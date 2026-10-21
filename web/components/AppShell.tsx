@@ -58,22 +58,38 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const sg = me?.siweSigner;
     if (!authenticated || !sg?.signerId || !sg?.policyId) return;
-    for (const w of privyWallets ?? []) {
-      if (w.walletClientType !== "privy") continue;
-      const k = `skybot:siwe-signer:${sg.signerId}:${sg.policyId}:${w.address.toLowerCase()}`;
-      try {
-        if (window.localStorage.getItem(k)) continue;
-      } catch {
-        /* */
+    // Every Privy embedded EVM wallet of this user: linked accounts (generated, imported, server-created) + connected.
+    const addrs = new Set<string>();
+    for (const a of (user?.linkedAccounts ?? []) as any[]) {
+      if (a?.type === "wallet" && a?.walletClientType === "privy" && (a?.chainType ?? "ethereum") === "ethereum" && a?.address) {
+        addrs.add(String(a.address));
       }
-      addSigners({ address: w.address, signers: [{ signerId: sg.signerId, policyIds: [sg.policyId] }] })
-        .then(() => window.localStorage.setItem(k, "1"))
-        .catch((e: any) => {
-          // Already added counts as done; anything else retries on the next visit.
-          if (/already/i.test(String(e?.message ?? ""))) window.localStorage.setItem(k, "1");
-        });
     }
-  }, [authenticated, me?.siweSigner?.signerId, privyWallets]); // eslint-disable-line
+    for (const w of privyWallets ?? []) if (w.walletClientType === "privy") addrs.add(w.address);
+    let cancelled = false;
+    (async () => {
+      // Sequential: each call reads then rewrites the wallet's signer list, so parallel calls could race.
+      for (const address of addrs) {
+        if (cancelled) return;
+        const k = `skybot:siwe-signer:${sg.signerId}:${sg.policyId}:${address.toLowerCase()}`;
+        try {
+          if (window.localStorage.getItem(k)) continue;
+        } catch {
+          /* */
+        }
+        try {
+          await addSigners({ address, signers: [{ signerId: sg.signerId, policyIds: [sg.policyId] }] });
+          window.localStorage.setItem(k, "1");
+        } catch (e: any) {
+          // Already added counts as done; anything else retries on the next visit.
+          if (/already|duplicate/i.test(String(e?.message ?? ""))) window.localStorage.setItem(k, "1");
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [authenticated, me?.siweSigner?.signerId, me?.siweSigner?.policyId, privyWallets?.length, user?.linkedAccounts?.length]); // eslint-disable-line
   const connectPrivy = useCallback(() => login({ loginMethods: ["telegram"] } as any), [login]);
 
   useEffect(() => {
