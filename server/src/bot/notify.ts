@@ -19,9 +19,25 @@ export async function notifyJobDone(jobId: string) {
     const { requireUser } = await import("../users/service.js");
     const u = await requireUser(j.userId).catch(() => null);
     if (!u?.telegramUserId) return;
-    const ok = (j.results as any[]).filter((r) => r.status === "confirmed");
-    const msg = `<b>Job ${esc(j.status)}</b>\n${esc(j.chain)} <code>${j.target}</code>\n${ok.length} wallet(s) minted${ok.length ? ": " + ok.map((r) => `<code>${r.address.slice(0, 8)}…</code> [${(r.tokenIds ?? []).join(",")}]`).join("; ") : ""}${j.error ? "\n" + esc(j.error) : ""}`;
-    await new Api(env.telegramBotToken).sendMessage(u.telegramUserId, msg, { parse_mode: "HTML" });
+    const results = j.results as any[];
+    const ok = results.filter((r) => r.status === "confirmed");
+    const title = j.status === "done" ? "Mint finished" : j.status === "failed" ? "Mint failed" : `Mint ${esc(j.status)}`;
+    const lines = [
+      `<b>${title}</b> · ${esc(j.chain)} <code>${j.target.slice(0, 6)}…${j.target.slice(-4)}</code>`,
+      `${ok.length} of ${results.length} wallet(s) minted`,
+      ...results.map(
+        (r) =>
+          `${r.status === "confirmed" ? "✅" : "❌"} <code>${String(r.address).slice(0, 6)}…${String(r.address).slice(-4)}</code> ${esc(r.status)}${
+            (r.tokenIds ?? []).length ? ` · #${(r.tokenIds as string[]).join(", #")}` : ""
+          }${r.explorer ? ` · <a href="${esc(r.explorer)}">tx</a>` : ""}${r.error ? ` · ${esc(String(r.error).slice(0, 120))}` : ""}`,
+      ),
+      ...(j.error ? [esc(j.error)] : []),
+    ];
+    const msg = lines.join("\n").slice(0, 3900);
+    await new Api(env.telegramBotToken).sendMessage(u.telegramUserId, msg, {
+      parse_mode: "HTML",
+      link_preview_options: { is_disabled: true },
+    });
   } catch (e: any) {
     log.warn("telegram notify failed", redactString(String(e?.message ?? e)));
   }

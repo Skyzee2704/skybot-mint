@@ -12,18 +12,28 @@ import { Bot, InlineKeyboard } from "grammy";
 import { env } from "../config/env.js";
 import { resolveTarget } from "../core/resolver/resolver.js";
 import { remember } from "../core/resolver/cache.js";
-import { consumeTelegramLink, userByTelegram, unlinkTelegram, type AppUser } from "../users/service.js";
+import { checkRateLimit, consumeTelegramLink, userByTelegram, unlinkTelegram, type AppUser } from "../users/service.js";
+
+const JOB_STATUS: Record<string, string> = {
+  scheduled: "Scheduled",
+  waiting_unlock: "Waiting",
+  running: "Running",
+  done: "Done",
+  failed: "Failed",
+  cancelled: "Cancelled",
+};
+const jobStatusLabel = (s: string) => JOB_STATUS[s] ?? s;
 import { publicHttpsReady } from "./telegramWebApp.js";
 import { log, redactString } from "../util/log.js";
 import { formatEther } from "ethers";
 
-export const esc = (s: unknown) =>
-  String(s ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+import { esc, formatCheck, parseCheckArgs } from "./check.js";
+import { formatDateTime } from "../util/time.js";
+export { esc };
 
-export function summarize(t: Awaited<ReturnType<typeof resolveTarget>>): string {
+const tzFooter = (tz: string | null | undefined) => (tz ? "" : "\n<i>Times in UTC. Open SkyBOT once to see your own timezone.</i>");
+
+export function summarize(t: Awaited<ReturnType<typeof resolveTarget>>, timeZone: string | null = null): string {
   return [
     `<b>${esc(t.name ?? "Unknown")}</b> (${esc(t.symbol ?? "?")}) on ${esc(t.chain.name)}`,
     `Contract: <code>${t.contract}</code>${t.slug ? ` · <a href="https://opensea.io/collection/${encodeURIComponent(t.slug)}">OpenSea</a>` : ""}`,
@@ -31,9 +41,8 @@ export function summarize(t: Awaited<ReturnType<typeof resolveTarget>>): string 
     `Supply: ${t.supply.total ?? "?"}/${t.supply.max ?? "?"} (remaining ${t.supply.remaining ?? "?"})`,
     ...t.stages.map(
       (s) =>
-        `• ${esc(s.name)} [${s.type}]: ${s.priceWei !== null ? formatEther(s.priceWei) + " " + t.chain.nativeSymbol : "price ?"} · ${s.status}${s.start ? " · " + s.start.replace(".000Z", "Z") : ""}`,
+        `• ${esc(s.name)}: ${s.priceWei !== null ? (s.priceWei === "0" ? "Free" : formatEther(s.priceWei) + " " + t.chain.nativeSymbol) : "price unknown"}${s.maxPerWallet ? ` · max ${s.maxPerWallet}/wallet` : ""} · ${s.status === "upcoming" && s.start ? "starts " + formatDateTime(s.start, { timeZone }) : s.status === "active" ? "live now" : s.status}`,
     ),
-    `Strategy: ${t.recommendedStrategy}`,
     ...t.warnings.map((w) => `⚠️ ${esc(w)}`),
   ].join("\n");
 }
@@ -67,9 +76,10 @@ export async function configureBotProfile(bot: Bot) {
   await bot.api.setMyShortDescription("Mint NFTs with SkyBOT. Tap the menu button to open the dashboard.").catch(() => {});
   await bot.api.setMyCommands([
     { command: "start", description: "Welcome and open the dashboard" },
-    { command: "mint", description: "Resolve a drop: /mint <link|address>" },
+    { command: "check", description: "Eligibility of all your wallets: /check <link|address>" },
+    { command: "mint", description: "Drop summary, then mint in the dashboard" },
     { command: "wallets", description: "List your wallets" },
-    { command: "jobs", description: "Recent mint jobs" },
+    { command: "jobs", description: "Recent and scheduled mints" },
     { command: "withdraw", description: "Withdraw funds from your wallets" },
     { command: "help", description: "How to use SkyBOT Mint" },
   ]);
@@ -151,9 +161,11 @@ export function createBot(token: string, opts: ConstructorParameters<typeof Bot>
       : "Dashboard opens in the browser until PUBLIC_URL is a public https:// URL.",
     "",
     "<b>Commands</b>",
-    "/mint &lt;link|address&gt; — drop summary + open dashboard",
+    "/check &lt;link|address&gt; — stages + eligibility of all your wallets (read-only)",
+    "/mint &lt;link|address&gt; — drop summary, then mint in the dashboard",
     "/wallets — your wallets",
-    "/jobs — recent jobs",
+    "/jobs — recent and scheduled mints",
+    "/withdraw — open the Withdraw page",
     "",
     `Dashboard: ${esc(dashUrl("/"))}`,
   ].join("\n");
@@ -237,9 +249,65 @@ export function createBot(token: string, opts: ConstructorParameters<typeof Bot>
     const { listJobs } = await import("../core/jobs/repo.js");
     const js = await listJobs(u.id, 10);
     if (!js.length) return ctx.reply("No jobs yet.");
-    await ctx.reply(js.map((j) => `${j.status} · ${j.chain} · <code>${j.target.slice(0, 10)}…</code> · ${j.runAt ?? "now"}`).join("\n"), {
-      parse_mode: "HTML",
-    });
+    await ctx.reply(
+      js
+        .map(
+          (j) =>
+            `${esc(jobStatusLabel(j.status))} · ${esc(j.chain)} · <code>${j.target.slice(0, 6)}…${j.target.slice(-4)}</code>\n   ${
+              j.runAt
+                ? `${new Date(j.runAt).getTime() > Date.now() ? "runs" : "ran"} ${formatDateTime(j.runAt, { timeZone: u.timezone ?? null })}`
+                : `created ${formatDateTime(j.createdAt, { timeZone: u.timezone ?? null })}`
+            }`,
+        )
+        .join("\n") + tzFooter(u.timezone),
+      { parse_mode: "HTML" },
+    );
+  });
+
+  bot.command("check", async (ctx) => {
+    const u = await linkedUser(ctx);
+    if (!u)
+      return ctx.reply("Open SkyBOT first: tap Open Dashboard or the menu button to sign in with Telegram.", {
+        reply_markup: openDashboardKeyboard(),
+      });
+    const args = parseCheckArgs(ctx.message?.text ?? "");
+    if (!args)
+      return ctx.reply(
+        "Send an OpenSea link or a contract address, for example:\n<code>/check https://opensea.io/collection/name</code>\n<code>/check base:0x1234…abcd</code>",
+        { parse_mode: "HTML" },
+      );
+    try {
+      await checkRateLimit(u.id, "tg:check", 6);
+    } catch {
+      return ctx.reply("Too many checks in a minute. Please wait a moment and try again.");
+    }
+    await ctx.replyWithChatAction("typing").catch(() => {});
+    try {
+      const t = remember(await resolveTarget({ input: args.input, chain: args.chain }));
+      const path = `/app/mint?input=${encodeURIComponent(args.input)}&chain=${t.chain.key}`;
+      const kb = new InlineKeyboard();
+      if (mini) kb.webApp("Open in SkyBOT", dashUrl(path));
+      else kb.url("Open in SkyBOT", dashUrl(path));
+      let rows: any[] = [];
+      let targetStage: any = null;
+      if (t.recommendedStrategy !== "none") {
+        const { checkEligibility } = await import("../core/mint/eligibility.js");
+        const r = await checkEligibility(t, t.recommendedStrategy, u.id, null, null);
+        rows = r.rows;
+        targetStage = r.targetStage;
+      }
+      const chunks = formatCheck({ target: t, rows, targetStage, timeZone: u.timezone ?? null });
+      if (t.recommendedStrategy === "none")
+        chunks[chunks.length - 1] += "\n\nSkyBOT can't find a supported mint function on this contract.";
+      for (let i = 0; i < chunks.length; i++)
+        await ctx.reply(chunks[i], {
+          parse_mode: "HTML",
+          link_preview_options: { is_disabled: true },
+          ...(i === chunks.length - 1 ? { reply_markup: kb } : {}),
+        });
+    } catch (e: any) {
+      await ctx.reply(`Couldn't check that: ${esc(redactString(String(e?.message ?? e)).slice(0, 200))}`, { parse_mode: "HTML" });
+    }
   });
 
   bot.command("withdraw", async (ctx) => {
@@ -266,11 +334,14 @@ export function createBot(token: string, opts: ConstructorParameters<typeof Bot>
       const kb = new InlineKeyboard();
       if (mini) kb.webApp("Open Dashboard", dashUrl(path));
       else kb.url("Check eligibility & mint", dashUrl(path));
-      await ctx.reply(`${summarize(t)}\n\nOpen the dashboard to pick wallets, simulate, and confirm.`, {
-        parse_mode: "HTML",
-        reply_markup: kb,
-        link_preview_options: { is_disabled: true },
-      });
+      await ctx.reply(
+        `${summarize(t, u.timezone ?? null)}\n\nOpen the dashboard to pick wallets, simulate, and confirm.${tzFooter(u.timezone)}`,
+        {
+          parse_mode: "HTML",
+          reply_markup: kb,
+          link_preview_options: { is_disabled: true },
+        },
+      );
     } catch (e: any) {
       await ctx.reply(`Could not resolve: ${esc(redactString(e.message))}`, { parse_mode: "HTML" });
     }
@@ -290,7 +361,14 @@ export function createBot(token: string, opts: ConstructorParameters<typeof Bot>
       const kb = new InlineKeyboard();
       if (mini) kb.webApp("Open Dashboard", dashUrl(path));
       else kb.url("Open in SkyBOT", dashUrl(path));
-      await ctx.reply(`${summarize(t)}`, { parse_mode: "HTML", reply_markup: kb, link_preview_options: { is_disabled: true } });
+      await ctx.reply(
+        `${summarize(t, u.timezone ?? null)}${tzFooter(u.timezone)}\n\nTip: /check ${esc(input)} shows eligibility for all your wallets.`,
+        {
+          parse_mode: "HTML",
+          reply_markup: kb,
+          link_preview_options: { is_disabled: true },
+        },
+      );
     } catch (e: any) {
       await ctx.reply(`Could not resolve: ${esc(redactString(e.message))}`, { parse_mode: "HTML" });
     }

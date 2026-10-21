@@ -27,7 +27,7 @@ SkyBOT Mint lets a community mint NFT drops quickly and safely from many wallets
 - **Multi-RPC broadcast**: signed transactions go to every configured RPC in parallel, with public RPC fallbacks.
 - **Privy custody**: embedded and server wallets, client-side key import and export, and server signing only through Privy authorization keys.
 - **Telegram Mini App**: the full dashboard opens inside Telegram with seamless login, native MainButton confirm, BackButton, haptics, and theme colors.
-- **Telegram bot**: link your account two ways, resolve drops with `/mint`, list wallets and jobs, and get notified when jobs finish.
+- **Telegram bot**: same account as the web (Privy Telegram sign-in), read-only `/check` for every wallet's eligibility, `/mint` to open a drop in the Mini App, wallets and jobs lists, and notifications when mints finish. Times use your own timezone.
 - **Multi-user and admin**: per-user data scoping, wallet groups, optional spend caps, and an admin user list.
 - **Serverless-native**: a single Vercel project with Neon Postgres, QStash, and optional Upstash Redis rate limits.
 
@@ -35,18 +35,18 @@ SkyBOT Mint lets a community mint NFT drops quickly and safely from many wallets
 
 > Screenshots use demo data (random addresses, sample jobs).
 
-| Landing | Telegram Mini App: Mint | Telegram Mini App: Wallets |
-|---|---|---|
+| Landing                                                                               | Telegram Mini App: Mint                                                                         | Telegram Mini App: Wallets                                                                       |
+| ------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
 | <img src="screenshots/landing-mobile.png" width="220" alt="Landing page on mobile" /> | <img src="screenshots/miniapp-mint.png" width="220" alt="Mint page in the Telegram Mini App" /> | <img src="screenshots/miniapp-wallets.png" width="220" alt="Wallets in the Telegram Mini App" /> |
 
 <img src="screenshots/landing-desktop.png" alt="SkyBOT Mint landing page" />
 
-| Wallets | Jobs |
-|---|---|
+| Wallets                                                                 | Jobs                                                              |
+| ----------------------------------------------------------------------- | ----------------------------------------------------------------- |
 | <img src="screenshots/dashboard-wallets.png" alt="Wallets dashboard" /> | <img src="screenshots/dashboard-jobs.png" alt="Jobs dashboard" /> |
 
-| Mint | Settings |
-|---|---|
+| Mint                                                              | Settings                                                                                                    |
+| ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
 | <img src="screenshots/dashboard-mint.png" alt="Mint dashboard" /> | <img src="screenshots/dashboard-settings.png" alt="Settings: Telegram linking, spend caps, chain health" /> |
 
 ## Architecture
@@ -81,33 +81,33 @@ flowchart LR
 
 ## Supported Chains
 
-| Chain | Chain ID | Native | Env key |
-|---|---:|---|---|
-| Ethereum | 1 | ETH | `RPC_ETHEREUM` |
-| Base | 8453 | ETH | `RPC_BASE` |
-| Polygon | 137 | POL | `RPC_POLYGON` |
-| Arbitrum One | 42161 | ETH | `RPC_ARBITRUM` |
-| BNB Smart Chain | 56 | BNB | `RPC_BNB` |
-| Unichain | 130 | ETH | `RPC_UNICHAIN` |
-| Ink | 57073 | ETH | `RPC_INK` |
-| Robinhood Chain | 4663 | ETH | `RPC_ROBINHOOD` |
-| Arc | 5042 | USDC | `RPC_ARC` |
+| Chain           | Chain ID | Native | Env key         |
+| --------------- | -------: | ------ | --------------- |
+| Ethereum        |        1 | ETH    | `RPC_ETHEREUM`  |
+| Base            |     8453 | ETH    | `RPC_BASE`      |
+| Polygon         |      137 | POL    | `RPC_POLYGON`   |
+| Arbitrum One    |    42161 | ETH    | `RPC_ARBITRUM`  |
+| BNB Smart Chain |       56 | BNB    | `RPC_BNB`       |
+| Unichain        |      130 | ETH    | `RPC_UNICHAIN`  |
+| Ink             |    57073 | ETH    | `RPC_INK`       |
+| Robinhood Chain |     4663 | ETH    | `RPC_ROBINHOOD` |
+| Arc             |     5042 | USDC   | `RPC_ARC`       |
 
 To add a chain, add an entry to `server/src/config/chains.ts` and set `RPC_<KEY>`.
 
 ## Tech Stack
 
-| Layer | Technology |
-|---|---|
-| Web | Next.js 16 (App Router), React 19, TypeScript |
-| API | Fastify, served from Next.js route handlers (Node runtime) |
+| Layer            | Technology                                                                 |
+| ---------------- | -------------------------------------------------------------------------- |
+| Web              | Next.js 16 (App Router), React 19, TypeScript                              |
+| API              | Fastify, served from Next.js route handlers (Node runtime)                 |
 | Auth and custody | Privy (`@privy-io/react-auth`, `@privy-io/node`), Telegram WebApp initData |
-| Chain | ethers v6, multi-RPC broadcast |
-| Database | Drizzle ORM with Neon Postgres (prod), SQLite (local), and PGlite (tests) |
-| Scheduling | Upstash QStash (prod), in-process emulation (local) |
-| Rate limits | Upstash Redis `@upstash/ratelimit`, with an in-memory fallback |
-| Telegram | grammY (webhook on Vercel, long polling locally) |
-| Tooling | Vitest, ESLint, Prettier, and GitHub Actions |
+| Chain            | ethers v6, multi-RPC broadcast                                             |
+| Database         | Drizzle ORM with Neon Postgres (prod), SQLite (local), and PGlite (tests)  |
+| Scheduling       | Upstash QStash (prod), in-process emulation (local)                        |
+| Rate limits      | Upstash Redis `@upstash/ratelimit`, with an in-memory fallback             |
+| Telegram         | grammY (webhook on Vercel, long polling locally)                           |
+| Tooling          | Vitest, ESLint, Prettier, and GitHub Actions                               |
 
 ## Quick Start (Local Development)
 
@@ -131,14 +131,14 @@ pm2 start ecosystem.config.cjs   # skybot-web (next start) + skybot-worker
 
 Useful scripts:
 
-| Command | Description |
-|---|---|
-| `npm run typecheck` | TypeScript checks for server and web |
-| `npm run lint` | ESLint (zero warnings in CI) |
-| `npm run format` | Prettier |
-| `npm test` | Vitest suite (auth, cross-user authz, initData forgery, safety, resolver, serverless/QStash) |
-| `npm run migrate` | Apply database migrations to `DATABASE_URL` |
-| `npm run telegram:setup` | Set the webhook, commands, and menu button (after deploy) |
+| Command                  | Description                                                                                  |
+| ------------------------ | -------------------------------------------------------------------------------------------- |
+| `npm run typecheck`      | TypeScript checks for server and web                                                         |
+| `npm run lint`           | ESLint (zero warnings in CI)                                                                 |
+| `npm run format`         | Prettier                                                                                     |
+| `npm test`               | Vitest suite (auth, cross-user authz, initData forgery, safety, resolver, serverless/QStash) |
+| `npm run migrate`        | Apply database migrations to `DATABASE_URL`                                                  |
+| `npm run telegram:setup` | Set the webhook, commands, and menu button (after deploy)                                    |
 
 ## Deployment
 
@@ -155,25 +155,25 @@ See **[DEPLOY.md](DEPLOY.md)** for the full step-by-step guide.
 
 All variables are listed in [`.env.example`](.env.example). The main ones:
 
-| Variable | Required | Description |
-|---|:---:|---|
-| `NEXT_PUBLIC_PRIVY_APP_ID` | ✅ | Privy App ID (public) |
-| `PRIVY_APP_SECRET` | ✅ | Privy App secret (server only) |
-| `PRIVY_AUTH_PRIVATE_KEY` | ✅ | Privy authorization key used for server-side signing |
-| `PRIVY_AUTH_KEY_QUORUM_ID` | ✅ | Key quorum ID added as signer on user wallets |
-| `PUBLIC_URL` | ✅ | Public HTTPS URL of the deployment (Mini App, deep links, CORS) |
-| `SESSION_SECRET` | ✅ | HMAC secret for Telegram-first session cookies |
-| `DATABASE_URL` | ✅ prod | Neon Postgres connection string |
-| `QSTASH_TOKEN`, `QSTASH_CURRENT_SIGNING_KEY`, `QSTASH_NEXT_SIGNING_KEY` | ✅ prod | Scheduling and signature verification |
-| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_BOT_USERNAME` | ✅ | Telegram bot |
-| `TELEGRAM_WEBHOOK_SECRET` | ✅ prod | Secret token used to verify webhook calls |
-| `ADMIN_EMAILS`, `ADMIN_TELEGRAM_IDS`, `TELEGRAM_USER_ID` | — | Admin users and notification target |
-| `OPENSEA_API_KEY`, `ETHERSCAN_API_KEY` | ✅ | Drop resolution and ABI lookup |
-| `RPC_<CHAIN>` | — | Private RPC URLs per chain (public fallbacks built in) |
-| `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` | — | Distributed rate limiting |
-| `JOB_LEAD_MS`, `JOB_MAX_DURATION_SEC` | — | Scheduler timing (defaults 20000 ms / 300 s) |
-| `MAX_PRICE_PER_NFT`, `MAX_DAILY_SPEND`, `MAX_GAS_PRICE_GWEI` | — | Global safety limits |
-| `NEXT_PUBLIC_SOURCE_URL` | — | Repository URL for the footer "Source" link (AGPL) |
+| Variable                                                                | Required | Description                                                     |
+| ----------------------------------------------------------------------- | :------: | --------------------------------------------------------------- |
+| `NEXT_PUBLIC_PRIVY_APP_ID`                                              |    ✅    | Privy App ID (public)                                           |
+| `PRIVY_APP_SECRET`                                                      |    ✅    | Privy App secret (server only)                                  |
+| `PRIVY_AUTH_PRIVATE_KEY`                                                |    ✅    | Privy authorization key used for server-side signing            |
+| `PRIVY_AUTH_KEY_QUORUM_ID`                                              |    ✅    | Key quorum ID added as signer on user wallets                   |
+| `PUBLIC_URL`                                                            |    ✅    | Public HTTPS URL of the deployment (Mini App, deep links, CORS) |
+| `SESSION_SECRET`                                                        |    ✅    | HMAC secret for Telegram-first session cookies                  |
+| `DATABASE_URL`                                                          | ✅ prod  | Neon Postgres connection string                                 |
+| `QSTASH_TOKEN`, `QSTASH_CURRENT_SIGNING_KEY`, `QSTASH_NEXT_SIGNING_KEY` | ✅ prod  | Scheduling and signature verification                           |
+| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_BOT_USERNAME`                           |    ✅    | Telegram bot                                                    |
+| `TELEGRAM_WEBHOOK_SECRET`                                               | ✅ prod  | Secret token used to verify webhook calls                       |
+| `ADMIN_EMAILS`, `ADMIN_TELEGRAM_IDS`, `TELEGRAM_USER_ID`                |    —     | Admin users and notification target                             |
+| `OPENSEA_API_KEY`, `ETHERSCAN_API_KEY`                                  |    ✅    | Drop resolution and ABI lookup                                  |
+| `RPC_<CHAIN>`                                                           |    —     | Private RPC URLs per chain (public fallbacks built in)          |
+| `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`                    |    —     | Distributed rate limiting                                       |
+| `JOB_LEAD_MS`, `JOB_MAX_DURATION_SEC`                                   |    —     | Scheduler timing (defaults 20000 ms / 300 s)                    |
+| `MAX_PRICE_PER_NFT`, `MAX_DAILY_SPEND`, `MAX_GAS_PRICE_GWEI`            |    —     | Global safety limits                                            |
+| `NEXT_PUBLIC_SOURCE_URL`                                                |    —     | Repository URL for the footer "Source" link (AGPL)              |
 
 ## Security Model
 
@@ -188,13 +188,15 @@ Read the full threat model and production checklist in **[SECURITY.md](SECURITY.
 
 ## Telegram Bot Commands
 
-| Command | Description |
-|---|---|
-| `/start` | Welcome message and **Open Dashboard** button (Mini App, signs you in with Telegram) |
-| `/mint <link\|address>` | Resolve a drop and open it in the dashboard |
-| `/wallets` | List your wallets |
-| `/jobs` | Show recent mint jobs |
-| `/help` | How to use SkyBOT Mint |
+| Command                  | Description                                                                          |
+| ------------------------ | ------------------------------------------------------------------------------------ |
+| `/start`                 | Welcome message and **Open Dashboard** button (Mini App, signs you in with Telegram) |
+| `/check <link\|address>` | Read-only: stages (price, limit, time in your timezone) and per-wallet eligibility   |
+| `/mint <link\|address>`  | Resolve a drop and open it in the dashboard                                          |
+| `/wallets`               | List your wallets                                                                    |
+| `/jobs`                  | Show recent and scheduled mints                                                      |
+| `/withdraw`              | Open the Withdraw page                                                               |
+| `/help`                  | How to use SkyBOT Mint                                                               |
 
 ## Project Structure
 
