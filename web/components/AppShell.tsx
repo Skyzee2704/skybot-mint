@@ -54,10 +54,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const { addSigners } = useSigners();
   const { wallets: privyWallets } = useWallets();
   // Sign-in-only signer (Privy policy allows personal_sign of OpenSea's login text only) added silently to each
-  // embedded wallet, so the Telegram /check can verify upcoming OpenSea stages. Never blocks or shows errors.
+  // embedded wallet, so the Telegram /check can verify upcoming OpenSea stages. Privy only lets the wallet owner add
+  // it, so this runs in the member's session: the server says which wallets already have it, the app adds the rest,
+  // then the server re-verifies with Privy and records it. Never blocks or shows errors.
+  const sgKey = me?.siweSigner ? `${me.siweSigner.signerId}:${me.siweSigner.policyId}:${me.siweSigner.attached?.length ?? "?"}` : "";
   useEffect(() => {
     const sg = me?.siweSigner;
     if (!authenticated || !sg?.signerId || !sg?.policyId) return;
+    const done = new Set<string>(((sg.attached as string[] | null) ?? []).map((a) => a.toLowerCase()));
     // Every Privy embedded EVM wallet of this user: linked accounts (generated, imported, server-created) + connected.
     const addrs = new Set<string>();
     for (const a of (user?.linkedAccounts ?? []) as any[]) {
@@ -66,30 +70,36 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       }
     }
     for (const w of privyWallets ?? []) if (w.walletClientType === "privy") addrs.add(w.address);
+    const todo = [...addrs].filter((a) => !done.has(a.toLowerCase()));
+    if (!todo.length) return;
     let cancelled = false;
     (async () => {
+      let added = 0;
       // Sequential: each call reads then rewrites the wallet's signer list, so parallel calls could race.
-      for (const address of addrs) {
+      for (const address of todo) {
         if (cancelled) return;
-        const k = `skybot:siwe-signer:${sg.signerId}:${sg.policyId}:${address.toLowerCase()}`;
-        try {
-          if (window.localStorage.getItem(k)) continue;
-        } catch {
-          /* */
-        }
         try {
           await addSigners({ address, signers: [{ signerId: sg.signerId, policyIds: [sg.policyId] }] });
-          window.localStorage.setItem(k, "1");
+          added++;
         } catch (e: any) {
-          // Already added counts as done; anything else retries on the next visit.
-          if (/already|duplicate/i.test(String(e?.message ?? ""))) window.localStorage.setItem(k, "1");
+          // Already present counts as done; anything else retries on the next visit.
+          if (/already|duplicate|exists/i.test(String(e?.message ?? ""))) added++;
+        }
+      }
+      if (added && !cancelled) {
+        try {
+          const token = await getAccessToken();
+          await api("/api/wallets/siwe-signer/verify", { method: "POST", body: {}, token });
+        } catch {
+          /* best effort */
         }
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [authenticated, me?.siweSigner?.signerId, me?.siweSigner?.policyId, privyWallets?.length, user?.linkedAccounts?.length]); // eslint-disable-line
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authenticated, sgKey, privyWallets?.length, user?.linkedAccounts?.length]);
   const connectPrivy = useCallback(() => login({ loginMethods: ["telegram"] } as any), [login]);
 
   useEffect(() => {

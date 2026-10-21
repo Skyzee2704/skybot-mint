@@ -3,11 +3,14 @@
  * Sign-in-only signer (Telegram /check): keeps the OpenSea SIWE key quorum attached to every embedded wallet.
  *
  * Privy custody rules (docs.privy.io › Authorization keys › Self-custodial user wallets):
- *  - wallets created by Privy's client SDKs (and imports) are owned by the USER; changing their signers needs the
- *    owner's authorization signature;
- *  - from the server, that signature comes from the user's Privy access token (`authorization_context.user_jwts`,
- *    the SDK exchanges it for a short-lived user key) — so any signed-in web / Mini App request can attach it;
- *  - with no user token (user offline) only a wallet owned by a key quorum that includes our app key can be updated.
+ *  - wallets created by Privy's client SDKs (and imports) are owned by the USER (a user key quorum); changing
+ *    their signers needs the owner's authorization;
+ *  - the server-side route for that (`authorization_context.user_jwts` → POST /v1/wallets/authenticate) rejects
+ *    this app's Privy access tokens with 400 "Invalid JWT token provided" — reproduced with a freshly issued,
+ *    locally verified token (encrypted and raw requests alike), so it is not used;
+ *  - the member's own browser session can add it (`useSigners().addSigners`): the server reports which wallets
+ *    still miss the signer, the app adds exactly those, then asks the server to re-verify;
+ *  - with the member offline only a wallet owned by a key quorum that includes our app key can be updated.
  * The signer itself can only personal_sign OpenSea's login text (Privy policy + our SIWE guard), never transact.
  */
 import { and, eq, isNull } from "drizzle-orm";
@@ -65,10 +68,10 @@ async function mark(walletId: string, attached: boolean, note: string | null) {
 export type SignerOutcome = "attached" | "already" | "needs_owner" | "no_privy_wallet" | "error" | "skipped";
 
 /**
- * Make sure the sign-in-only quorum is an additional signer on one wallet.
- * `userJwt` = the member's Privy access token (owner authorization). Without it only app-owned wallets can be updated.
+ * Make sure the sign-in-only quorum is an additional signer on one wallet. Only app-owned wallets (owner = our app
+ * key quorum) can be updated from here; user-owned wallets report "needs_owner" so the member's app adds it.
  */
-export async function ensureSignerOnWallet(privyWalletId: string, userJwt?: string | null): Promise<SignerOutcome> {
+export async function ensureSignerOnWallet(privyWalletId: string): Promise<SignerOutcome> {
   if (!privySiweSignerReady()) return "skipped";
   const { getPrivy } = await import("../auth/privy.js");
   const privy = getPrivy();
@@ -77,11 +80,7 @@ export async function ensureSignerOnWallet(privyWalletId: string, userJwt?: stri
   const w: any = await privy.wallets().get(privyWalletId);
   const current: any[] = w?.additional_signers ?? [];
   if (current.some((s) => s?.signer_id === quorum)) return "already";
-  let ctx: { user_jwts?: string[]; authorization_private_keys?: string[] } | null = null;
-  if (userJwt) ctx = { user_jwts: [userJwt] };
-  else if (env.privyAuthPrivateKey && env.privyAuthKeyQuorumId && w?.owner_id === env.privyAuthKeyQuorumId)
-    ctx = { authorization_private_keys: [env.privyAuthPrivateKey] };
-  if (!ctx) return "needs_owner";
+  if (!(env.privyAuthPrivateKey && env.privyAuthKeyQuorumId && w?.owner_id === env.privyAuthKeyQuorumId)) return "needs_owner";
   // Signer updates replace the list: keep every existing signer exactly as it is.
   const next = [
     ...current.map((s) => ({
@@ -90,19 +89,38 @@ export async function ensureSignerOnWallet(privyWalletId: string, userJwt?: stri
     })),
     { signer_id: quorum, override_policy_ids: [policy] },
   ];
-  await privy.wallets().update(privyWalletId, { additional_signers: next, authorization_context: ctx } as any);
+  await privy.wallets().update(privyWalletId, {
+    additional_signers: next,
+    authorization_context: { authorization_private_keys: [env.privyAuthPrivateKey] },
+  } as any);
   return "attached";
 }
 
+export type SignerReport = Record<SignerOutcome, number> & {
+  /** Addresses (checksummed) already carrying the signer — the app skips these. */
+  attachedAddresses: string[];
+  /** Addresses still without it — the app adds the signer with the member's own session. */
+  missingAddresses: string[];
+};
+
 /**
- * Attach / verify the signer on a user's wallets. With `userJwt` (signed-in request) every missing signer is added;
- * without it (housekeeping) wallets are only checked, at most every 6 h each.
+ * Verify the signer on a user's wallets (fixing legacy wallet ids). Already-attached wallets are never re-read.
+ * `force` re-checks every unattached wallet now (signed-in visits); otherwise each at most every 6 h (housekeeping).
  */
 export async function ensureSiweSigners(
   user: { id: string; privyUserId: string | null },
-  opts: { userJwt?: string | null; force?: boolean } = {},
-): Promise<Record<SignerOutcome, number>> {
-  const out: Record<SignerOutcome, number> = { attached: 0, already: 0, needs_owner: 0, no_privy_wallet: 0, error: 0, skipped: 0 };
+  opts: { force?: boolean } = {},
+): Promise<SignerReport> {
+  const out: SignerReport = {
+    attached: 0,
+    already: 0,
+    needs_owner: 0,
+    no_privy_wallet: 0,
+    error: 0,
+    skipped: 0,
+    attachedAddresses: [],
+    missingAddresses: [],
+  };
   if (!privySiweSignerReady() || !user.privyUserId || user.privyUserId.startsWith("tg:")) return out;
   const db = getDb();
   const ws = await db
@@ -111,15 +129,14 @@ export async function ensureSiweSigners(
     .where(and(eq(wallets.userId, user.id), isNull(wallets.removedAt)));
   if (!ws.length) return out;
   const status = new Map((await db.select().from(siweSigners)).map((s) => [s.walletId, s]));
-  const todo = ws.filter((w) => {
+  const todo: typeof ws = [];
+  for (const w of ws) {
     const s = status.get(w.id);
-    if (s?.attachedAt) return false;
-    if (opts.userJwt || opts.force || !s) return true;
-    return Date.now() - Date.parse(s.checkedAt) > RECHECK_MS;
-  });
-  if (!todo.length) {
-    out.already = ws.length;
-    return out;
+    if (s?.attachedAt) {
+      out.already++;
+      out.attachedAddresses.push(w.address);
+    } else if (opts.force || !s || Date.now() - Date.parse(s.checkedAt) > RECHECK_MS) todo.push(w);
+    else out.missingAddresses.push(w.address);
   }
   let ids: Map<string, string> | null = null;
   // Sequential on purpose: Privy rewrites a wallet's signer list per update.
@@ -136,13 +153,16 @@ export async function ensureSiweSigners(
         await mark(w.id, false, "not a Privy embedded wallet");
         continue;
       }
-      const r = await ensureSignerOnWallet(id, opts.userJwt);
+      const r = await ensureSignerOnWallet(id);
       out[r]++;
-      await mark(w.id, r === "attached" || r === "already", r === "needs_owner" ? "owner authorization needed" : null);
+      const ok = r === "attached" || r === "already";
+      (ok ? out.attachedAddresses : out.missingAddresses).push(w.address);
+      await mark(w.id, ok, r === "needs_owner" ? "added by the member's app" : null);
     } catch (e: any) {
       out.error++;
+      out.missingAddresses.push(w.address);
       const msg = redactString(String(e?.message ?? e)).slice(0, 160);
-      log.warn("siwe signer attach failed", msg);
+      log.warn("siwe signer check failed", msg);
       await mark(w.id, false, msg.slice(0, 120)).catch(() => {});
     }
   }
@@ -159,7 +179,7 @@ export async function backfillSiweSigners(opts: { force?: boolean; maxUsers?: nu
     if (opts.maxUsers && n >= opts.maxUsers) break;
     if (!u.privyUserId || u.privyUserId.startsWith("tg:")) continue;
     const r = await ensureSiweSigners(u, { force: opts.force });
-    if (Object.values(r).some(Boolean)) n++;
+    n++;
     for (const k of Object.keys(total) as SignerOutcome[]) total[k] += r[k];
   }
   return total;

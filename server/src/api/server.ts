@@ -68,14 +68,20 @@ const mintReq = z.object({
   forceWalletIds: z.array(z.string().max(100)).max(500).optional(),
 });
 
-/** Best effort, time-boxed: never blocks or fails the request it rides on. */
-async function attachSiweSigners(user: { id: string; privyUserId: string | null }, userJwt: string) {
-  if (!privySiweSignerReady()) return;
+/**
+ * Best effort, time-boxed check of the sign-in-only signer on a member's wallets (never fails the request).
+ * Returns which addresses already carry it, so the app adds it only where it's missing.
+ */
+async function siweSignerStatus(user: { id: string; privyUserId: string | null }) {
+  if (!privySiweSignerReady()) return null;
   const { ensureSiweSigners } = await import("../users/siweSigner.js");
-  await Promise.race([
-    ensureSiweSigners(user, { userJwt }).catch((e) => log.warn("siwe signer attach", redactString(String(e?.message ?? e)).slice(0, 160))),
-    new Promise((r) => setTimeout(r, 6_000)),
-  ]);
+  return (await Promise.race([
+    ensureSiweSigners(user, { force: true }).catch((e) => {
+      log.warn("siwe signer check", redactString(String(e?.message ?? e)).slice(0, 160));
+      return null;
+    }),
+    new Promise((r) => setTimeout(() => r(null), 5_000)),
+  ])) as Awaited<ReturnType<typeof ensureSiweSigners>> | null;
 }
 
 export async function buildServer(): Promise<FastifyInstance> {
@@ -222,17 +228,29 @@ export async function buildServer(): Promise<FastifyInstance> {
       return { timeZone: await setUserTimeZone(req.user!, timeZone) };
     });
     a.get("/api/me", async (req) => {
-      // Signed-in with Privy: attach the sign-in-only signer to this member's wallets server-side (owner-authorized
-      // with their own access token), so Telegram /check can verify upcoming OpenSea stages later on its own.
-      if (req.privyAccessToken) await attachSiweSigners(req.user!, req.privyAccessToken);
-      return meView(req);
+      // Which wallets still miss the sign-in-only signer (Telegram /check). The app adds it with the member's own
+      // Privy session; the server can't (Privy rejects user JWTs at /v1/wallets/authenticate for this app).
+      const st = req.privyAccessToken ? await siweSignerStatus(req.user!) : null;
+      return {
+        user: publicUser(req.user!),
+        authVia: req.authVia,
+        serverSigning: privyServerSigningReady(),
+        // Public ids only (no keys).
+        siweSigner: privySiweSignerReady()
+          ? {
+              signerId: env.privySiweKeyQuorumId,
+              policyId: env.privySiwePolicyId,
+              attached: st?.attachedAddresses ?? null,
+              missing: st?.missingAddresses ?? null,
+            }
+          : null,
+      };
     });
-    const meView = (req: any) => ({
-      user: publicUser(req.user!),
-      authVia: req.authVia,
-      serverSigning: privyServerSigningReady(),
-      // Public ids only (no keys): lets the app add the sign-in-only signer to embedded wallets silently.
-      siweSigner: privySiweSignerReady() ? { signerId: env.privySiweKeyQuorumId, policyId: env.privySiwePolicyId } : null,
+    // After the app added the signer: re-verify against Privy and record it (so /check can sign server-side).
+    a.post("/api/wallets/siwe-signer/verify", async (req) => {
+      const st = await siweSignerStatus(req.user!);
+      if (st) log.info("siwe signer verify", { attached: st.attachedAddresses.length, missing: st.missingAddresses.length });
+      return { attached: st?.attachedAddresses ?? [], missing: st?.missingAddresses ?? [] };
     });
 
     a.get("/api/chains/health", async () =>
@@ -345,8 +363,6 @@ export async function buildServer(): Promise<FastifyInstance> {
         .parse(req.body);
       const out = [];
       for (const w of b.wallets) out.push(await syncPrivyWallet(req.user!.id, w));
-      // New / imported wallets get the sign-in-only signer right away (same signed-in request).
-      if (req.privyAccessToken) await attachSiweSigners(req.user!, req.privyAccessToken);
       return { wallets: out };
     });
     a.post("/api/wallets/generate", async (req) => {

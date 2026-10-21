@@ -22,39 +22,30 @@ describe("sign-in-only signer attach", () => {
   it("no-op when the quorum is already a signer", async () => {
     const { ensureSignerOnWallet } = await import("../src/users/siweSigner.js");
     store.w1 = { id: "w1", owner_id: "user-owner", additional_signers: [{ signer_id: "quorum1", override_policy_ids: ["policy1"] }] };
-    expect(await ensureSignerOnWallet("w1", "jwt")).toBe("already");
+    expect(await ensureSignerOnWallet("w1")).toBe("already");
     expect(update).not.toHaveBeenCalled();
   });
 
-  it("user-owned wallet without the member's token: Privy needs the owner's authorization", async () => {
+  it("user-owned wallet: never updated from the server (Privy rejects user JWTs here); the member's app adds it", async () => {
     const { ensureSignerOnWallet } = await import("../src/users/siweSigner.js");
-    store.w2 = { id: "w2", owner_id: "user-owner", additional_signers: [] };
-    expect(await ensureSignerOnWallet("w2", null)).toBe("needs_owner");
+    store.w2 = { id: "w2", owner_id: "user-owner", additional_signers: [{ signer_id: "other" }] };
+    expect(await ensureSignerOnWallet("w2")).toBe("needs_owner");
     expect(update).not.toHaveBeenCalled();
-  });
-
-  it("with the member's access token: adds only the sign-in quorum + policy and keeps existing signers", async () => {
-    const { ensureSignerOnWallet } = await import("../src/users/siweSigner.js");
-    store.w3 = { id: "w3", owner_id: "user-owner", additional_signers: [{ signer_id: "other", override_policy_ids: ["p9"] }] };
-    expect(await ensureSignerOnWallet("w3", "user-jwt")).toBe("attached");
-    const [id, body] = update.mock.calls[0]!;
-    expect(id).toBe("w3");
-    expect(body.authorization_context).toEqual({ user_jwts: ["user-jwt"] });
-    expect(body.additional_signers).toEqual([
-      { signer_id: "other", override_policy_ids: ["p9"] },
-      { signer_id: "quorum1", override_policy_ids: ["policy1"] },
-    ]);
-    expect(body.owner).toBeUndefined();
-    expect(body.owner_id).toBeUndefined();
   });
 
   it("app-owned (key quorum) wallet can be updated offline with the app key", async () => {
     process.env.PRIVY_AUTH_PRIVATE_KEY = "appkey";
     process.env.PRIVY_AUTH_KEY_QUORUM_ID = "appquorum";
     const { ensureSignerOnWallet } = await import("../src/users/siweSigner.js");
-    store.w4 = { id: "w4", owner_id: "appquorum", additional_signers: [] };
-    expect(await ensureSignerOnWallet("w4", null)).toBe("attached");
-    expect(update.mock.calls[0]![1].authorization_context).toEqual({ authorization_private_keys: ["appkey"] });
+    store.w4 = { id: "w4", owner_id: "appquorum", additional_signers: [{ signer_id: "other", override_policy_ids: ["p9"] }] };
+    expect(await ensureSignerOnWallet("w4")).toBe("attached");
+    const body = update.mock.calls[0]![1];
+    expect(body.authorization_context).toEqual({ authorization_private_keys: ["appkey"] });
+    expect(body.additional_signers).toEqual([
+      { signer_id: "other", override_policy_ids: ["p9"] },
+      { signer_id: "quorum1", override_policy_ids: ["policy1"] },
+    ]);
+    expect(body.owner).toBeUndefined();
   });
 
   it("recognises real Privy wallet ids vs stored addresses", async () => {
