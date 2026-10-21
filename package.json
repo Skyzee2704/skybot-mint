@@ -1,0 +1,22 @@
+{
+  "name": "nft-mint-bot",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "server",
+    "web"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace server & npm run dev --workspace web",
+    "dev:server": "npm run dev --workspace server",
+    "dev:web": "npm run dev --workspace web",
+    "build": "npm run build --workspace server && npm run build --workspace web",
+    "start:server": "npm run start --workspace server",
+    "start:web": "npm run start --workspace web",
+    "test": "npm test --workspace server",
+    "smoke": "npm run smoke --workspace server"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true
+  }
+}
