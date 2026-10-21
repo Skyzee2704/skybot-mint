@@ -56,6 +56,19 @@ export const env = {
   get privyAuthKeyQuorumId() {
     return str("PRIVY_AUTH_KEY_QUORUM_ID");
   },
+  /**
+   * Dedicated sign-in-only signer (separate from the mint signer): its key quorum is added to user wallets with
+   * PRIVY_SIWE_POLICY_ID, a Privy policy that only ALLOWS personal_sign of OpenSea's login text (everything else denied).
+   */
+  get privySiweAuthPrivateKey() {
+    return str("PRIVY_SIWE_AUTH_PRIVATE_KEY");
+  },
+  get privySiweKeyQuorumId() {
+    return str("PRIVY_SIWE_KEY_QUORUM_ID");
+  },
+  get privySiwePolicyId() {
+    return str("PRIVY_SIWE_POLICY_ID");
+  },
   /** Comma-separated emails that are admins (allow-list, checked on every request). No other way to become admin. */
   get adminEmails() {
     return (str("ADMIN_EMAILS") ?? "")
@@ -160,6 +173,10 @@ export function isPublicHttps(url = env.publicUrl): boolean {
 
 export function privyConfigured() {
   return Boolean(env.privyAppId && env.privyAppSecret);
+}
+/** Server can sign OpenSea's login message (Telegram /check) — all three values plus Privy itself. */
+export function privySiweSignerReady() {
+  return privyConfigured() && Boolean(env.privySiweAuthPrivateKey && env.privySiweKeyQuorumId && env.privySiwePolicyId);
 }
 export function privyServerSigningReady() {
   return privyConfigured() && Boolean(env.privyAuthPrivateKey);

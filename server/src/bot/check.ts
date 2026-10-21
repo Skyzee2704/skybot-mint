@@ -55,7 +55,7 @@ function stageLine(s: ResolvedTarget["stages"][number], sym: string, tz: string 
 }
 
 function verdict(r: EligibilityRow): { label: "Eligible" | "Not eligible" | "Unknown"; why: string } {
-  if (r.needsOpenSeaLogin) return { label: "Unknown", why: "verify in app" };
+  if (r.needsOpenSeaLogin) return { label: "Unknown", why: "open app once to verify" };
   const a = r.access;
   const other = r.reasons.filter((x) => !x.startsWith("insufficient balance") && !x.startsWith("not allowlisted"));
   if (a.status === "no") return { label: "Not eligible", why: a.detail ?? "not on the allowlist" };
@@ -112,14 +112,14 @@ export function formatCheck(v: CheckView): string[] {
           ? `\n   ${r.stages.map((s) => `${esc(s.label ?? s.type ?? "stage")}: ${s.eligible ? "yes" : s.eligible === false ? "no" : "?"}`).join(" · ")}`
           : "";
       lines.push(
-        `${ICON[x.label]} <b>${esc(r.label)}</b> <code>${shortAddr(r.address)}</code> — ${x.label}${x.why ? `: ${esc(x.why)}` : ""}${per}`,
+        `${ICON[x.label]} <b>${esc(r.label)}</b> <code>${shortAddr(r.address)}</code> · ${x.label}${x.why ? ` — ${esc(x.why)}` : ""}${per}`,
       );
     }
   }
   if (verdicts.some((x) => x.r.needsOpenSeaLogin))
     lines.push(
       "",
-      "Upcoming OpenSea stages need a one-time free OpenSea check per wallet. Tap <b>Open in SkyBOT</b> → Verify with OpenSea.",
+      "Some wallets aren't verified with OpenSea yet. Tap <b>Open in SkyBOT</b> once: wallets are verified automatically (free, no gas).",
     );
   lines.push(
     "",

@@ -7,10 +7,10 @@
  */
 import { getAddress, type Wallet } from "ethers";
 import { env } from "../../config/env.js";
+import { OPENSEA_SIWE_STATEMENT } from "./siweGuard.js";
 
 const API = "https://api.opensea.io";
-export const SIWE_STATEMENT =
-  "Click to sign in and accept the Platform Terms of Service (https://opensea.io/tos) and Privacy Policy (https://opensea.io/privacy).";
+export const SIWE_STATEMENT = OPENSEA_SIWE_STATEMENT;
 
 export function buildSiweMessage(address: string, nonce: string, issuedAt = new Date()): { text: string; fields: Record<string, string> } {
   const a = getAddress(address);

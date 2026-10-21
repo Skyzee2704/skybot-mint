@@ -72,9 +72,10 @@ describe("/check formatting", () => {
     expect(msg).toContain("starts Thu, 22 Oct 2026 · 19:30 (UTC+5:30) · in 23h 20m");
     expect(msg).toContain("Free");
     expect(msg).toContain("max 2/wallet");
-    expect(msg).toContain("✅ <b>Main</b> <code>0x668B…27A0</code> — Eligible");
+    expect(msg).toContain("✅ <b>Main</b> <code>0x668B…27A0</code> · Eligible");
     expect(msg).toContain("❌ <b>Alt</b>");
-    expect(msg).toContain("Unknown: verify in app");
+    expect(msg).toContain("Unknown — open app once to verify");
+    expect(msg).toContain("Open in SkyBOT");
     expect(msg).toContain("Times shown in Asia/Kolkata.");
     expect(msg).not.toMatch(/\d{4}-\d{2}-\d{2}T/);
   });

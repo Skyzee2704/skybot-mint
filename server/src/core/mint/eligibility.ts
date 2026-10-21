@@ -16,6 +16,7 @@ import { MintRequest, Strategy } from "./types.js";
 import { cachedJwt, eligibilityWithJwt, jwtFromSignature, validateSiweFields } from "../resolver/openseaAuth.js";
 import type { OsStage } from "../resolver/opensea.js";
 import { and, eq } from "drizzle-orm";
+import { loadJwt, serverSignIn, storeJwt } from "../resolver/openseaSession.js";
 import { getDb } from "../../db/client.js";
 import { openseaVerdicts } from "../../db/schema.js";
 
@@ -125,6 +126,8 @@ export interface EligibilityOptions {
   openseaWalletLogin?: boolean;
   /** Browser-signed OpenSea sign-in messages (Privy embedded wallets), one per wallet. */
   siwe?: SiweProof[];
+  /** Try the server sign-in-only Privy signer for wallets without a saved OpenSea session (Telegram /check, web). */
+  serverSign?: boolean;
 }
 
 /* ---------- saved OpenSea verdicts (per wallet + drop), reused by later checks and the Telegram /check ---------- */
@@ -314,12 +317,14 @@ export async function checkEligibility(
       if (useOs && t.slug && access.status === "unknown" && targetOs) {
         const proof = proofs.get(w.id);
         try {
-          let jwt = cachedJwt(w.address);
+          let jwt = await loadJwt(userId, w.address);
           if (!jwt && proof) {
             validateSiweFields(proof.fields, w.address);
             jwt = await jwtFromSignature(proof.fields, proof.signature);
+            await storeJwt(userId, w.address, jwt);
           }
           const cached = cachedVerdicts.get(w.id);
+          if (!jwt && !cached && opts.serverSign) jwt = await serverSignIn(userId, w);
           if (!jwt && !cached) needsOpenSeaLogin = true;
           else {
             const res = jwt ? await eligibilityWithJwt(jwt, t.slug) : cached!.stages;

@@ -181,6 +181,18 @@ export default function SettingsPage() {
       )}
 
       <div className="card">
+        <h2>OpenSea Verification</h2>
+        <p className="muted">
+          To check upcoming OpenSea stages, SkyBOT signs OpenSea&apos;s off-chain sign-in message for your wallets (free, no gas, never a
+          transaction), which accepts OpenSea&apos;s{" "}
+          <a href="https://opensea.io/tos" target="_blank" rel="noreferrer">
+            Terms of Service
+          </a>
+          .
+        </p>
+      </div>
+
+      <div className="card">
         <h2>Chain Health</h2>
         <button className="ghost" onClick={async () => setHealth(await api("/api/chains/health"))}>
           Run Check

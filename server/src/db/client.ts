@@ -156,6 +156,7 @@ const DDL = [
   `CREATE TABLE IF NOT EXISTS wallet_tombstones (
     id TEXT PRIMARY KEY, user_id TEXT NOT NULL, address TEXT NOT NULL, privy_wallet_id TEXT, removed_at TEXT NOT NULL)`,
   `CREATE INDEX IF NOT EXISTS wallet_tombstones_user ON wallet_tombstones(user_id)`,
+  `CREATE TABLE IF NOT EXISTS opensea_tokens (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, token_enc TEXT NOT NULL, expires_at TEXT NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS rate_buckets (
     key TEXT PRIMARY KEY, count INTEGER NOT NULL DEFAULT 0, window_start INTEGER NOT NULL)`,
 ];

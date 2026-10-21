@@ -7,7 +7,7 @@
  * the server import helper is disabled unless ALLOW_SERVER_KEY_IMPORT=1 (dev only).
  */
 import { PrivyClient } from "@privy-io/node";
-import { env, privyConfigured, privyServerSigningReady } from "../config/env.js";
+import { env, privyConfigured, privyServerSigningReady, privySiweSignerReady } from "../config/env.js";
 import { log } from "../util/log.js";
 
 let client: PrivyClient | null = null;
@@ -48,7 +48,11 @@ export async function createPrivyWallets(privyUserId: string, count: number) {
   const privy = getPrivy();
   const out: { id: string; address: string }[] = [];
   for (let i = 0; i < count; i++) {
-    const w = await privy.wallets().create({ chain_type: "ethereum", owner: { user_id: privyUserId } });
+    // Sign-in-only signer (personal_sign of OpenSea's login, enforced by a Privy policy) is attached at creation.
+    const signer = privySiweSignerReady()
+      ? { additional_signers: [{ signer_id: env.privySiweKeyQuorumId!, override_policy_ids: [env.privySiwePolicyId!] }] }
+      : {};
+    const w = await privy.wallets().create({ chain_type: "ethereum", owner: { user_id: privyUserId }, ...signer } as any);
     out.push({ id: w.id, address: w.address });
   }
   return out;

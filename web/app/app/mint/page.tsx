@@ -5,7 +5,8 @@ import { STRATEGY_LABELS } from "@/lib/labels";
 import Link from "next/link";
 import { fmtEth, short } from "@/lib/api";
 import { useApi, useShell } from "@/components/AppShell";
-import { usePrivy, useSignMessage } from "@privy-io/react-auth";
+import { usePrivy, useSignMessage, useWallets } from "@privy-io/react-auth";
+import { assertOpenSeaSiwe } from "@nft-mint-bot/server/siwe";
 import { useWalletList } from "@/lib/wallets";
 import { ChainSelect } from "@/components/ChainSelect";
 import { ConfirmBox } from "@/components/Confirm";
@@ -21,6 +22,7 @@ export default function MintPage() {
   const { userId, tgOnly, connectPrivy } = useShell();
   const { authenticated } = usePrivy();
   const { signMessage } = useSignMessage();
+  const { wallets: privyWallets } = useWallets();
   const walletList = useWalletList(api, userId);
   const [scope, setScope] = useState<"all" | "select">("all");
   const [picked, setPicked] = useState<Record<string, boolean>>({});
@@ -104,13 +106,21 @@ export default function MintPage() {
   const pickedIds = Object.keys(picked).filter((k) => picked[k]);
   const walletIds = scope === "all" ? undefined : pickedIds;
 
-  /** Browser-side OpenSea sign-in (Privy embedded wallet, off-chain, no gas). Returns proofs for the server. */
+  /**
+   * Silent OpenSea sign-in for embedded Privy wallets on this device (off-chain, no gas, no popup).
+   * SAFETY: every message is checked by the SIWE guard first — only OpenSea's exact login text for that same
+   * wallet with a fresh nonce is ever signed; anything else is refused. Never typed data or transactions.
+   */
   const openseaProofs = async (ids: string[]) => {
-    const { messages } = await api("/api/opensea/siwe/prepare", { body: { walletIds: ids } });
+    const local = new Set((privyWallets ?? []).filter((w) => w.walletClientType === "privy").map((w) => w.address.toLowerCase()));
+    const own = walletList.wallets.filter((w) => ids.includes(w.id) && local.has(w.address.toLowerCase())).map((w) => w.id);
     const proofs: any[] = [];
-    let failed = 0;
+    let failed = ids.length - own.length;
+    if (!own.length) return { proofs, failed };
+    const { messages } = await api("/api/opensea/siwe/prepare", { body: { walletIds: own } });
     for (const m of messages) {
       try {
+        assertOpenSeaSiwe(m.message, m.address);
         const { signature } = await signMessage({ message: m.message }, { address: m.address, uiOptions: { showWalletUIs: false } });
         proofs.push({ walletId: m.walletId, fields: m.fields, signature });
       } catch {
@@ -120,24 +130,20 @@ export default function MintPage() {
     return { proofs, failed };
   };
 
-  const checkElig = async (opts: { verify?: boolean } = {}) => {
+  const checkElig = async () => {
     setErr(null);
     setSim(null);
     setVerifyNote(null);
-    setBusy(opts.verify ? "Verifying with OpenSea…" : "Checking wallets…");
+    setBusy("Checking wallets…");
     try {
       const base = { chain: t.chain.key, contract: t.contract, input: t.input, strategy, walletIds, generic: genericPayload() };
       let r = await api("/api/eligibility", { body: base });
       const need = r.rows.filter((x: any) => x.needsOpenSeaLogin).map((x: any) => x.walletId);
-      if (need.length && (opts.verify || r.openseaAutoVerify)) {
-        if (!authenticated) setVerifyNote("OpenSea verification signs with your Privy wallet. Connect with Privy first.");
-        else {
-          setBusy(`Verifying ${need.length} wallet(s) with OpenSea…`);
-          const { proofs, failed } = await openseaProofs(need);
-          if (proofs.length) r = await api("/api/eligibility", { body: { ...base, siwe: proofs } });
-          if (failed)
-            setVerifyNote(`${failed} wallet(s) could not sign the OpenSea sign-in message (only Privy wallets on this device can sign).`);
-        }
+      if (need.length && authenticated) {
+        setBusy(`Verifying ${need.length} wallet(s) with OpenSea…`);
+        const { proofs, failed } = await openseaProofs(need);
+        if (proofs.length) r = await api("/api/eligibility", { body: { ...base, siwe: proofs } });
+        if (failed) setVerifyNote(`${failed} wallet(s) couldn't be verified with OpenSea from this device.`);
       }
       setElig(r);
       setSel(Object.fromEntries(r.rows.filter((x: any) => x.eligibleIgnoringBalance).map((x: any) => [x.walletId, true])));
@@ -400,7 +406,7 @@ export default function MintPage() {
               {n.kind === "stage_upcoming" ? (
                 <>
                   <b>{n.label}</b> starts {n.start ? fmt(n.start) : "soon"}.
-                  {n.needsVerification ? " Verify each wallet with OpenSea to check eligibility early — free, no gas." : ""}
+                  {n.needsVerification ? " Some wallets couldn't be verified with OpenSea yet." : ""}
                 </>
               ) : (
                 "No mint stage is live or scheduled right now."
@@ -412,19 +418,10 @@ export default function MintPage() {
               {n}
             </div>
           ))}
-          {rows.some((r: any) => r.needsOpenSeaLogin) && (
+          {rows.some((r: any) => r.needsOpenSeaLogin) && tgOnly && !authenticated && (
             <div className="notice row" style={{ justifyContent: "space-between" }}>
-              <span>
-                {rows.filter((r: any) => r.needsOpenSeaLogin).length} wallet(s) need OpenSea verification. Each wallet signs OpenSea&apos;s
-                sign-in message in your browser (off-chain, no gas) and accepts OpenSea&apos;s Terms.
-              </span>
-              {tgOnly && !authenticated ? (
-                <button onClick={connectPrivy}>Connect with Privy</button>
-              ) : (
-                <button disabled={!!busy} onClick={() => checkElig({ verify: true })}>
-                  Verify with OpenSea
-                </button>
-              )}
+              <span>Connect with Privy to verify upcoming OpenSea stages for your wallets automatically.</span>
+              <button onClick={connectPrivy}>Connect with Privy</button>
             </div>
           )}
           {verifyNote && <div className="notice">{verifyNote}</div>}

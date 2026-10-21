@@ -5,7 +5,7 @@ import helmet from "@fastify/helmet";
 import { z } from "zod";
 import { formatEther } from "ethers";
 import { CHAINS, requireChain, rpcsForChain } from "../config/chains.js";
-import { configStatus, env, privyConfigured, privyServerSigningReady } from "../config/env.js";
+import { configStatus, env, privyConfigured, privyServerSigningReady, privySiweSignerReady } from "../config/env.js";
 import { requireAuth, adminGate } from "../auth/middleware.js";
 import { getPool } from "../core/rpc/pool.js";
 import { getResolved, refresh, remember } from "../core/resolver/cache.js";
@@ -209,7 +209,13 @@ export async function buildServer(): Promise<FastifyInstance> {
       const { setUserTimeZone } = await import("../users/service.js");
       return { timeZone: await setUserTimeZone(req.user!, timeZone) };
     });
-    a.get("/api/me", async (req) => ({ user: publicUser(req.user!), authVia: req.authVia, serverSigning: privyServerSigningReady() }));
+    a.get("/api/me", async (req) => ({
+      user: publicUser(req.user!),
+      authVia: req.authVia,
+      serverSigning: privyServerSigningReady(),
+      // Public ids only (no keys): lets the app add the sign-in-only signer to embedded wallets silently.
+      siweSigner: privySiweSignerReady() ? { signerId: env.privySiweKeyQuorumId, policyId: env.privySiwePolicyId } : null,
+    }));
 
     a.get("/api/chains/health", async () =>
       Promise.all(
@@ -420,13 +426,14 @@ export async function buildServer(): Promise<FastifyInstance> {
         })
         .parse(req.body);
       const t = b.refresh ? await refresh(b.chain, b.contract, b.input) : await getResolved(b.chain, b.contract, b.input);
-      const st = await getSettings(req.user!.id);
       const r = await checkEligibility(t, b.strategy, req.user!.id, b.walletIds ?? null, b.quantity ?? null, undefined, {
         generic: b.generic,
-        openseaWalletLogin: st.openseaWalletLogin,
+        openseaWalletLogin: true,
         siwe: b.siwe,
+        serverSign: true,
       });
-      return { ...r, openseaAutoVerify: Boolean(st.openseaWalletLogin) };
+      // OpenSea upcoming-stage verification is always on: the client signs missing wallets silently.
+      return { ...r, openseaAutoVerify: true };
     });
     /** OpenSea sign-in messages for the user's own wallets; signed in the browser (Privy), never on the server. */
     a.post("/api/opensea/siwe/prepare", async (req) => {

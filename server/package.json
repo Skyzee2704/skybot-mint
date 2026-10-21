@@ -52,6 +52,10 @@
     "./qty": {
       "types": "./dist/core/mint/qty.d.ts",
       "default": "./dist/core/mint/qty.js"
+    },
+    "./siwe": {
+      "types": "./dist/core/resolver/siweGuard.d.ts",
+      "default": "./dist/core/resolver/siweGuard.js"
     }
   },
   "types": "dist/vercel.d.ts",

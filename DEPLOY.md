@@ -2,14 +2,14 @@
 
 SkyBOT Mint runs as a **single Vercel project**. The Next.js app serves both the UI and the API. Supporting services:
 
-| Service | Purpose | Plan |
-|---|---|---|
-| [Vercel](https://vercel.com) | Hosting (Next.js, Node.js functions) | Hobby or Pro |
-| [Neon](https://neon.tech) | Postgres database | Free tier is fine |
-| [Upstash QStash](https://upstash.com/docs/qstash) | Scheduled mints and the housekeeping cron | Free tier is fine |
-| [Upstash Redis](https://upstash.com/docs/redis) | Shared rate limits (optional, recommended) | Free tier is fine |
-| [Privy](https://dashboard.privy.io) | Authentication and wallet custody | — |
-| Telegram [@BotFather](https://t.me/BotFather) | Bot and Mini App | — |
+| Service                                           | Purpose                                    | Plan              |
+| ------------------------------------------------- | ------------------------------------------ | ----------------- |
+| [Vercel](https://vercel.com)                      | Hosting (Next.js, Node.js functions)       | Hobby or Pro      |
+| [Neon](https://neon.tech)                         | Postgres database                          | Free tier is fine |
+| [Upstash QStash](https://upstash.com/docs/qstash) | Scheduled mints and the housekeeping cron  | Free tier is fine |
+| [Upstash Redis](https://upstash.com/docs/redis)   | Shared rate limits (optional, recommended) | Free tier is fine |
+| [Privy](https://dashboard.privy.io)               | Authentication and wallet custody          | —                 |
+| Telegram [@BotFather](https://t.me/BotFather)     | Bot and Mini App                           | —                 |
 
 Plan for about 30 minutes for the first deployment.
 
@@ -49,11 +49,11 @@ git push -u origin main
 
 ### Function durations
 
-| Route | `maxDuration` | Why |
-|---|---|---|
-| `/api/jobs/run` | 300 s | Pre-signs, waits until stage start, broadcasts, and tracks receipts |
-| `/api/cron/housekeeping` | 60 s | Finishes receipts, expires stuck or missed jobs, purges link codes |
-| `/api/*` | 60 s | Regular API |
+| Route                    | `maxDuration` | Why                                                                 |
+| ------------------------ | ------------- | ------------------------------------------------------------------- |
+| `/api/jobs/run`          | 300 s         | Pre-signs, waits until stage start, broadcasts, and tracks receipts |
+| `/api/cron/housekeeping` | 60 s          | Finishes receipts, expires stuck or missed jobs, purges link codes  |
+| `/api/*`                 | 60 s          | Regular API                                                         |
 
 With Fluid compute, both **Hobby and Pro allow up to 300 s**, and Pro can go up to 800 s. Keep `JOB_MAX_DURATION_SEC` equal to the `/api/jobs/run` value.
 
@@ -61,28 +61,28 @@ With Fluid compute, both **Hobby and Pro allow up to 300 s**, and Pro can go up 
 
 Set these in **Vercel → Project → Settings → Environment Variables** for Production, and for Preview if you use it. See [`.env.example`](.env.example) for the full list.
 
-| Variable | Where to get it |
-|---|---|
-| `NEXT_PUBLIC_PRIVY_APP_ID` | Privy Dashboard → App settings → App ID |
-| `PRIVY_APP_SECRET` | Privy Dashboard → App settings → App secret |
-| `PRIVY_AUTH_PRIVATE_KEY` | Privy Dashboard → Wallet infrastructure → Authorization keys → New key (shown once) |
-| `PRIVY_AUTH_KEY_QUORUM_ID` | Privy Dashboard → the key quorum containing that authorization key |
-| `PUBLIC_URL` | Your Vercel production URL (`https://…`, no trailing slash) |
-| `SESSION_SECRET` | `openssl rand -hex 32` |
-| `DATABASE_URL` | Neon pooled connection string |
-| `QSTASH_TOKEN`, `QSTASH_CURRENT_SIGNING_KEY`, `QSTASH_NEXT_SIGNING_KEY` | Upstash Console → QStash |
-| `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` | Upstash Console → Redis → REST API (optional) |
-| `TELEGRAM_BOT_TOKEN` | @BotFather → `/mybots` → API Token |
-| `TELEGRAM_BOT_USERNAME` | Your bot's username without `@`, for example `MyTradeSkyBOT` |
-| `TELEGRAM_WEBHOOK_SECRET` | `openssl rand -hex 24` (letters, digits, `_` and `-` only) |
-| `TELEGRAM_USER_ID`, `ADMIN_TELEGRAM_IDS` | Your numeric Telegram ID (for example from @userinfobot) |
-| `ADMIN_EMAILS` | Emails that receive the admin role |
-| `OPENSEA_API_KEY` | OpenSea developer portal |
-| `ETHERSCAN_API_KEY` | etherscan.io → API Keys (V2 works across chains) |
-| `RPC_ETHEREUM`, `RPC_BASE`, … | Your RPC provider (Alchemy, QuickNode, …). Public RPCs are used as fallbacks |
-| `NEXT_PUBLIC_SOURCE_URL` | Your public GitHub repository URL (AGPL "Source" link) |
-| `JOB_LEAD_MS` | Optional, default `20000` |
-| `MAX_PRICE_PER_NFT`, `MAX_DAILY_SPEND`, `MAX_GAS_PRICE_GWEI` | Optional global safety limits |
+| Variable                                                                | Where to get it                                                                     |
+| ----------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `NEXT_PUBLIC_PRIVY_APP_ID`                                              | Privy Dashboard → App settings → App ID                                             |
+| `PRIVY_APP_SECRET`                                                      | Privy Dashboard → App settings → App secret                                         |
+| `PRIVY_AUTH_PRIVATE_KEY`                                                | Privy Dashboard → Wallet infrastructure → Authorization keys → New key (shown once) |
+| `PRIVY_AUTH_KEY_QUORUM_ID`                                              | Privy Dashboard → the key quorum containing that authorization key                  |
+| `PUBLIC_URL`                                                            | Your Vercel production URL (`https://…`, no trailing slash)                         |
+| `SESSION_SECRET`                                                        | `openssl rand -hex 32`                                                              |
+| `DATABASE_URL`                                                          | Neon pooled connection string                                                       |
+| `QSTASH_TOKEN`, `QSTASH_CURRENT_SIGNING_KEY`, `QSTASH_NEXT_SIGNING_KEY` | Upstash Console → QStash                                                            |
+| `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`                    | Upstash Console → Redis → REST API (optional)                                       |
+| `TELEGRAM_BOT_TOKEN`                                                    | @BotFather → `/mybots` → API Token                                                  |
+| `TELEGRAM_BOT_USERNAME`                                                 | Your bot's username without `@`, for example `MyTradeSkyBOT`                        |
+| `TELEGRAM_WEBHOOK_SECRET`                                               | `openssl rand -hex 24` (letters, digits, `_` and `-` only)                          |
+| `TELEGRAM_USER_ID`, `ADMIN_TELEGRAM_IDS`                                | Your numeric Telegram ID (for example from @userinfobot)                            |
+| `ADMIN_EMAILS`                                                          | Emails that receive the admin role                                                  |
+| `OPENSEA_API_KEY`                                                       | OpenSea developer portal                                                            |
+| `ETHERSCAN_API_KEY`                                                     | etherscan.io → API Keys (V2 works across chains)                                    |
+| `RPC_ETHEREUM`, `RPC_BASE`, …                                           | Your RPC provider (Alchemy, QuickNode, …). Public RPCs are used as fallbacks        |
+| `NEXT_PUBLIC_SOURCE_URL`                                                | Your public GitHub repository URL (AGPL "Source" link)                              |
+| `JOB_LEAD_MS`                                                           | Optional, default `20000`                                                           |
+| `MAX_PRICE_PER_NFT`, `MAX_DAILY_SPEND`, `MAX_GAS_PRICE_GWEI`            | Optional global safety limits                                                       |
 
 > `NEXT_PUBLIC_*` values are inlined into the browser bundle when you build, so redeploy after you change them. Every other value stays on the server.
 
@@ -111,29 +111,34 @@ In the [Privy Dashboard](https://dashboard.privy.io), for your app:
    - Enable **Email** and **Google** (Socials tab). Google works with Privy's default credentials; no Google Cloud setup is needed.
    - Do **not** enable wallet login. SkyBOT accounts are email, Google, or Telegram only.
    - Enable **Telegram** and fill in both parts of its settings:
-     - **OAuth credentials (Recommended)**: the **Client ID** and **Client secret** from @BotFather (see *Telegram OAuth credentials* below). This powers Telegram login on the website.
+     - **OAuth credentials (Recommended)**: the **Client ID** and **Client secret** from @BotFather (see _Telegram OAuth credentials_ below). This powers Telegram login on the website.
      - **Bot token and name**: the bot token and the bot handle (`MyTradeSkyBOT`). Mini App sessions are signed by Telegram with the bot token, so keep these filled for seamless login inside Telegram.
      - Tick **Enable login directly from the Telegram app, such as with Telegram Mini Apps** (seamless login).
-   - **Identity tokens** (recommended): enable *Return user data in an identity token*. SkyBOT reads linked accounts (email, Google, Telegram) from it without an extra Privy API call. Without it, SkyBOT falls back to one Privy API lookup the first time a login is seen.
+   - **Identity tokens** (recommended): enable _Return user data in an identity token_. SkyBOT reads linked accounts (email, Google, Telegram) from it without an extra Privy API call. Without it, SkyBOT falls back to one Privy API lookup the first time a login is seen.
 2. **Domains / Allowed origins**
    - `https://<your-app>.vercel.app` (and your custom domain, if any)
    - `https://web.telegram.org` and `http://web.telegram.org` (Telegram Web clients)
    - `http://localhost:3000` (local development; remove it in production if you prefer)
-3. **Embedded wallets**: set **Create on login** to *Users without wallets* (EVM).
+3. **Embedded wallets**: set **Create on login** to _Users without wallets_ (EVM).
 4. **Authorization keys**: create an authorization key and a **key quorum**. Put the private key in `PRIVY_AUTH_PRIVATE_KEY` and the quorum ID in `PRIVY_AUTH_KEY_QUORUM_ID`. SkyBOT adds this quorum as a signer so scheduled mints can be signed server-side.
-5. **Policies (strongly recommended)**: attach a policy to the signer that allowlists contract targets (SeaDrop and the mint contracts you use), limits `value` per transaction, restricts chain IDs, and denies `approve`, `setApprovalForAll`, and `transfer`. See [SECURITY.md](SECURITY.md).
+5. **OpenSea sign-in signer (optional, for Telegram `/check`)** — a second, sign-in-only signer:
+   1. Generate a P-256 key locally: `openssl ecparam -name prime256v1 -genkey -noout -out siwe.pem && openssl ec -in siwe.pem -pubout -out siwe.pub.pem` ([Privy: create an authorization key](https://docs.privy.io/wallets/using-wallets/signers/quickstart)).
+   2. Privy Dashboard → **Authorization keys** → **New key** → **Register key quorum instead**: paste the public key, threshold **1**, name it "SkyBOT OpenSea sign-in". Copy the quorum id → `PRIVY_SIWE_KEY_QUORUM_ID`.
+   3. Privy Dashboard → **Policies** → create an **ethereum** policy with exactly one rule: method `personal_sign`, action **ALLOW**, condition `message.content` **starts_with** `opensea.io wants you to sign in with your Ethereum account:\n{{wallet.address}}`. No other rules (Privy denies every method without an ALLOW rule). Copy the policy id → `PRIVY_SIWE_POLICY_ID` ([policies](https://docs.privy.io/controls/policies/overview), [message rules](https://docs.privy.io/controls/policies/example-policies/ethereum), [`{{wallet.address}}`](https://docs.privy.io/controls/policies/template-variables)).
+   4. Convert the private key to the base64 PKCS#8 form the Privy Node SDK expects — `openssl pkcs8 -topk8 -nocrypt -in siwe.pem -outform DER | base64 -w0` — and put that value in `PRIVY_SIWE_AUTH_PRIVATE_KEY` on Vercel (keep `siwe.pem` offline; Privy can't recover it), then redeploy. SkyBOT then adds the signer with that policy to embedded wallets silently on the next app open (`useSigners().addSigners`, [docs](https://docs.privy.io/wallets/using-wallets/signers/add-signers)) and to newly generated wallets at creation.
+6. **Policies (strongly recommended)**: attach a policy to the signer that allowlists contract targets (SeaDrop and the mint contracts you use), limits `value` per transaction, restricts chain IDs, and denies `approve`, `setApprovalForAll`, and `transfer`. See [SECURITY.md](SECURITY.md).
 
 ## 8. Configure BotFather
 
 In [@BotFather](https://t.me/BotFather):
 
-1. **Telegram OAuth credentials** (for Privy's *OAuth credentials* fields). Telegram documents this in [Log In With Telegram → Registering your Allowed URLs](https://core.telegram.org/bots/telegram-login#registering-your-allowed-urls):
-   1. Open the @BotFather **Mini App** (the *Open* button in the BotFather chat), select your bot, then open **Login Widget** (some clients label it *Bot Settings → Web Login*).
+1. **Telegram OAuth credentials** (for Privy's _OAuth credentials_ fields). Telegram documents this in [Log In With Telegram → Registering your Allowed URLs](https://core.telegram.org/bots/telegram-login#registering-your-allowed-urls):
+   1. Open the @BotFather **Mini App** (the _Open_ button in the BotFather chat), select your bot, then open **Login Widget** (some clients label it _Bot Settings → Web Login_).
    2. Add these **Allowed URLs**:
       - `https://auth.privy.io/api/v1/oauth/callback` (Privy's OAuth callback, required)
       - `https://<your-app>.vercel.app` (the website origin where the login button appears)
-   3. Copy the **Client ID** and **Client Secret** shown in the same section and paste them into Privy → Login methods → Telegram → *OAuth credentials*. The Client Secret is **not** the bot token.
-2. `/setdomain`: select your bot and enter your Vercel host, for example `skybot-mint.vercel.app`. This is still needed by the legacy Login Widget flow that Privy uses with *Bot token and name*.
+   3. Copy the **Client ID** and **Client Secret** shown in the same section and paste them into Privy → Login methods → Telegram → _OAuth credentials_. The Client Secret is **not** the bot token.
+2. `/setdomain`: select your bot and enter your Vercel host, for example `skybot-mint.vercel.app`. This is still needed by the legacy Login Widget flow that Privy uses with _Bot token and name_.
 3. `/setuserpic`: upload `assets/logo-512.png`. Telegram shows the bot's name and picture on the login consent screen.
 4. Optional: `/setmenubutton` sets the menu button manually to `PUBLIC_URL` with the text **Open Dashboard**. Step 6 already does this through the API.
 5. Optional: `/newapp` registers a named Mini App (t.me/<bot>/<app>) that points to `PUBLIC_URL`.
@@ -168,12 +173,12 @@ See [README → Quick Start](README.md#quick-start-local-development). Locally, 
 
 ## Troubleshooting
 
-| Symptom | Fix |
-|---|---|
-| `401 invalid signature` on `/api/jobs/run` | `PUBLIC_URL` must exactly match the deployed URL, and the signing keys must match QStash |
-| Mini App opens but shows **Connect with Privy** | Seamless login is off or misconfigured: tick *Enable login directly from the Telegram app*, fill in the bot token and name in Privy, and add `web.telegram.org` to allowed domains |
-| Telegram login on the web fails with a redirect error | Add `https://auth.privy.io/api/v1/oauth/callback` and your site origin to the bot's Allowed URLs in @BotFather, and check the Client ID and Secret in Privy |
-| `409 ACCOUNT_CONFLICT` after login | That Telegram account belongs to another SkyBOT account with wallets. Sign in with the original login |
-| Webhook `last_error_message: 401` | `TELEGRAM_WEBHOOK_SECRET` changed. Rerun step 6 |
-| "Scheduler unavailable" when scheduling | Check `QSTASH_TOKEN` (and `QSTASH_URL` for your region) |
-| Function timeout on scheduled mints | Reduce `JOB_LEAD_MS` or raise `maxDuration` (Pro) |
+| Symptom                                               | Fix                                                                                                                                                                                |
+| ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `401 invalid signature` on `/api/jobs/run`            | `PUBLIC_URL` must exactly match the deployed URL, and the signing keys must match QStash                                                                                           |
+| Mini App opens but shows **Connect with Privy**       | Seamless login is off or misconfigured: tick _Enable login directly from the Telegram app_, fill in the bot token and name in Privy, and add `web.telegram.org` to allowed domains |
+| Telegram login on the web fails with a redirect error | Add `https://auth.privy.io/api/v1/oauth/callback` and your site origin to the bot's Allowed URLs in @BotFather, and check the Client ID and Secret in Privy                        |
+| `409 ACCOUNT_CONFLICT` after login                    | That Telegram account belongs to another SkyBOT account with wallets. Sign in with the original login                                                                              |
+| Webhook `last_error_message: 401`                     | `TELEGRAM_WEBHOOK_SECRET` changed. Rerun step 6                                                                                                                                    |
+| "Scheduler unavailable" when scheduling               | Check `QSTASH_TOKEN` (and `QSTASH_URL` for your region)                                                                                                                            |
+| Function timeout on scheduled mints                   | Reduce `JOB_LEAD_MS` or raise `maxDuration` (Pro)                                                                                                                                  |

@@ -292,7 +292,7 @@ export function createBot(token: string, opts: ConstructorParameters<typeof Bot>
       let targetStage: any = null;
       if (t.recommendedStrategy !== "none") {
         const { checkEligibility } = await import("../core/mint/eligibility.js");
-        const r = await checkEligibility(t, t.recommendedStrategy, u.id, null, null);
+        const r = await checkEligibility(t, t.recommendedStrategy, u.id, null, null, undefined, { serverSign: true });
         rows = r.rows;
         targetStage = r.targetStage;
       }

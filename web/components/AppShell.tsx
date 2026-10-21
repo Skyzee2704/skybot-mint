@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { getIdentityToken, usePrivy } from "@privy-io/react-auth";
+import { getIdentityToken, usePrivy, useSigners, useWallets } from "@privy-io/react-auth";
 import { localTimeZone } from "@/lib/time";
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
 import { api } from "@/lib/api";
@@ -51,6 +51,29 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [err, setErr] = useState<string | null>(null);
   const path = usePathname();
   const router = useRouter();
+  const { addSigners } = useSigners();
+  const { wallets: privyWallets } = useWallets();
+  // Sign-in-only signer (Privy policy allows personal_sign of OpenSea's login text only) added silently to each
+  // embedded wallet, so the Telegram /check can verify upcoming OpenSea stages. Never blocks or shows errors.
+  useEffect(() => {
+    const sg = me?.siweSigner;
+    if (!authenticated || !sg?.signerId || !sg?.policyId) return;
+    for (const w of privyWallets ?? []) {
+      if (w.walletClientType !== "privy") continue;
+      const k = `skybot:siwe-signer:${sg.signerId}:${sg.policyId}:${w.address.toLowerCase()}`;
+      try {
+        if (window.localStorage.getItem(k)) continue;
+      } catch {
+        /* */
+      }
+      addSigners({ address: w.address, signers: [{ signerId: sg.signerId, policyIds: [sg.policyId] }] })
+        .then(() => window.localStorage.setItem(k, "1"))
+        .catch((e: any) => {
+          // Already added counts as done; anything else retries on the next visit.
+          if (/already/i.test(String(e?.message ?? ""))) window.localStorage.setItem(k, "1");
+        });
+    }
+  }, [authenticated, me?.siweSigner?.signerId, privyWallets]); // eslint-disable-line
   const connectPrivy = useCallback(() => login({ loginMethods: ["telegram"] } as any), [login]);
 
   useEffect(() => {

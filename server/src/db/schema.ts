@@ -175,3 +175,11 @@ export const walletTombstones = sqliteTable(
   },
   (t) => [index("wallet_tombstones_user").on(t.userId)],
 );
+
+/** OpenSea read:eligibility JWT per wallet (encrypted). Lets repeat checks skip re-signing. */
+export const openseaTokens = sqliteTable("opensea_tokens", {
+  id: text("id").primaryKey(), // lower-case wallet address
+  userId: text("user_id").notNull(),
+  tokenEnc: text("token_enc").notNull(),
+  expiresAt: text("expires_at").notNull(),
+});
