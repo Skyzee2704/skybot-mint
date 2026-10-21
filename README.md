@@ -50,11 +50,11 @@ Open http://localhost:3000. On first launch you create the **master password**. 
 | base | 8453 | ✅ | same |
 | polygon | 137 | ✅ | same |
 | arbitrum | 42161 | ✅ | same |
-| bnb | 56 | ✅ | same |
+| bnb | 56 | ✅ | Etherscan v2 → Sourcify → probe |
 | unichain | 130 | ✅ | same |
 | ink | 57073 | ✅ | Blockscout → Sourcify → probe |
-| robinhood | 4663 | ✅ | Etherscan v2 → Blockscout → Sourcify → probe |
-| arc | 5042 (native USDC) | ✅ | same |
+| robinhood | 4663 | ✅ | Blockscout → Sourcify → probe |
+| arc | 5042 (native USDC) | ✅ | Blockscout → Sourcify → probe |
 
 SeaDrop presence was verified on every chain with read-only `eth_getCode`.
 
