@@ -2,7 +2,7 @@ import { formatEther } from "ethers";
 import { requireChain } from "../../config/chains.js";
 import { getPool } from "../rpc/pool.js";
 import { ResolvedTarget } from "../resolver/resolver.js";
-import { wallets as walletSvc } from "../wallets/service.js";
+import { getWallet } from "../../users/service.js";
 import { assertDailyBudget, capsFor, dailySpent, fmtCap } from "../safety/safety.js";
 import { buildMintTx } from "./build.js";
 import { getFees } from "./fees.js";
@@ -25,7 +25,7 @@ export function revertReason(e: any): string {
   return String(e?.reason ?? e?.revert?.name ?? e?.info?.error?.message ?? e?.shortMessage ?? e?.message ?? e).slice(0, 240);
 }
 
-export async function simulateMint(t: ResolvedTarget, req: MintRequest) {
+export async function simulateMint(t: ResolvedTarget, req: MintRequest, userId: string) {
   const chain = requireChain(t.chain.key);
   const pool = getPool(chain);
   await pool.checkChainId();
@@ -34,10 +34,10 @@ export async function simulateMint(t: ResolvedTarget, req: MintRequest) {
   const beforeStart = runAtMs > Date.now() + 2000;
 
   const rows: SimRow[] = await Promise.all(req.wallets.map(async (wq): Promise<SimRow> => {
-    const w = walletSvc.get(wq.walletId);
+    const w = await getWallet(userId, wq.walletId);
     const base = { walletId: w.id, label: w.label, address: w.address, quantity: wq.quantity };
     let tx;
-    try { tx = await buildMintTx(t, req, w.address, wq.quantity); }
+    try { tx = await buildMintTx(t, req, w.address, wq.quantity, undefined, userId); }
     catch (e: any) {
       const notActive = e.code === "NOT_ACTIVE";
       const gl = BigInt(req.gasLimit ?? fallbackGas(req.strategy, wq.quantity));
@@ -61,20 +61,20 @@ export async function simulateMint(t: ResolvedTarget, req: MintRequest) {
   const totalGas = rows.reduce((a, r) => a + BigInt(r.maxGasCostWei), 0n);
   const totalNfts = rows.reduce((a, r) => a + r.quantity, 0);
   const blockers: string[] = [];
-  try { assertDailyBudget(chain, totalValue + totalGas); } catch (e: any) { blockers.push(e.message); }
+  try { await assertDailyBudget(userId, chain, totalValue + totalGas); } catch (e: any) { blockers.push(e.message); }
   const failed = rows.filter((r) => !r.ok && !r.expectedRevertBeforeStart);
   if (failed.length === rows.length && rows.length) blockers.push("Every wallet failed simulation");
 
-  const caps = capsFor(chain);
+  const caps = await capsFor(userId, chain);
   const summary = {
     chain: chain.key, nativeSymbol: chain.nativeSymbol, wallets: rows.length, totalNfts,
     totalValue: formatEther(totalValue), totalMaxGas: formatEther(totalGas), totalMax: formatEther(totalValue + totalGas),
     maxFeePerGasGwei: Number(fees.maxFeePerGas) / 1e9, priorityFeeGwei: Number(fees.maxPriorityFeePerGas) / 1e9, feesCapped: fees.capped,
-    dailySpent: formatEther(dailySpent(chain)), dailyCap: fmtCap(caps.maxDailySpendWei), maxPricePerNft: fmtCap(caps.maxPricePerNftWei),
+    dailySpent: formatEther(await dailySpent(userId, chain)), dailyCap: fmtCap(caps.maxDailySpendWei), maxPricePerNft: fmtCap(caps.maxPricePerNftWei),
     runAt: req.runAt ?? null, scheduled: beforeStart,
   };
   const okRows = rows.filter((r) => r.ok || r.expectedRevertBeforeStart);
   const plan = blockers.length || okRows.length === 0 ? null
-    : createPlan("mint", { request: { ...req, wallets: okRows.map((r) => ({ walletId: r.walletId, quantity: r.quantity })) }, gasHints: Object.fromEntries(rows.map((r) => [r.walletId, r.gasLimit])) }, `MINT ${totalNfts}`);
+    : createPlan(userId, "mint", { request: { ...req, wallets: okRows.map((r) => ({ walletId: r.walletId, quantity: r.quantity })) }, gasHints: Object.fromEntries(rows.map((r) => [r.walletId, r.gasLimit])) }, `MINT ${totalNfts}`);
   return { rows, summary, blockers, planId: plan?.id ?? null, confirmPhrase: plan?.confirmPhrase ?? null };
 }

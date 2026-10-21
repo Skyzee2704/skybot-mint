@@ -24,7 +24,7 @@ export function allowedTargets(t: ResolvedTarget, req: MintRequest): string[] {
  * Build the mint tx for one wallet. Prices/ABI come from the server-side resolved target,
  * never from the client (except generic price override, which is capped by safety).
  */
-export async function buildMintTx(t: ResolvedTarget, req: MintRequest, wallet: string, quantity: number, os = new OpenSeaClient()): Promise<BuiltTx> {
+export async function buildMintTx(t: ResolvedTarget, req: MintRequest, wallet: string, quantity: number, os = new OpenSeaClient(), userId = "system"): Promise<BuiltTx> {
   const chain = requireChain(t.chain.key);
   let tx: BuiltTx;
   switch (req.strategy) {
@@ -80,6 +80,6 @@ export async function buildMintTx(t: ResolvedTarget, req: MintRequest, wallet: s
     default: throw new MintBuildError(`Unknown strategy ${(req as any).strategy}`);
   }
   const osPrice = req.strategy === "opensea_api" ? osStage(t).priceWei : null;
-  assertSafeMintTx({ ...tx, chainId: chain.chainId }, { chain, allowedTargets: allowedTargets(t, req), quantity, expectedMaxValueWei: osPrice !== null ? BigInt(osPrice) * BigInt(quantity) : null });
+  await assertSafeMintTx({ ...tx, chainId: chain.chainId }, { userId, chain, allowedTargets: allowedTargets(t, req), quantity, expectedMaxValueWei: osPrice !== null ? BigInt(osPrice) * BigInt(quantity) : null });
   return tx;
 }

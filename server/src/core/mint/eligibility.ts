@@ -4,10 +4,9 @@ import { getPool } from "../rpc/pool.js";
 import { OpenSeaClient } from "../resolver/opensea.js";
 import { ResolvedTarget } from "../resolver/resolver.js";
 import { SEADROP_ABI, SEADROP_ADDRESS, seadropMintedBy } from "../resolver/seadrop.js";
-import { dropEligibility } from "../resolver/openseaAuth.js";
 import { AccessResult, MerkleInfo, SimResult, classifyRevert, getMerkleInfo, merkleAccess, simulateIgnoringBalance } from "./access.js";
 import { genericMintedBy } from "../resolver/generic.js";
-import { wallets as walletSvc } from "../wallets/service.js";
+import { getWallet, listWallets } from "../../users/service.js";
 import { getFees } from "./fees.js";
 import { MintBuildError, buildMintTx } from "./build.js";
 import { MintRequest, Strategy } from "./types.js";
@@ -65,10 +64,10 @@ export function decide(input: {
 
 export interface EligibilityOptions { generic?: MintRequest["generic"]; openseaWalletLogin?: boolean }
 
-export async function checkEligibility(t: ResolvedTarget, strategy: Strategy, walletIds: string[] | null, desiredQty = 1, os = new OpenSeaClient(), opts: EligibilityOptions = {}): Promise<{ rows: EligibilityRow[]; priceWei: string | null; maxFeePerGas: string; notes: string[]; allowlistInfo: Record<string, unknown> }> {
+export async function checkEligibility(t: ResolvedTarget, strategy: Strategy, userId: string, walletIds: string[] | null, desiredQty = 1, os = new OpenSeaClient(), opts: EligibilityOptions = {}): Promise<{ rows: EligibilityRow[]; priceWei: string | null; maxFeePerGas: string; notes: string[]; allowlistInfo: Record<string, unknown> }> {
   const chain = requireChain(t.chain.key);
   const pool = getPool(chain);
-  const list = walletSvc.list().filter((w) => !walletIds || walletIds.includes(w.id));
+  const list = (await listWallets(userId)).filter((w) => !walletIds || walletIds.includes(w.id));
   const fees = await getFees(pool);
   const genericPrice = strategy === "generic" && opts.generic?.priceWei ? BigInt(opts.generic.priceWei) : null;
   const priceKnown = genericPrice ?? stagePriceWei(t, strategy);
@@ -120,7 +119,7 @@ export async function checkEligibility(t: ResolvedTarget, strategy: Strategy, wa
     if (strategy === "opensea_api") {
       if (useOs && d.suggestedQty > 0) {
         try {
-          const tx = await buildMintTx(t, { chain: chain.key, contract: t.contract, strategy, slug: t.slug, wallets: [] }, w.address, qty, os);
+          const tx = await buildMintTx(t, { chain: chain.key, contract: t.contract, strategy, slug: t.slug, wallets: [] }, w.address, qty, os, userId);
           access = { status: activeIsPublic ? "public" : "yes", source: "OpenSea mint API", detail: activeIsPublic ? "public stage" : `allowed in "${activeOs?.label ?? "active stage"}"` };
           legacy = "eligible";
           simulation = await simulateIgnoringBalance(pool, { from: w.address, to: tx.to, data: tx.data, value: tx.value });
@@ -141,16 +140,11 @@ export async function checkEligibility(t: ResolvedTarget, strategy: Strategy, wa
       }
       // Upcoming stage: opt-in OpenSea wallet login (SIWE) → official eligibility endpoint.
       if (access.status === "unknown" && opts.openseaWalletLogin && t.slug && os.available) {
-        try {
-          const st = await dropEligibility(walletSvc.signer(w.id), t.slug);
-          const want = (activeOs ?? nextOs)?.uuid;
-          const s = st.find((x) => x.stage_uuid === want) ?? st.find((x) => x.is_eligible) ?? st[0];
-          if (s) access = { status: s.is_eligible ? "yes" : "no", source: "OpenSea eligibility API (wallet login)", detail: `stage ${s.stage_uuid}${s.max_total_mintable_by_wallet ? `, max ${s.max_total_mintable_by_wallet}/wallet` : ""}` };
-        } catch (e: any) { access = { ...access, detail: `${access.detail ?? ""}; wallet login failed: ${String(e.message).slice(0, 100)}` }; }
+        access = { status: "unknown", source: "OpenSea eligibility API", detail: "Wallet login for upcoming stages requires Privy personal_sign — enable in a future update; use the mint API once the stage is active." };
       }
     } else if (d.suggestedQty > 0 || strategy === "seadrop_public") {
       try {
-        const tx = await buildMintTx(t, { chain: chain.key, contract: t.contract, strategy, slug: t.slug, wallets: [], generic: opts.generic }, w.address, qty, os);
+        const tx = await buildMintTx(t, { chain: chain.key, contract: t.contract, strategy, slug: t.slug, wallets: [], generic: opts.generic }, w.address, qty, os, userId);
         simulation = await simulateIgnoringBalance(pool, { from: w.address, to: tx.to, data: tx.data, value: tx.value });
       } catch (e: any) { simulation = { ok: null, reason: String(e.message).slice(0, 160), source: "build" }; }
     }

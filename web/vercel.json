@@ -1,0 +1,5 @@
+{
+  "framework": "nextjs",
+  "buildCommand": "cd .. && npm ci --workspace=@nft-mint-bot/web --include-workspace-root && npm run build --workspace=@nft-mint-bot/web",
+  "installCommand": "cd .. && npm ci --workspace=@nft-mint-bot/web --include-workspace-root"
+}

@@ -1,93 +1,88 @@
-import { randomUUID } from "node:crypto";
-import { getStore, JobRecord } from "../core/store.js";
-import { session } from "../core/keystore/session.js";
+import { insertJob, getJob, listActiveJobs, patchJob, type JobRecord } from "../core/jobs/repo.js";
 import { MintRequest } from "../core/mint/types.js";
 import { broadcastAndTrack, prepareAll } from "../core/mint/executor.js";
+import { privyServerSigningReady } from "../auth/privy.js";
 import { log } from "../util/log.js";
 
-/**
- * In-process job worker. Runs in the API process because signing needs the unlocked KEK,
- * which lives only in that process' memory (never on disk, never sent to another process).
- *
- * Timeline for a scheduled job (runAt = stage start):
- *   runAt - PRESIGN_LEAD_MS : build + sign (seadrop_public / generic)
- *   runAt + offsetMs        : broadcast to all RPCs
- * opensea_api jobs build at runAt (the official API returns 409 until the stage is live) and retry for 30s.
- */
 const PRESIGN_LEAD_MS = 3000;
-const TICK_MS = 200;
-const UNLOCK_GRACE_MS = 5 * 60_000;
+const TICK_MS = 250;
 const running = new Set<string>();
 let timer: NodeJS.Timeout | null = null;
 const listeners = new Set<(j: JobRecord) => void>();
 export const onJobUpdate = (fn: (j: JobRecord) => void) => { listeners.add(fn); return () => listeners.delete(fn); };
 
-function patch(id: string, p: Partial<JobRecord>) {
-  const j = getStore().update((d) => { const j = d.jobs.find((x) => x.id === id); if (j) Object.assign(j, p); return j; });
+async function notify(id: string) {
+  const j = await getJob(null, id);
   if (j) listeners.forEach((fn) => fn(j));
 }
 
-export function enqueueMint(req: MintRequest, gasHints: Record<string, string>): JobRecord {
-  const job: JobRecord = {
-    id: randomUUID(), createdAt: new Date().toISOString(), status: "scheduled", runAt: req.runAt ?? null,
-    chain: req.chain, target: req.contract, strategy: req.strategy, request: { ...req, gasHints }, results: [], log: [],
-  };
-  getStore().update((d) => { d.jobs.unshift(job); if (d.jobs.length > 500) d.jobs.length = 500; });
+export async function enqueueMint(userId: string, req: MintRequest, gasHints: Record<string, string>): Promise<JobRecord> {
+  if (!privyServerSigningReady()) {
+    // Still enqueue — worker will mark waiting_unlock / fail with a clear message if signing isn't ready at run time.
+  }
+  const job = await insertJob(userId, req, gasHints);
+  listeners.forEach((fn) => fn(job));
   return job;
 }
 
-export function cancelJob(id: string) {
-  const j = getStore().db.jobs.find((x) => x.id === id);
+export async function cancelJob(userId: string, id: string) {
+  const j = await getJob(userId, id);
   if (!j) throw Object.assign(new Error("job not found"), { statusCode: 404 });
   if (running.has(id)) throw Object.assign(new Error("job is already running"), { statusCode: 409 });
   if (j.status !== "scheduled" && j.status !== "waiting_unlock") throw Object.assign(new Error(`cannot cancel a ${j.status} job`), { statusCode: 409 });
-  patch(id, { status: "cancelled" });
+  await patchJob(id, { status: "cancelled" });
+  await notify(id);
 }
 
 async function run(job: JobRecord) {
   running.add(job.id);
   const req = job.request as MintRequest & { gasHints: Record<string, string> };
   const runAt = job.runAt ? new Date(job.runAt).getTime() : Date.now();
-  const offset = Math.max(-5000, Math.min(60_000, req.offsetMs ?? 0));
+  const offset = req.offsetMs ?? 0;
   try {
-    patch(job.id, { status: "running" });
-    if (req.strategy === "opensea_api" && Date.now() < runAt) await new Promise((r) => setTimeout(r, runAt - Date.now()));
-    const buildDeadline = Math.max(Date.now(), runAt) + 30_000;
+    if (!privyServerSigningReady()) {
+      await patchJob(job.id, { status: "failed", error: "Server signing not configured (PRIVY_AUTH_PRIVATE_KEY + key quorum as session signer on wallets). See README." });
+      await notify(job.id); return;
+    }
+    await patchJob(job.id, { status: "running" }); await notify(job.id);
+    const buildDeadline = Math.max(runAt + offset + 30_000, Date.now() + 30_000);
+    // Pre-sign ~3s before broadcast for on-chain strategies; OpenSea API builds at/after runAt.
+    const presignAt = req.strategy === "opensea_api" ? runAt + offset : runAt + offset - PRESIGN_LEAD_MS;
+    while (Date.now() < Math.min(presignAt, runAt + offset)) await new Promise((r) => setTimeout(r, 50));
     const { prepared, results } = await prepareAll(job, req, req.gasHints ?? {}, buildDeadline);
-    patch(job.id, { results });
-    const fireAt = runAt + offset;
-    if (Date.now() < fireAt) await new Promise((r) => setTimeout(r, fireAt - Date.now()));
+    while (Date.now() < runAt + offset) await new Promise((r) => setTimeout(r, 20));
     await broadcastAndTrack(job, req, prepared, results);
-    const ok = results.some((r) => r.status === "confirmed");
-    patch(job.id, { status: ok ? "done" : "failed", results, error: ok ? undefined : "no wallet minted successfully" });
+    const failed = results.every((r) => r.status === "failed" || r.status === "reverted" || r.status === "timeout");
+    await patchJob(job.id, { status: failed ? "failed" : "done", results });
   } catch (e: any) {
+    await patchJob(job.id, { status: "failed", error: String(e?.message ?? e).slice(0, 400) });
     log.error(`job ${job.id} failed`, e);
-    patch(job.id, { status: "failed", error: String(e.message).slice(0, 400) });
-  } finally { running.delete(job.id); }
+  } finally {
+    running.delete(job.id);
+    await notify(job.id);
+  }
 }
 
-export function tick(now = Date.now()) {
-  for (const j of getStore().db.jobs) {
-    if (running.has(j.id)) continue;
-    if (j.status !== "scheduled" && j.status !== "waiting_unlock") continue;
-    const runAt = j.runAt ? new Date(j.runAt).getTime() : now;
-    const startAt = j.strategy === "opensea_api" ? runAt - 1000 : runAt - PRESIGN_LEAD_MS;
-    if (now < startAt) continue;
-    if (!session.unlocked) {
-      if (now > runAt + UNLOCK_GRACE_MS) patch(j.id, { status: "failed", error: "keystore was locked at run time" });
-      else if (j.status !== "waiting_unlock") patch(j.id, { status: "waiting_unlock" });
+async function tick() {
+  const active = await listActiveJobs();
+  for (const j of active) {
+    if (running.has(j.id) || j.status === "running") continue;
+    if (j.status === "waiting_unlock") {
+      if (privyServerSigningReady()) { await patchJob(j.id, { status: "scheduled" }); await notify(j.id); }
       continue;
     }
-    void run(j);
+    if (!privyServerSigningReady()) {
+      await patchJob(j.id, { status: "waiting_unlock" }); await notify(j.id); continue;
+    }
+    const runAt = j.runAt ? new Date(j.runAt).getTime() : Date.now();
+    const lead = (j.request as any)?.strategy === "opensea_api" ? 0 : PRESIGN_LEAD_MS;
+    if (Date.now() + lead + 500 >= runAt) void run(j);
   }
 }
 
 export function startWorker() {
   if (timer) return;
-  // Jobs that were mid-flight when the process died are marked failed (tx state must be checked manually).
-  getStore().update((d) => d.jobs.forEach((j) => { if (j.status === "running") { j.status = "failed"; j.error = "process restarted during execution — check explorer"; } }));
-  timer = setInterval(() => { try { tick(); } catch (e) { log.error("worker tick", e); } }, TICK_MS);
-  timer.unref?.();
+  timer = setInterval(() => { void tick().catch((e) => log.error("worker tick", e)); }, TICK_MS);
   log.info("Worker started");
 }
-export function stopWorker() { if (timer) clearInterval(timer); timer = null; }
+export function stopWorker() { if (timer) { clearInterval(timer); timer = null; } }

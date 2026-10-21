@@ -1,4 +1,13 @@
-# NFT Mint Bot
+# SkyBOT Mint
+
+Multi-user NFT mint desk (web + Telegram Mini App). **Start here:** [DEPLOY.md](DEPLOY.md) (Vercel + Railway/Render + Neon, in Indonesian) and [SECURITY.md](SECURITY.md) (custody + threat model).
+
+- Auth: Privy (email/Google; Telegram in the Mini App). Wallets: Privy embedded/server wallets. SkyBOT never stores or accepts raw private keys.
+- Telegram ↔ dashboard linking: Settings → deep link `https://t.me/MyTradeSkyBOT?start=link_<code>`, or `/link` in the bot and paste the code. `/unlink` or the Settings button removes it.
+- DB: Postgres via `DATABASE_URL`, SQLite fallback locally. Telegram: webhook when `PUBLIC_API_URL` + `TELEGRAM_WEBHOOK_SECRET` are set, polling otherwise.
+
+> The sections below describe the mint engine (resolver, eligibility, chains). Notes about a master password or keystore are from the old single-user version and no longer apply.
+
 
 Self-hosted dashboard + API (+ optional Telegram bot) for minting NFTs from **OpenSea drops (SeaDrop)** and **any other mint contract**, by pasting an OpenSea link, a collection slug, or a contract address.
 
