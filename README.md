@@ -238,7 +238,7 @@ Contributions are welcome — open an [issue](https://github.com/skyzee2706/skyb
 
 ## License
 
-Copyright (C) 2026 SkyBOT Mint.
+Copyright (C) 2026 SkyBOT Mint. See [NOTICE](NOTICE).
 
 SkyBOT Mint is free software: you can redistribute it and/or modify it under the terms of the **GNU Affero General Public License, version 3 only** ([AGPL-3.0-only](LICENSE)).
 

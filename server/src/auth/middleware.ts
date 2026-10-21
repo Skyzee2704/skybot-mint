@@ -104,7 +104,10 @@ export async function requireAuth(req: FastifyRequest, reply: FastifyReply) {
   }
 
   if (!privyConfigured()) {
-    return reply.code(503).send({ error: "Privy is not configured. Set PRIVY_APP_ID and PRIVY_APP_SECRET.", code: "PRIVY_NOT_CONFIGURED" });
+    // No credentials at all → always 401 (never leak config state as a different status); hint for operators.
+    return reply
+      .code(401)
+      .send({ error: "Authentication required (Privy is not configured on this server).", code: "PRIVY_NOT_CONFIGURED" });
   }
   return reply.code(401).send({ error: "Missing Authorization: Bearer <privy-access-token> (or X-Telegram-Init-Data in Mini App)" });
 }
