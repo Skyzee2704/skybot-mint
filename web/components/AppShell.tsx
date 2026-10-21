@@ -1,4 +1,5 @@
 "use client";
+// SPDX-License-Identifier: AGPL-3.0-only
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { usePrivy } from "@privy-io/react-auth";
@@ -48,15 +49,23 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     };
     webApp.BackButton.show();
     webApp.BackButton.onClick(onBack);
-    return () => { webApp.BackButton.offClick(onBack); webApp.BackButton.hide(); };
+    return () => {
+      webApp.BackButton.offClick(onBack);
+      webApp.BackButton.hide();
+    };
   }, [webApp, isMiniApp, path, router]);
 
-  if (!ready) return <div className="hero"><p className="muted">Loading…</p></div>;
+  if (!ready)
+    return (
+      <div className="hero">
+        <p className="muted">Loading…</p>
+      </div>
+    );
   if (!authenticated && !tgOnly) {
     return (
       <div className="hero">
         <p className="muted">{err ?? (isMiniApp ? "Open Settings on the web to Connect Telegram, or sign in." : "Signing you in…")}</p>
-        <button onClick={login}>Sign in</button>
+        <button onClick={login}>Sign In</button>
       </div>
     );
   }
@@ -72,11 +81,23 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <>
       <nav className="shell-nav">
-        <Link href="/" className="brand"><img src="/logo.png" alt="" /> SkyBOT Mint</Link>
-        {nav.map((n) => <Link key={n.href} href={n.href} className={path.startsWith(n.href) ? "active" : ""}>{n.label}</Link>)}
+        <Link href="/" className="brand">
+          <img src="/logo.png" alt="" /> SkyBOT Mint
+        </Link>
+        {nav.map((n) => (
+          <Link key={n.href} href={n.href} className={path.startsWith(n.href) ? "active" : ""}>
+            {n.label}
+          </Link>
+        ))}
         <span className="spacer" />
-        <span className="muted" style={{ fontSize: 13 }}>{me?.user?.email ?? user?.email?.address ?? (tgOnly ? `@${me?.user?.telegramUsername ?? "tg"}` : "signed in")}</span>
-        {!tgOnly && !isMiniApp && <button className="ghost" onClick={() => logout().then(() => router.push("/"))}>Sign out</button>}
+        <span className="muted" style={{ fontSize: 13 }}>
+          {me?.user?.email ?? user?.email?.address ?? (tgOnly ? `@${me?.user?.telegramUsername ?? "tg"}` : "signed in")}
+        </span>
+        {!tgOnly && !isMiniApp && (
+          <button className="ghost" onClick={() => logout().then(() => router.push("/"))}>
+            Sign Out
+          </button>
+        )}
       </nav>
       <main className="app">{children}</main>
     </>

@@ -1,20 +1,24 @@
 {
-  "name": "nft-mint-bot",
+  "name": "skybot-mint",
   "private": true,
-  "version": "0.1.0",
+  "version": "1.0.0",
   "workspaces": [
     "server",
     "web"
   ],
   "scripts": {
-    "dev": "npm run dev --workspace server & npm run dev --workspace web",
-    "dev:server": "npm run dev --workspace server",
-    "dev:web": "npm run dev --workspace web",
-    "build": "npm run build --workspace server && npm run build --workspace web",
-    "start:server": "npm run start --workspace server",
+    "dev": "npm run dev --workspace web",
+    "build": "npm run build --workspace web",
     "start:web": "npm run start --workspace web",
     "test": "npm test --workspace server",
-    "smoke": "npm run smoke --workspace server"
+    "smoke": "npm run smoke --workspace server",
+    "dev:worker": "npm run dev --workspace server",
+    "typecheck": "npm run typecheck --workspace server && npm run typecheck --workspace web",
+    "lint": "eslint .",
+    "format": "prettier --write \"**/*.{ts,tsx,mjs,cjs,css,json,yml,yaml}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,mjs,cjs,css,json,yml,yaml}\"",
+    "migrate": "npm run migrate --workspace server",
+    "telegram:setup": "npm run telegram:setup --workspace server"
   },
   "allowScripts": {
     "esbuild@0.28.2": true,
@@ -23,5 +27,18 @@
   },
   "overrides": {
     "ws@^8": "^8.22.0"
+  },
+  "license": "AGPL-3.0-only",
+  "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "eslint": "^9.39.5",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "globals": "^17.13.0",
+    "prettier": "^3.9.10",
+    "typescript-eslint": "^8.72.0"
+  },
+  "engines": {
+    "node": ">=20.9"
   }
 }

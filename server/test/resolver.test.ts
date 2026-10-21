@@ -1,6 +1,13 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 import { describe, it, expect } from "vitest";
 import { findMintCandidates, findGetters, bytecodeHasSelector } from "../src/core/resolver/abiAnalysis.js";
-import { decodePublicDrop, pickFeeRecipient, encodeMintPublic, OPENSEA_FEE_RECIPIENT, SEADROP_ADDRESS } from "../src/core/resolver/seadrop.js";
+import {
+  decodePublicDrop,
+  pickFeeRecipient,
+  encodeMintPublic,
+  OPENSEA_FEE_RECIPIENT,
+  SEADROP_ADDRESS,
+} from "../src/core/resolver/seadrop.js";
 import { decide } from "../src/core/mint/eligibility.js";
 import { parseMintedTokenIds } from "../src/core/mint/receipts.js";
 import { id, zeroPadValue, toBeHex, parseEther } from "ethers";
@@ -33,7 +40,14 @@ describe("ABI analysis", () => {
     expect(mt.inputs.map((i) => i.role)).toEqual(["recipient", "quantity"]);
   });
   it("finds getters", () => {
-    expect(findGetters(ABI)).toMatchObject({ price: "cost()", maxSupply: "maxSupply()", totalSupply: "totalSupply()", maxPerWallet: "maxPerWallet()", mintedBy: "numberMinted(address)", paused: "paused()" });
+    expect(findGetters(ABI)).toMatchObject({
+      price: "cost()",
+      maxSupply: "maxSupply()",
+      totalSupply: "totalSupply()",
+      maxPerWallet: "maxPerWallet()",
+      mintedBy: "numberMinted(address)",
+      paused: "paused()",
+    });
   });
   it("bytecode selector scan", () => {
     expect(bytecodeHasSelector("0x6080...63a0712d68...", "0xa0712d68")).toBe(true);
@@ -44,7 +58,11 @@ describe("ABI analysis", () => {
 describe("SeaDrop helpers", () => {
   it("decodes public drop and treats zeros as unset", () => {
     expect(decodePublicDrop([0n, 0n, 0n, 0n, 0n, false])).toBeNull();
-    expect(decodePublicDrop([1000n, 10n, 20n, 5n, 1000n, true])).toMatchObject({ mintPriceWei: "1000", maxPerWallet: 5, restrictFeeRecipients: true });
+    expect(decodePublicDrop([1000n, 10n, 20n, 5n, 1000n, true])).toMatchObject({
+      mintPriceWei: "1000",
+      maxPerWallet: 5,
+      restrictFeeRecipients: true,
+    });
   });
   it("fee recipient selection", () => {
     expect(pickFeeRecipient([], false)).toBe(OPENSEA_FEE_RECIPIENT);
@@ -60,7 +78,8 @@ describe("eligibility decide", () => {
   const base = { priceWei: parseEther("0.01"), gasCostWei: parseEther("0.001"), desiredQty: 3, supplyRemaining: 100n, stageEnded: false };
   it("caps qty by per-wallet remaining", () => {
     const d = decide({ ...base, balance: parseEther("1"), maxPerWallet: 5, minted: 4 });
-    expect(d.suggestedQty).toBe(1); expect(d.reasons).toEqual([]);
+    expect(d.suggestedQty).toBe(1);
+    expect(d.reasons).toEqual([]);
   });
   it("flags insufficient balance and limit reached", () => {
     expect(decide({ ...base, balance: 0n, maxPerWallet: 5, minted: 0 }).reasons[0]).toMatch(/insufficient/);
@@ -70,7 +89,8 @@ describe("eligibility decide", () => {
 
 describe("receipt parsing", () => {
   it("extracts ERC-721 mint token ids for the wallet only", () => {
-    const c = "0x06ea2bf75bedc071be4c20361656c665145b38d4"; const w = "0x" + "a".repeat(40);
+    const c = "0x06ea2bf75bedc071be4c20361656c665145b38d4";
+    const w = "0x" + "a".repeat(40);
     const T = id("Transfer(address,address,uint256)");
     const z = zeroPadValue("0x", 32);
     const logs = [

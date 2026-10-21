@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 import { getChain } from "../../config/chains.js";
 
 export interface ParsedInput {
@@ -31,16 +32,30 @@ export function parseInput(raw: string): ParsedInput {
   const looksUrl = /^https?:\/\//i.test(input) || /^[\w.-]+\.[a-z]{2,}\//i.test(input);
   if (looksUrl) {
     let url: URL;
-    try { url = new URL(/^https?:\/\//i.test(input) ? input : `https://${input}`); } catch { throw new Error(`Could not parse URL "${input}"`); }
+    try {
+      url = new URL(/^https?:\/\//i.test(input) ? input : `https://${input}`);
+    } catch {
+      throw new Error(`Could not parse URL "${input}"`);
+    }
     const host = url.hostname.replace(/^www\./, "").toLowerCase();
-    const segs = url.pathname.split("/").map((s) => decodeURIComponent(s).trim()).filter(Boolean);
+    const segs = url.pathname
+      .split("/")
+      .map((s) => decodeURIComponent(s).trim())
+      .filter(Boolean);
 
     if (host.endsWith("opensea.io")) {
       const i = segs.findIndex((s) => s === "assets" || s === "item");
       if (i >= 0) {
         const rest = segs.slice(i + 1);
         const a = rest.findIndex((s) => ADDR.test(s));
-        if (a >= 0) return { kind: "address", value: rest[a], chainHint: a > 0 ? chainKey(rest[a - 1]) : undefined, tokenId: rest[a + 1], source: "opensea" };
+        if (a >= 0)
+          return {
+            kind: "address",
+            value: rest[a],
+            chainHint: a > 0 ? chainKey(rest[a - 1]) : undefined,
+            tokenId: rest[a + 1],
+            source: "opensea",
+          };
       }
       const c = segs.indexOf("collection");
       if (c >= 0 && segs[c + 1]) {

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 /**
  * Chain registry. Adding a chain = adding one entry here.
  *
@@ -27,59 +28,134 @@ export interface ChainConfig {
 
 export const CHAINS: ChainConfig[] = [
   {
-    key: "ethereum", chainId: 1, name: "Ethereum", nativeSymbol: "ETH", explorer: "https://etherscan.io", openseaChain: "ethereum",
-    publicRpcs: ["https://ethereum-rpc.publicnode.com", "https://eth.drpc.org", "https://1rpc.io/eth", "https://cloudflare-eth.com", "https://eth.merkle.io"],
-    etherscanV2: true, blockscoutApi: "https://eth.blockscout.com/api", seadrop: true,
+    key: "ethereum",
+    chainId: 1,
+    name: "Ethereum",
+    nativeSymbol: "ETH",
+    explorer: "https://etherscan.io",
+    openseaChain: "ethereum",
+    publicRpcs: [
+      "https://ethereum-rpc.publicnode.com",
+      "https://eth.drpc.org",
+      "https://1rpc.io/eth",
+      "https://cloudflare-eth.com",
+      "https://eth.merkle.io",
+    ],
+    etherscanV2: true,
+    blockscoutApi: "https://eth.blockscout.com/api",
+    seadrop: true,
   },
   {
-    key: "base", chainId: 8453, name: "Base", nativeSymbol: "ETH", explorer: "https://basescan.org", openseaChain: "base",
+    key: "base",
+    chainId: 8453,
+    name: "Base",
+    nativeSymbol: "ETH",
+    explorer: "https://basescan.org",
+    openseaChain: "base",
     publicRpcs: ["https://mainnet.base.org", "https://base-rpc.publicnode.com", "https://base.drpc.org", "https://1rpc.io/base"],
     sendOnlyRpcs: ["https://mainnet-sequencer.base.org"],
-    etherscanV2: true, blockscoutApi: "https://base.blockscout.com/api", seadrop: true,
+    etherscanV2: true,
+    blockscoutApi: "https://base.blockscout.com/api",
+    seadrop: true,
   },
   {
-    key: "polygon", chainId: 137, name: "Polygon", nativeSymbol: "POL", explorer: "https://polygonscan.com", openseaChain: "polygon",
+    key: "polygon",
+    chainId: 137,
+    name: "Polygon",
+    nativeSymbol: "POL",
+    explorer: "https://polygonscan.com",
+    openseaChain: "polygon",
     publicRpcs: ["https://polygon-bor-rpc.publicnode.com", "https://polygon.drpc.org", "https://1rpc.io/matic"],
-    etherscanV2: true, blockscoutApi: "https://polygon.blockscout.com/api", seadrop: true,
+    etherscanV2: true,
+    blockscoutApi: "https://polygon.blockscout.com/api",
+    seadrop: true,
     safety: { maxPricePerNft: "200", maxDailySpend: "1000" }, // POL-denominated defaults
   },
   {
-    key: "arbitrum", chainId: 42161, name: "Arbitrum One", nativeSymbol: "ETH", explorer: "https://arbiscan.io", openseaChain: "arbitrum",
+    key: "arbitrum",
+    chainId: 42161,
+    name: "Arbitrum One",
+    nativeSymbol: "ETH",
+    explorer: "https://arbiscan.io",
+    openseaChain: "arbitrum",
     publicRpcs: ["https://arb1.arbitrum.io/rpc", "https://arbitrum-one-rpc.publicnode.com", "https://arbitrum.drpc.org"],
-    etherscanV2: true, blockscoutApi: "https://arbitrum.blockscout.com/api", seadrop: true,
+    etherscanV2: true,
+    blockscoutApi: "https://arbitrum.blockscout.com/api",
+    seadrop: true,
   },
   {
-    key: "bnb", chainId: 56, name: "BNB Smart Chain", nativeSymbol: "BNB", explorer: "https://bscscan.com", openseaChain: "bsc",
+    key: "bnb",
+    chainId: 56,
+    name: "BNB Smart Chain",
+    nativeSymbol: "BNB",
+    explorer: "https://bscscan.com",
+    openseaChain: "bsc",
     publicRpcs: ["https://bsc-dataseed.bnbchain.org", "https://bsc-rpc.publicnode.com", "https://bsc.drpc.org"],
-    etherscanV2: true, seadrop: true,
+    etherscanV2: true,
+    seadrop: true,
     safety: { maxPricePerNft: "0.1", maxDailySpend: "0.5" },
   },
   {
-    key: "unichain", chainId: 130, name: "Unichain", nativeSymbol: "ETH", explorer: "https://uniscan.xyz", openseaChain: "unichain",
+    key: "unichain",
+    chainId: 130,
+    name: "Unichain",
+    nativeSymbol: "ETH",
+    explorer: "https://uniscan.xyz",
+    openseaChain: "unichain",
     publicRpcs: ["https://mainnet.unichain.org", "https://unichain-rpc.publicnode.com", "https://unichain.drpc.org"],
-    etherscanV2: true, blockscoutApi: "https://unichain.blockscout.com/api", seadrop: true,
+    etherscanV2: true,
+    blockscoutApi: "https://unichain.blockscout.com/api",
+    seadrop: true,
   },
   {
-    key: "ink", chainId: 57073, name: "Ink", nativeSymbol: "ETH", explorer: "https://explorer.inkonchain.com", openseaChain: "ink",
+    key: "ink",
+    chainId: 57073,
+    name: "Ink",
+    nativeSymbol: "ETH",
+    explorer: "https://explorer.inkonchain.com",
+    openseaChain: "ink",
     publicRpcs: ["https://rpc-gel.inkonchain.com", "https://rpc-qnd.inkonchain.com", "https://ink.drpc.org"],
-    blockscoutApi: "https://explorer.inkonchain.com/api", seadrop: true, // not in Etherscan v2 chainlist (verified 2026-10)
+    blockscoutApi: "https://explorer.inkonchain.com/api",
+    seadrop: true, // not in Etherscan v2 chainlist (verified 2026-10)
   },
   {
-    key: "robinhood", chainId: 4663, name: "Robinhood Chain", nativeSymbol: "ETH", explorer: "https://robinhoodchain.blockscout.com", openseaChain: "robinhood",
+    key: "robinhood",
+    chainId: 4663,
+    name: "Robinhood Chain",
+    nativeSymbol: "ETH",
+    explorer: "https://robinhoodchain.blockscout.com",
+    openseaChain: "robinhood",
     publicRpcs: ["https://rpc.mainnet.chain.robinhood.com"],
     sendOnlyRpcs: ["https://sequencer.mainnet.chain.robinhood.com"],
-    etherscanV2: true, blockscoutApi: "https://robinhoodchain.blockscout.com/api", seadrop: true,
+    etherscanV2: true,
+    blockscoutApi: "https://robinhoodchain.blockscout.com/api",
+    seadrop: true,
   },
   {
-    key: "arc", chainId: 5042, name: "Arc", nativeSymbol: "USDC", explorer: "https://explorer.arc.io", openseaChain: "arc",
+    key: "arc",
+    chainId: 5042,
+    name: "Arc",
+    nativeSymbol: "USDC",
+    explorer: "https://explorer.arc.io",
+    openseaChain: "arc",
     publicRpcs: ["https://rpc.mainnet.arc.io", "https://rpc.drpc.mainnet.arc.io"],
-    etherscanV2: true, blockscoutApi: "https://explorer.arc.io/api", seadrop: true,
+    etherscanV2: true,
+    blockscoutApi: "https://explorer.arc.io/api",
+    seadrop: true,
     safety: { maxPricePerNft: "100", maxDailySpend: "500" }, // USDC-denominated defaults (native gas token is USDC)
   },
   // Add a chain: copy an entry, set chainId/explorer/publicRpcs, then set RPC_<KEY> in env.
 ];
 
-const ALIASES: Record<string, string> = { eth: "ethereum", mainnet: "ethereum", matic: "polygon", bsc: "bnb", binance: "bnb", arb: "arbitrum", arbitrum_one: "arbitrum" };
+const ALIASES: Record<string, string> = {
+  eth: "ethereum",
+  mainnet: "ethereum",
+  matic: "polygon",
+  bsc: "bnb",
+  binance: "bnb",
+  arb: "arbitrum",
+  arbitrum_one: "arbitrum",
+};
 
 export function getChain(keyOrId: string | number | bigint | undefined | null): ChainConfig | undefined {
   if (keyOrId === undefined || keyOrId === null) return undefined;
@@ -99,7 +175,10 @@ export function requireChain(keyOrId: string | number | bigint): ChainConfig {
 }
 
 function splitList(v: string | undefined): string[] {
-  return (v ?? "").split(/[,\s]+/).map((s) => s.trim()).filter((s) => /^https?:\/\//i.test(s));
+  return (v ?? "")
+    .split(/[,\s]+/)
+    .map((s) => s.trim())
+    .filter((s) => /^https?:\/\//i.test(s));
 }
 
 export interface ResolvedRpcs {

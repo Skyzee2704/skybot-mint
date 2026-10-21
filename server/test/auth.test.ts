@@ -1,5 +1,5 @@
-import { describe, expect, it, beforeEach } from "vitest";
-import os from "node:os"; import path from "node:path"; import fs from "node:fs";
+// SPDX-License-Identifier: AGPL-3.0-only
+import { describe, expect, it } from "vitest";
 import { createPlan, consumePlan } from "../src/core/plans.js";
 
 describe("per-user plans", () => {
@@ -14,7 +14,8 @@ describe("per-user plans", () => {
 
 describe("telegram link code format", () => {
   it("deep link uses link_ prefix", () => {
-    const bot = "MyTradeSkyBOT"; const code = "abc123";
+    const bot = "MyTradeSkyBOT";
+    const code = "abc123";
     const deep = `https://t.me/${bot}?start=link_${code}`;
     expect(deep).toMatch(/start=link_/);
     const payload = deep.split("start=")[1];

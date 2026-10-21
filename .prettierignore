@@ -1,0 +1,9 @@
+node_modules
+dist
+.next
+.vercel
+data
+coverage
+package-lock.json
+LICENSE
+server/src/_legacy

@@ -1,20 +1,47 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
 import { AbiCoder, keccak256 } from "ethers";
-import { SEADROP_ERRORS, classifyRevert, decodeRevert, merkleAccess, merkleRoot, parseAllowList, seadropLeaf } from "../src/core/mint/access.js";
+import {
+  SEADROP_ERRORS,
+  classifyRevert,
+  decodeRevert,
+  merkleAccess,
+  merkleRoot,
+  parseAllowList,
+  seadropLeaf,
+} from "../src/core/mint/access.js";
 import { buildSiweMessage, sessionCookies, SIWE_STATEMENT } from "../src/core/resolver/openseaAuth.js";
 import { esc } from "../src/bot/telegram.js";
 import { redactString } from "../src/util/log.js";
 
-const A = "0x4B92b75EFB0F5eBA9AB819C8775d56fbDc89ECcA", B = "0x5D1f449A593DB76f9ce007A311d62830CAE7Bd1b", C = "0x000000000000000000000000000000000000dEaD";
-const mp = { mintPrice: "1000", maxTotalMintableByWallet: 2, startTime: 1, endTime: 2, dropStageIndex: 1, maxTokenSupplyForStage: 100, feeBps: 1000, restrictFeeRecipients: true };
+const A = "0x4B92b75EFB0F5eBA9AB819C8775d56fbDc89ECcA",
+  B = "0x5D1f449A593DB76f9ce007A311d62830CAE7Bd1b",
+  C = "0x000000000000000000000000000000000000dEaD";
+const mp = {
+  mintPrice: "1000",
+  maxTotalMintableByWallet: 2,
+  startTime: 1,
+  endTime: 2,
+  dropStageIndex: 1,
+  maxTokenSupplyForStage: 100,
+  feeBps: 1000,
+  restrictFeeRecipients: true,
+};
 
 describe("revert decoding", () => {
   it("decodes SeaDrop custom errors", () => {
     expect(decodeRevert(SEADROP_ERRORS.encodeErrorResult("InvalidProof", []))).toBe("InvalidProof()");
-    expect(decodeRevert(SEADROP_ERRORS.encodeErrorResult("NotActive", [10, 1792000000, 1793000000]))).toMatch(/^NotActive \(stage starts 2026/);
-    expect(decodeRevert(SEADROP_ERRORS.encodeErrorResult("MintQuantityExceedsMaxMintedPerWallet", [3, 2]))).toBe("MintQuantityExceedsMaxMintedPerWallet(3, 2)");
+    expect(decodeRevert(SEADROP_ERRORS.encodeErrorResult("NotActive", [10, 1792000000, 1793000000]))).toMatch(
+      /^NotActive \(stage starts 2026/,
+    );
+    expect(decodeRevert(SEADROP_ERRORS.encodeErrorResult("MintQuantityExceedsMaxMintedPerWallet", [3, 2]))).toBe(
+      "MintQuantityExceedsMaxMintedPerWallet(3, 2)",
+    );
   });
-  it("decodes Error(string)", () => expect(decodeRevert("0x08c379a0" + AbiCoder.defaultAbiCoder().encode(["string"], ["Sale not active"]).slice(2))).toBe("Sale not active"));
+  it("decodes Error(string)", () =>
+    expect(decodeRevert("0x08c379a0" + AbiCoder.defaultAbiCoder().encode(["string"], ["Sale not active"]).slice(2))).toBe(
+      "Sale not active",
+    ));
   it("classifies access-denied reverts", () => {
     expect(classifyRevert("InvalidProof()")).toBe("no");
     expect(classifyRevert("InvalidSignature(0x00)")).toBe("no");
@@ -48,11 +75,15 @@ describe("merkle allowlist", () => {
 describe("OpenSea SIWE helpers", () => {
   it("builds the exact message layout OpenSea rebuilds server-side", () => {
     const m = buildSiweMessage(A.toLowerCase(), "abcdef123456", new Date("2026-10-21T10:00:00.000Z"));
-    expect(m.text).toBe(`opensea.io wants you to sign in with your Ethereum account:\n${A}\n\n${SIWE_STATEMENT}\n\nURI: https://opensea.io\nVersion: 1\nChain ID: 1\nNonce: abcdef123456\nIssued At: 2026-10-21T10:00:00.000Z`);
+    expect(m.text).toBe(
+      `opensea.io wants you to sign in with your Ethereum account:\n${A}\n\n${SIWE_STATEMENT}\n\nURI: https://opensea.io\nVersion: 1\nChain ID: 1\nNonce: abcdef123456\nIssued At: 2026-10-21T10:00:00.000Z`,
+    );
     expect(m.fields).toMatchObject({ domain: "opensea.io", address: A, chainId: "1", accountType: "Ethereum" });
   });
   it("extracts session cookies", () => {
-    const h = new Headers(); h.append("set-cookie", "access_token=aaa; Path=/; HttpOnly"); h.append("set-cookie", "refresh_token=bbb; Path=/");
+    const h = new Headers();
+    h.append("set-cookie", "access_token=aaa; Path=/; HttpOnly");
+    h.append("set-cookie", "refresh_token=bbb; Path=/");
     expect(sessionCookies(h)).toBe("access_token=aaa; refresh_token=bbb");
     expect(() => sessionCookies(new Headers())).toThrow(/cookie/);
   });
@@ -60,5 +91,6 @@ describe("OpenSea SIWE helpers", () => {
 
 describe("telegram + redaction", () => {
   it("escapes HTML", () => expect(esc("<b>A&B</b>")).toBe("&lt;b&gt;A&amp;B&lt;/b&gt;"));
-  it("redacts bot tokens", () => expect(redactString("err 1234567890:AAAbbbCCCdddEEEfffGGGhhhIIIjjjKKKlll x")).toBe("err [REDACTED_BOT_TOKEN] x"));
+  it("redacts bot tokens", () =>
+    expect(redactString("err 1234567890:AAAbbbCCCdddEEEfffGGGhhhIIIjjjKKKlll x")).toBe("err [REDACTED_BOT_TOKEN] x"));
 });

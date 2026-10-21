@@ -1,117 +1,163 @@
-# Deploy SkyBOT Mint (Vercel + Railway/Render + Neon)
+# Deploying SkyBOT Mint
 
-Gue nulis ini biar lo bisa push ke GitHub, web di Vercel, API di Railway/Render, DB di Neon.
+SkyBOT Mint runs as a **single Vercel project**. The Next.js app serves both the UI and the API. Supporting services:
 
-## Arsitektur
+| Service | Purpose | Plan |
+|---|---|---|
+| [Vercel](https://vercel.com) | Hosting (Next.js, Node.js functions) | Hobby or Pro |
+| [Neon](https://neon.tech) | Postgres database | Free tier is fine |
+| [Upstash QStash](https://upstash.com/docs/qstash) | Scheduled mints and the housekeeping cron | Free tier is fine |
+| [Upstash Redis](https://upstash.com/docs/redis) | Shared rate limits (optional, recommended) | Free tier is fine |
+| [Privy](https://dashboard.privy.io) | Authentication and wallet custody | — |
+| Telegram [@BotFather](https://t.me/BotFather) | Bot and Mini App | — |
 
-- **web/** → Vercel (Next.js). Root Directory di Vercel = `web`.
-- **server/** (API + worker + Telegram) → Railway atau Render via `Dockerfile` di root.
-- **DB** → Neon Postgres (`DATABASE_URL`). Lokal tetap bisa SQLite (kosongin `DATABASE_URL`).
-- **Mini App** butuh `PUBLIC_URL=https://…` (domain Vercel lo).
+Plan for about 30 minutes for the first deployment.
 
-## 1. Push ke GitHub
+---
+
+## 1. Push to GitHub
 
 ```bash
-cd /workspace/nft-mint-bot
-git add -A
-git status   # pastikan .env / secrets/ / *.db gak ke-track
-git commit -m "SkyBOT Mint multi-user + deploy"
-# buat repo di GitHub, terus:
-git remote add origin git@github.com:USER/skybot-mint.git
+git remote add origin git@github.com:<you>/skybot-mint.git
 git push -u origin main
 ```
 
-## 2. Neon (Postgres)
+`.gitignore` already excludes `.env*` (except `.env.example`), `data/`, databases, keys, and build output. Never commit real secrets.
 
-1. https://neon.tech → New project
-2. Copy connection string (`postgresql://…?sslmode=require`)
-3. Nanti tempel ke Railway/Render sebagai `DATABASE_URL`
+## 2. Create the Database (Neon)
 
-## 3. Railway (API) — rekomendasi
+1. Create a Neon project and a database, for example `skybot`.
+2. Copy the **pooled** connection string (`postgresql://…-pooler…/skybot?sslmode=require`). This is your `DATABASE_URL`.
+3. Migrations run automatically on the first request. To run them ahead of time:
+   ```bash
+   DATABASE_URL="postgresql://…" npm run migrate
+   ```
 
-1. New Project → Deploy from GitHub → pilih repo
-2. Builder: Dockerfile (ada `railway.json`)
-3. Variables (wajib):
+## 3. Create Upstash QStash (and Redis)
 
-| Key | Contoh |
+1. In the Upstash console, go to **QStash** and copy `QSTASH_TOKEN`, `QSTASH_CURRENT_SIGNING_KEY`, and `QSTASH_NEXT_SIGNING_KEY`. If your QStash region shows a different endpoint, also set `QSTASH_URL`.
+2. Optional but recommended: create a **Redis** database and copy `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`. Without Redis, rate limits are per function instance only.
+
+## 4. Import into Vercel
+
+1. **Add New → Project**, then import the GitHub repository.
+2. **Root Directory: `web`**. Leave "Include files outside the root directory" enabled, which is the default. The app depends on the `server/` workspace package.
+3. Framework preset: **Next.js**. Install and build commands come from `web/vercel.json` (`cd .. && npm ci`, then `npm run build`).
+4. Keep **Fluid compute** enabled (the default).
+5. Add the environment variables from step 5, then click **Deploy**.
+6. After the first deploy, note your production URL, for example `https://skybot-mint.vercel.app`. Set `PUBLIC_URL` to it and **redeploy**.
+
+### Function durations
+
+| Route | `maxDuration` | Why |
+|---|---|---|
+| `/api/jobs/run` | 300 s | Pre-signs, waits until stage start, broadcasts, and tracks receipts |
+| `/api/cron/housekeeping` | 60 s | Finishes receipts, expires stuck or missed jobs, purges link codes |
+| `/api/*` | 60 s | Regular API |
+
+With Fluid compute, both **Hobby and Pro allow up to 300 s**, and Pro can go up to 800 s. Keep `JOB_MAX_DURATION_SEC` equal to the `/api/jobs/run` value.
+
+## 5. Environment Variables
+
+Set these in **Vercel → Project → Settings → Environment Variables** for Production, and for Preview if you use it. See [`.env.example`](.env.example) for the full list.
+
+| Variable | Where to get it |
 |---|---|
-| `DATABASE_URL` | dari Neon |
-| `PRIVY_APP_ID` | `cmvhyys6g00ao0gl3sk2o75fy` |
-| `PRIVY_APP_SECRET` | dari Privy Dashboard |
-| `PUBLIC_URL` | `https://skybot.vercel.app` (isi setelah Vercel) |
-| `WEB_ORIGIN` | sama kayak `PUBLIC_URL` |
-| `PUBLIC_API_URL` | URL publik Railway (setelah deploy, update) |
-| `TELEGRAM_BOT_TOKEN` | dari BotFather |
-| `TELEGRAM_BOT_USERNAME` | `MyTradeSkyBOT` |
-| `TELEGRAM_WEBHOOK_SECRET` | string random panjang |
-| `OPENSEA_API_KEY` / `ETHERSCAN_API_KEY` | opsional tapi recommended |
-| `ADMIN_EMAILS` | email lo |
-| `PRIVY_AUTH_PRIVATE_KEY` + `PRIVY_AUTH_KEY_QUORUM_ID` | buat scheduled mint |
+| `NEXT_PUBLIC_PRIVY_APP_ID` | Privy Dashboard → App settings → App ID |
+| `PRIVY_APP_SECRET` | Privy Dashboard → App settings → App secret |
+| `PRIVY_AUTH_PRIVATE_KEY` | Privy Dashboard → Wallet infrastructure → Authorization keys → New key (shown once) |
+| `PRIVY_AUTH_KEY_QUORUM_ID` | Privy Dashboard → the key quorum containing that authorization key |
+| `PUBLIC_URL` | Your Vercel production URL (`https://…`, no trailing slash) |
+| `SESSION_SECRET` | `openssl rand -hex 32` |
+| `DATABASE_URL` | Neon pooled connection string |
+| `QSTASH_TOKEN`, `QSTASH_CURRENT_SIGNING_KEY`, `QSTASH_NEXT_SIGNING_KEY` | Upstash Console → QStash |
+| `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` | Upstash Console → Redis → REST API (optional) |
+| `TELEGRAM_BOT_TOKEN` | @BotFather → `/mybots` → API Token |
+| `TELEGRAM_BOT_USERNAME` | Your bot's username without `@`, for example `MyTradeSkyBOT` |
+| `TELEGRAM_WEBHOOK_SECRET` | `openssl rand -hex 24` (letters, digits, `_` and `-` only) |
+| `TELEGRAM_USER_ID`, `ADMIN_TELEGRAM_IDS` | Your numeric Telegram ID (for example from @userinfobot) |
+| `ADMIN_EMAILS` | Emails that receive the admin role |
+| `OPENSEA_API_KEY` | OpenSea developer portal |
+| `ETHERSCAN_API_KEY` | etherscan.io → API Keys (V2 works across chains) |
+| `RPC_ETHEREUM`, `RPC_BASE`, … | Your RPC provider (Alchemy, QuickNode, …). Public RPCs are used as fallbacks |
+| `NEXT_PUBLIC_SOURCE_URL` | Your public GitHub repository URL (AGPL "Source" link) |
+| `JOB_LEAD_MS` | Optional, default `20000` |
+| `MAX_PRICE_PER_NFT`, `MAX_DAILY_SPEND`, `MAX_GAS_PRICE_GWEI` | Optional global safety limits |
 
-4. Health check: `/api/health`
-5. Setelah dapat domain Railway, set `PUBLIC_API_URL=https://xxx.up.railway.app` → redeploy (bot pindah ke webhook).
+> `NEXT_PUBLIC_*` values are inlined into the browser bundle when you build, so redeploy after you change them. Every other value stays on the server.
 
-**Render:** sama, pakai `render.yaml` atau Docker + health `/api/health`.
+## 6. Post-Deploy Setup (Telegram Webhook and QStash Cron)
 
-## 4. Vercel (Web)
+Run this once per production URL. It sets the Telegram webhook (with `secret_token`), commands, description, and the **Open Dashboard** menu button (Mini App), and it creates the QStash housekeeping schedule (every 2 minutes).
 
-1. Import repo → **Root Directory = `web`**
-2. Framework: Next.js
-3. Env:
+**Option A: admin API.** Sign in to the dashboard with an admin account, then call `POST /api/admin/telegram/setup`. It requires an admin session.
 
-| Key | Value |
-|---|---|
-| `NEXT_PUBLIC_PRIVY_APP_ID` | `cmvhyys6g00ao0gl3sk2o75fy` |
-| `NEXT_PUBLIC_API_URL` | `https://xxx.up.railway.app` (tanpa slash akhir) |
-
-4. Deploy → catat URL (`https://….vercel.app`)
-5. Update di Railway: `PUBLIC_URL` + `WEB_ORIGIN` = URL Vercel → redeploy API
-
-## 5. Privy Dashboard
-
-https://dashboard.privy.io → app **SkyBOT Mint**
-
-1. **Login methods:** Email ON; Google ON (skarang masih OFF di API — nyalain); Telegram ON buat Mini App
-2. **Telegram:** tempel bot token + handle `@MyTradeSkyBOT`; enable **seamless auth**
-3. **Allowed origins / domains:**
-   - `https://your-app.vercel.app`
-   - `http://localhost:3000` (dev)
-   - `https://web.telegram.org` + `http://web.telegram.org`
-4. **Embedded wallets:** create on login = users without wallets (atau all users)
-5. **Session signer:** authorization key + key quorum → set `PRIVY_AUTH_*` di API; policy: allow SeaDrop `0x00005EA0…`, max value, chain IDs; deny approve/transfer
-
-## 6. BotFather (Telegram)
-
-1. `/setdomain` → bot → host Vercel **tanpa** `https://` (mis. `skybot.vercel.app`)
-2. Menu button: API set otomatis kalau `PUBLIC_URL` https publik; atau `/setmenubutton` → URL = `https://skybot.vercel.app`
-3. `/setuserpic` → upload `assets/logo-512.png`
-4. Di chat bot: /start → tombol **Buka Dashboard** buka Mini App
-
-## 7. Link akun (tanpa domain publik juga jalan)
-
-**Web → Telegram:** Settings → Generate deep link → buka `https://t.me/MyTradeSkyBOT?start=link_<code>`
-
-**Telegram → Web:** di bot ketik `/link` → tempel kode di Settings
-
-Unlink: Settings atau `/unlink`
-
-## 8. Lokal (pm2) — testing gue
+**Option B: script, from your machine:**
 
 ```bash
-cd /workspace/nft-mint-bot
-npm run build
-bash -lc 'pm2 restart ecosystem.config.cjs --update-env'
-# atau first start:
-# bash -lc 'pm2 start ecosystem.config.cjs && pm2 save'
+PUBLIC_URL=https://skybot-mint.vercel.app \
+TELEGRAM_BOT_TOKEN=… TELEGRAM_WEBHOOK_SECRET=… \
+QSTASH_TOKEN=… \
+npm run telegram:setup
 ```
 
-Lokal: SQLite di `DATA_DIR`, Telegram **polling** (jangan set `PUBLIC_API_URL`).
+To verify, open `https://api.telegram.org/bot<TOKEN>/getWebhookInfo`. The URL should be `…/api/telegram/webhook` with no `last_error_message`. In the Upstash console, the schedule `skybot-housekeeping` should be listed.
 
-## Checklist cepat
+## 7. Configure Privy
 
-- [ ] `.env` gak ke-push
-- [ ] Vercel `NEXT_PUBLIC_*` doang di client
-- [ ] Railway punya secret lengkap
-- [ ] CORS / Privy origins = Vercel URL
-- [ ] BotFather domain = Vercel host
-- [ ] `/api/health` hijau
+In the [Privy Dashboard](https://dashboard.privy.io), for your app:
+
+1. **Login methods**
+   - Enable **Email** and **Google**.
+   - Enable **Telegram**: enter the **bot token** and **bot handle** (`@MyTradeSkyBOT`). This enables Telegram login and **seamless login inside the Telegram Mini App**.
+2. **Domains / Allowed origins**
+   - `https://<your-app>.vercel.app` (and your custom domain, if any)
+   - `https://web.telegram.org` (Telegram Web clients)
+   - `http://localhost:3000` (local development; remove it in production if you prefer)
+3. **Embedded wallets**: set **Create on login** to *Users without wallets* (EVM).
+4. **Authorization keys**: create an authorization key and a **key quorum**. Put the private key in `PRIVY_AUTH_PRIVATE_KEY` and the quorum ID in `PRIVY_AUTH_KEY_QUORUM_ID`. SkyBOT adds this quorum as a signer so scheduled mints can be signed server-side.
+5. **Policies (strongly recommended)**: attach a policy to the signer that allowlists contract targets (SeaDrop and the mint contracts you use), limits `value` per transaction, restricts chain IDs, and denies `approve`, `setApprovalForAll`, and `transfer`. See [SECURITY.md](SECURITY.md).
+
+## 8. Configure BotFather
+
+In [@BotFather](https://t.me/BotFather):
+
+1. `/setdomain`: select your bot and enter your Vercel host, for example `skybot-mint.vercel.app`. Telegram Login requires this.
+2. `/setuserpic`: upload `assets/logo-512.png`.
+3. Optional: `/setmenubutton` sets the menu button manually to `PUBLIC_URL` with the text **Open Dashboard**. Step 6 already does this through the API.
+4. Optional: `/newapp` registers a named Mini App (t.me/<bot>/<app>) that points to `PUBLIC_URL`.
+
+## 9. Smoke Test
+
+1. Open `https://<your-app>/api/health`. It should report `"db":"postgres"`, `"scheduler":"qstash"`, `"webhook":true`, and `"miniApp":true`.
+2. Sign in on the web with email or Google. Wallets are created on first login.
+3. In Telegram, send `/start` to the bot and tap **Open Dashboard**. You should be logged in automatically.
+4. Link accounts if you signed up on both. See "Account Linking" below.
+5. Schedule a small test mint a few minutes ahead and watch **Jobs**.
+
+## Account Linking (Telegram ↔ Web)
+
+- **Web → Telegram:** go to **Settings → Connect Telegram → Generate Deep Link** and open the link. The bot confirms, and the web page updates automatically.
+- **Telegram → Web:** send `/link` to the bot, then paste the code into **Settings → Connect Telegram**.
+- **Telegram-first accounts:** opening the Mini App without a linked account creates a SkyBOT account automatically. You can attach email or Google later in **Settings → Link Email / Google**.
+- **Unlink:** use `/unlink` in Telegram or **Settings → Unlink**.
+
+Link codes are single-use and expire after 15 minutes.
+
+## Timing Expectations
+
+QStash delivers the message about `JOB_LEAD_MS` (default 20 s) before the stage starts. The function then pre-signs the transactions, waits in-process until the exact start time, and broadcasts to every RPC in parallel. Expect broadcasts within roughly **50–300 ms of stage start**, depending on the region and RPC latency. Deploy your Vercel functions in a region close to your RPC providers (Project → Settings → Functions → Region). If QStash delivers late, the job still fires as soon as it arrives. Jobs that miss their window are marked as missed by housekeeping.
+
+## Local Development
+
+See [README → Quick Start](README.md#quick-start-local-development). Locally, the bot uses **long polling** and the scheduler runs in-process. Do not set `TELEGRAM_WEBHOOK_SECRET` locally if the production webhook is active for the same bot, because Telegram delivers updates either by webhook or by polling, never both.
+
+## Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| `401 invalid signature` on `/api/jobs/run` | `PUBLIC_URL` must exactly match the deployed URL, and the signing keys must match QStash |
+| Mini App opens but asks to sign in | Enable Telegram login in Privy, run BotFather `/setdomain`, and check `PUBLIC_URL` |
+| Webhook `last_error_message: 401` | `TELEGRAM_WEBHOOK_SECRET` changed. Rerun step 6 |
+| "Scheduler unavailable" when scheduling | Check `QSTASH_TOKEN` (and `QSTASH_URL` for your region) |
+| Function timeout on scheduled mints | Reduce `JOB_LEAD_MS` or raise `maxDuration` (Pro) |

@@ -1,11 +1,31 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 /**
  * Tiny logger with secret redaction. Never log keys/passwords/tokens.
  */
 const SECRET_FIELDS = new Set([
-  "password", "privateKey", "privateKeys", "private_key", "key", "keys", "masterPassword",
-  "mnemonic", "seed", "token", "accessToken", "access_token", "idToken", "refreshToken",
-  "apiKey", "api_key", "authorization", "authorization_private_keys", "secret", "appSecret",
-  "privyAppSecret", "webhookSecret", "initData",
+  "password",
+  "privateKey",
+  "privateKeys",
+  "private_key",
+  "key",
+  "keys",
+  "masterPassword",
+  "mnemonic",
+  "seed",
+  "token",
+  "accessToken",
+  "access_token",
+  "idToken",
+  "refreshToken",
+  "apiKey",
+  "api_key",
+  "authorization",
+  "authorization_private_keys",
+  "secret",
+  "appSecret",
+  "privyAppSecret",
+  "webhookSecret",
+  "initData",
 ]);
 const HEX64 = /\b(0x)?[0-9a-fA-F]{64}\b/g;
 const JWT = /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g;
@@ -29,9 +49,10 @@ export function redact(v: unknown, depth = 0): unknown {
     const out: Record<string, unknown> = {};
     for (const [k, val] of Object.entries(v)) {
       const lk = k.toLowerCase();
-      out[k] = SECRET_FIELDS.has(k) || SECRET_FIELDS.has(lk) || /secret|password|private|mnemonic|token|authorization/i.test(k)
-        ? "[REDACTED]"
-        : redact(val, depth + 1);
+      out[k] =
+        SECRET_FIELDS.has(k) || SECRET_FIELDS.has(lk) || /secret|password|private|mnemonic|token|authorization/i.test(k)
+          ? "[REDACTED]"
+          : redact(val, depth + 1);
     }
     return out;
   }

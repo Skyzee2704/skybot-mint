@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 import { formatEther, parseEther } from "ethers";
 import { ChainConfig } from "../../config/chains.js";
 import { env } from "../../config/env.js";
@@ -20,12 +21,22 @@ export const DANGEROUS_SELECTORS: Record<string, string> = {
   "0xf2fde38b": "transferOwnership(address)",
   "0x3ccfd60b": "withdraw()",
 };
-const DANGEROUS_NAMES = /^(approve|setApprovalForAll|transfer|transferFrom|safeTransferFrom|safeBatchTransferFrom|increaseAllowance|permit|transferOwnership|withdraw|renounceOwnership)$/i;
+const DANGEROUS_NAMES =
+  /^(approve|setApprovalForAll|transfer|transferFrom|safeTransferFrom|safeBatchTransferFrom|increaseAllowance|permit|transferOwnership|withdraw|renounceOwnership)$/i;
 
-export class SafetyError extends Error { statusCode = 422; constructor(m: string) { super(m); this.name = "SafetyError"; } }
+export class SafetyError extends Error {
+  statusCode = 422;
+  constructor(m: string) {
+    super(m);
+    this.name = "SafetyError";
+  }
+}
 
 export function defaultCapValues(chain: ChainConfig) {
-  return { maxPricePerNft: chain.safety?.maxPricePerNft ?? env.maxPricePerNft, maxDailySpend: chain.safety?.maxDailySpend ?? env.maxDailySpend };
+  return {
+    maxPricePerNft: chain.safety?.maxPricePerNft ?? env.maxPricePerNft,
+    maxDailySpend: chain.safety?.maxDailySpend ?? env.maxDailySpend,
+  };
 }
 
 export async function capsFor(userId: string, chain: ChainConfig) {
@@ -39,22 +50,38 @@ export async function capsFor(userId: string, chain: ChainConfig) {
   };
 }
 export const fmtCap = (w: bigint | null) => (w === null ? "unlimited" : formatEther(w));
-export function isDangerousFunctionName(name: string) { return DANGEROUS_NAMES.test(name); }
+export function isDangerousFunctionName(name: string) {
+  return DANGEROUS_NAMES.test(name);
+}
 
-export interface TxCheck { to: string; data: string; value: bigint; chainId: number }
+export interface TxCheck {
+  to: string;
+  data: string;
+  value: bigint;
+  chainId: number;
+}
 
-export async function assertSafeMintTx(tx: TxCheck, ctx: { userId: string; chain: ChainConfig; allowedTargets: string[]; quantity: number; expectedMaxValueWei?: bigint | null }) {
+export async function assertSafeMintTx(
+  tx: TxCheck,
+  ctx: { userId: string; chain: ChainConfig; allowedTargets: string[]; quantity: number; expectedMaxValueWei?: bigint | null },
+) {
   if (tx.chainId !== ctx.chain.chainId) throw new SafetyError(`Chain ID mismatch: tx ${tx.chainId} vs selected ${ctx.chain.chainId}`);
   const to = tx.to.toLowerCase();
-  if (!ctx.allowedTargets.map((a) => a.toLowerCase()).includes(to)) throw new SafetyError(`Blocked: tx target ${tx.to} is not the expected mint contract`);
+  if (!ctx.allowedTargets.map((a) => a.toLowerCase()).includes(to))
+    throw new SafetyError(`Blocked: tx target ${tx.to} is not the expected mint contract`);
   const sel = (tx.data || "0x").slice(0, 10).toLowerCase();
   if (DANGEROUS_SELECTORS[sel]) throw new SafetyError(`Blocked: ${DANGEROUS_SELECTORS[sel]} is never part of a mint`);
   if (!Number.isInteger(ctx.quantity) || ctx.quantity < 1) throw new SafetyError("Quantity must be >= 1");
   if (ctx.expectedMaxValueWei !== undefined && ctx.expectedMaxValueWei !== null && tx.value > ctx.expectedMaxValueWei)
-    throw new SafetyError(`Blocked: tx value ${formatEther(tx.value)} is above the stage price x quantity (${formatEther(ctx.expectedMaxValueWei)} ${ctx.chain.nativeSymbol})`);
+    throw new SafetyError(
+      `Blocked: tx value ${formatEther(tx.value)} is above the stage price x quantity (${formatEther(ctx.expectedMaxValueWei)} ${ctx.chain.nativeSymbol})`,
+    );
   const { maxPricePerNftWei } = await capsFor(ctx.userId, ctx.chain);
   const perNft = tx.value / BigInt(ctx.quantity);
-  if (maxPricePerNftWei !== null && perNft > maxPricePerNftWei) throw new SafetyError(`Blocked: price ${formatEther(perNft)} ${ctx.chain.nativeSymbol}/NFT exceeds cap ${formatEther(maxPricePerNftWei)}`);
+  if (maxPricePerNftWei !== null && perNft > maxPricePerNftWei)
+    throw new SafetyError(
+      `Blocked: price ${formatEther(perNft)} ${ctx.chain.nativeSymbol}/NFT exceeds cap ${formatEther(maxPricePerNftWei)}`,
+    );
 }
 
 export async function dailySpent(userId: string, chain: ChainConfig): Promise<bigint> {
@@ -66,7 +93,9 @@ export async function assertDailyBudget(userId: string, chain: ChainConfig, addi
   if (maxDailySpendWei === null) return;
   const spent = await dailySpent(userId, chain);
   if (spent + additionalWei > maxDailySpendWei) {
-    throw new SafetyError(`Blocked: daily spend cap on ${chain.name} would be exceeded (spent ${formatEther(spent)} + this ${formatEther(additionalWei)} > cap ${formatEther(maxDailySpendWei)} ${chain.nativeSymbol})`);
+    throw new SafetyError(
+      `Blocked: daily spend cap on ${chain.name} would be exceeded (spent ${formatEther(spent)} + this ${formatEther(additionalWei)} > cap ${formatEther(maxDailySpendWei)} ${chain.nativeSymbol})`,
+    );
   }
 }
 

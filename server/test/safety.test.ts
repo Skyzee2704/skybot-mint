@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 import { describe, it, expect } from "vitest";
-import { parseEther, Interface } from "ethers";
+import { Interface } from "ethers";
 import { DANGEROUS_SELECTORS, isDangerousFunctionName } from "../src/core/safety/safety.js";
 import { computeFees } from "../src/core/mint/fees.js";
 import { redact, redactString } from "../src/util/log.js";
@@ -25,7 +26,9 @@ describe("fees", () => {
 
 describe("redaction", () => {
   it("masks alchemy paths and bot tokens", () => {
-    expect(redactString("fail https://eth-mainnet.g.alchemy.com/v2/SECRETKEY123 timeout")).toBe("fail https://eth-mainnet.g.alchemy.com/*** timeout");
+    expect(redactString("fail https://eth-mainnet.g.alchemy.com/v2/SECRETKEY123 timeout")).toBe(
+      "fail https://eth-mainnet.g.alchemy.com/*** timeout",
+    );
     expect(redactString("err 1234567890:AAAbbbCCCdddEEEfffGGGhhhIIIjjjKKKlll x")).toBe("err [REDACTED_BOT_TOKEN] x");
     expect(redact({ password: "x", ok: 1 })).toEqual({ password: "[REDACTED]", ok: 1 });
   });

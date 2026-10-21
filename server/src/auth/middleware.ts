@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { verifyPrivyAccessToken } from "./privy.js";
 import { privyConfigured } from "../config/env.js";
@@ -8,7 +9,11 @@ import { requireUser } from "../users/service.js";
 import { log, redactString } from "../util/log.js";
 
 declare module "fastify" {
-  interface FastifyRequest { user?: AppUser; privyAccessToken?: string; authVia?: "privy" | "telegram-session" | "telegram-init"; }
+  interface FastifyRequest {
+    user?: AppUser;
+    privyAccessToken?: string;
+    authVia?: "privy" | "telegram-session" | "telegram-init";
+  }
 }
 
 /** Extract Bearer token. Never log it. */
@@ -29,7 +34,8 @@ export async function requireAuth(req: FastifyRequest, reply: FastifyReply) {
     try {
       const claims = await verifyPrivyAccessToken(token);
       const idToken = (req.headers["privy-id-token"] as string | undefined) ?? undefined;
-      let email: string | null = null; let name: string | null = null;
+      let email: string | null = null;
+      let name: string | null = null;
       if (idToken) {
         try {
           const { getPrivy } = await import("./privy.js");
@@ -39,7 +45,9 @@ export async function requireAuth(req: FastifyRequest, reply: FastifyReply) {
           const tg = (u.linked_accounts as any[])?.find((a) => a.type === "telegram");
           email = emailAcc?.address ?? google?.email ?? null;
           name = google?.name ?? tg?.username ?? null;
-        } catch { /* identity token optional */ }
+        } catch {
+          /* identity token optional */
+        }
       }
       const user = await upsertUserFromPrivy(claims.privyUserId, { email, name });
       if (user.disabled) return reply.code(403).send({ error: "Account disabled" });
@@ -62,12 +70,17 @@ export async function requireAuth(req: FastifyRequest, reply: FastifyReply) {
     try {
       const user = await requireUser(sid);
       await checkRateLimit(user.id, req.routeOptions.url ?? req.url.split("?")[0]);
-      req.user = user; req.authVia = "telegram-session"; return;
-    } catch (e: any) { return reply.code(e.statusCode ?? 401).send({ error: e.message }); }
+      req.user = user;
+      req.authVia = "telegram-session";
+      return;
+    } catch (e: any) {
+      return reply.code(e.statusCode ?? 401).send({ error: e.message });
+    }
   }
 
-  const initData = (req.headers["x-telegram-init-data"] as string | undefined)
-    ?? (typeof (req.body as any)?.initData === "string" ? (req.body as any).initData : undefined);
+  const initData =
+    (req.headers["x-telegram-init-data"] as string | undefined) ??
+    (typeof (req.body as any)?.initData === "string" ? (req.body as any).initData : undefined);
   if (initData) {
     try {
       const v = validateInitData(initData);

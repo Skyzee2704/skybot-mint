@@ -1,5 +1,11 @@
 {
+  "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "nextjs",
-  "buildCommand": "cd .. && npm ci --workspace=@nft-mint-bot/web --include-workspace-root && npm run build --workspace=@nft-mint-bot/web",
-  "installCommand": "cd .. && npm ci --workspace=@nft-mint-bot/web --include-workspace-root"
+  "installCommand": "cd .. && npm ci",
+  "buildCommand": "npm run build",
+  "functions": {
+    "app/api/jobs/run/route.ts": { "maxDuration": 300 },
+    "app/api/cron/housekeeping/route.ts": { "maxDuration": 60 },
+    "app/api/[...path]/route.ts": { "maxDuration": 60 }
+  }
 }

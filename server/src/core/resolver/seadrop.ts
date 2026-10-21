@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 import { Contract, Interface, ZeroAddress, ZeroHash, getAddress } from "ethers";
 import { isRetryable, type RpcPool } from "../rpc/pool.js";
 
@@ -24,7 +25,14 @@ export const SEADROP_TOKEN_ABI = [
 ];
 export const seadropIface = new Interface(SEADROP_ABI);
 
-export interface PublicDrop { mintPriceWei: string; startTime: number; endTime: number; maxPerWallet: number; feeBps: number; restrictFeeRecipients: boolean }
+export interface PublicDrop {
+  mintPriceWei: string;
+  startTime: number;
+  endTime: number;
+  maxPerWallet: number;
+  feeBps: number;
+  restrictFeeRecipients: boolean;
+}
 export interface SeaDropInfo {
   address: string;
   publicDrop: PublicDrop | null;
@@ -59,13 +67,22 @@ export function pickFeeRecipient(allowed: string[], restricted: boolean): string
 /** Detect a SeaDrop V1 token by asking SeaDrop for its config and the token for getMintStats. */
 export async function readSeaDrop(pool: RpcPool, nft: string): Promise<SeaDropInfo | null> {
   // Reverts/empty returns => null; transport errors rethrow so the pool rotates to another RPC.
-  const safe = <T>(p: Promise<T>) => p.catch((e) => { if (isRetryable(e)) throw e; return null; });
+  const safe = <T>(p: Promise<T>) =>
+    p.catch((e) => {
+      if (isRetryable(e)) throw e;
+      return null;
+    });
   return pool.read(async (p) => {
     const sd = new Contract(SEADROP_ADDRESS, SEADROP_ABI, p);
     const tok = new Contract(nft, SEADROP_TOKEN_ABI, p);
     const [pub, stats, fees, root, signers, payout, gated] = await Promise.all([
-      safe(sd.getPublicDrop(nft)), safe(tok.getMintStats(ZeroAddress)), safe(sd.getAllowedFeeRecipients(nft)),
-      safe(sd.getAllowListMerkleRoot(nft)), safe(sd.getSigners(nft)), safe(sd.getCreatorPayoutAddress(nft)), safe(sd.getTokenGatedAllowedTokens(nft)),
+      safe(sd.getPublicDrop(nft)),
+      safe(tok.getMintStats(ZeroAddress)),
+      safe(sd.getAllowedFeeRecipients(nft)),
+      safe(sd.getAllowListMerkleRoot(nft)),
+      safe(sd.getSigners(nft)),
+      safe(sd.getCreatorPayoutAddress(nft)),
+      safe(sd.getTokenGatedAllowedTokens(nft)),
     ]);
     const publicDrop = pub ? decodePublicDrop(pub) : null;
     const hasAllowList = Boolean(root && root !== ZeroHash);
@@ -73,13 +90,18 @@ export async function readSeaDrop(pool: RpcPool, nft: string): Promise<SeaDropIn
     const gatedList = (gated as string[] | null) ?? [];
     const payoutAddr = payout && payout !== ZeroAddress ? String(payout) : null;
     // A SeaDrop token implements getMintStats; and SeaDrop holds some config for it.
-    const isSeaDrop = stats !== null && (publicDrop !== null || hasAllowList || signerList.length > 0 || gatedList.length > 0 || payoutAddr !== null);
+    const isSeaDrop =
+      stats !== null && (publicDrop !== null || hasAllowList || signerList.length > 0 || gatedList.length > 0 || payoutAddr !== null);
     if (!isSeaDrop) return null;
     const allowed = ((fees as string[] | null) ?? []).map((a) => getAddress(a));
     return {
-      address: SEADROP_ADDRESS, publicDrop,
-      feeRecipient: publicDrop ? pickFeeRecipient(allowed, publicDrop.restrictFeeRecipients) : allowed[0] ?? null,
-      allowedFeeRecipients: allowed, hasAllowList, hasSignedMints: signerList.length > 0, hasTokenGated: gatedList.length > 0,
+      address: SEADROP_ADDRESS,
+      publicDrop,
+      feeRecipient: publicDrop ? pickFeeRecipient(allowed, publicDrop.restrictFeeRecipients) : (allowed[0] ?? null),
+      allowedFeeRecipients: allowed,
+      hasAllowList,
+      hasSignedMints: signerList.length > 0,
+      hasTokenGated: gatedList.length > 0,
       creatorPayout: payoutAddr,
       totalSupply: stats ? BigInt((stats as any)[1]).toString() : null,
       maxSupply: stats ? BigInt((stats as any)[2]).toString() : null,

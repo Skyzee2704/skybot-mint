@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it, beforeAll, afterAll } from "vitest";
 import { createHmac } from "node:crypto";
 import os from "node:os";
@@ -6,7 +7,9 @@ import fs from "node:fs";
 
 describe("telegram initData HMAC", () => {
   const token = "123456:ABC-DEF";
-  beforeAll(() => { process.env.TELEGRAM_BOT_TOKEN = token; });
+  beforeAll(() => {
+    process.env.TELEGRAM_BOT_TOKEN = token;
+  });
 
   function sign(fields: Record<string, string>) {
     const entries = Object.entries(fields).sort(([a], [b]) => a.localeCompare(b));
@@ -45,7 +48,13 @@ describe("link codes single-use + isolation", () => {
     process.env.TELEGRAM_BOT_USERNAME = "MyTradeSkyBOT";
     delete process.env.DATABASE_URL;
   });
-  afterAll(() => { try { fs.rmSync(dataDir, { recursive: true, force: true }); } catch { /* */ } });
+  afterAll(() => {
+    try {
+      fs.rmSync(dataDir, { recursive: true, force: true });
+    } catch {
+      /* */
+    }
+  });
 
   it("web→tg deep link uses link_ prefix and consume is single-use", async () => {
     const { ensureDb } = await import("../src/db/client.js");
@@ -55,8 +64,14 @@ describe("link codes single-use + isolation", () => {
     const db = getDb();
     const now = new Date().toISOString();
     await db.insert(users).values({
-      id: "u1", privyUserId: "did:privy:u1", email: "a@test.com", name: null,
-      role: "user", disabled: false, createdAt: now, lastSeenAt: now,
+      id: "u1",
+      privyUserId: "did:privy:u1",
+      email: "a@test.com",
+      name: null,
+      role: "user",
+      disabled: false,
+      createdAt: now,
+      lastSeenAt: now,
     });
     const { createTelegramLinkCode, consumeTelegramLink } = await import("../src/users/service.js");
     const { code, deepLink } = await createTelegramLinkCode("u1");
@@ -94,17 +109,22 @@ describe("log redaction", () => {
 
 describe("telegram webhook requires secret", () => {
   it("returns 404 when not in webhook mode / no secret", async () => {
-    delete process.env.PUBLIC_API_URL; delete process.env.TELEGRAM_WEBHOOK_SECRET;
+    delete process.env.TELEGRAM_WEBHOOK_SECRET;
     const { buildServer } = await import("../src/api/server.js");
     const app = await buildServer();
     const r = await app.inject({ method: "POST", url: "/api/telegram/webhook", payload: {} });
     expect(r.statusCode).toBe(404);
-    process.env.PUBLIC_API_URL = "https://api.example.com"; process.env.TELEGRAM_WEBHOOK_SECRET = "s3cret-value";
-    const r2 = await app.inject({ method: "POST", url: "/api/telegram/webhook", payload: {}, headers: { "x-telegram-bot-api-secret-token": "wrong" } });
+    process.env.TELEGRAM_WEBHOOK_SECRET = "s3cret-value";
+    const r2 = await app.inject({
+      method: "POST",
+      url: "/api/telegram/webhook",
+      payload: {},
+      headers: { "x-telegram-bot-api-secret-token": "wrong" },
+    });
     expect(r2.statusCode).toBe(401);
     const r3 = await app.inject({ method: "POST", url: "/api/wallets/import", payload: { key: "0x00" } });
     expect(r3.statusCode).toBe(401);
-    delete process.env.PUBLIC_API_URL; delete process.env.TELEGRAM_WEBHOOK_SECRET;
+    delete process.env.TELEGRAM_WEBHOOK_SECRET;
     await app.close();
   });
 });
@@ -128,7 +148,11 @@ describe("telegram-first session", () => {
     const cookie = `sb_session=${encodeURIComponent(signSession("u1").token)}`;
     const r = await app.inject({ method: "POST", url: "/api/telegram/unlink", headers: { cookie }, payload: {} });
     expect(r.statusCode).toBe(403);
-    const f = await app.inject({ method: "POST", url: "/api/telegram/session", payload: { initData: "user=%7B%22id%22%3A1%7D&auth_date=9999999999&hash=" + "0".repeat(64) } });
+    const f = await app.inject({
+      method: "POST",
+      url: "/api/telegram/session",
+      payload: { initData: "user=%7B%22id%22%3A1%7D&auth_date=9999999999&hash=" + "0".repeat(64) },
+    });
     expect(f.statusCode).toBe(401);
     await app.close();
   });

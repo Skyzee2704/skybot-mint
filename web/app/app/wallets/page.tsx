@@ -1,9 +1,9 @@
 "use client";
+// SPDX-License-Identifier: AGPL-3.0-only
 import { useCallback, useEffect, useState } from "react";
 import { useCreateWallet, useImportWallet, useWallets, usePrivy } from "@privy-io/react-auth";
 import { useApi } from "@/components/AppShell";
 import { ChainSelect } from "@/components/ChainSelect";
-import { short } from "@/lib/api";
 
 export default function WalletsPage() {
   const api = useApi();
@@ -12,91 +12,207 @@ export default function WalletsPage() {
   const { wallets: privyWallets } = useWallets();
   const { user } = usePrivy();
   const [data, setData] = useState<{ wallets: any[]; groups: any[] }>({ wallets: [], groups: [] });
-  const [err, setErr] = useState<string | null>(null); const [msg, setMsg] = useState<string | null>(null);
-  const [key, setKey] = useState(""); const [label, setLabel] = useState(""); const [group, setGroup] = useState("");
-  const [genN, setGenN] = useState(3); const [chain, setChain] = useState("base"); const [balances, setBalances] = useState<Record<string, string>>({});
+  const [err, setErr] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [key, setKey] = useState("");
+  const [label, setLabel] = useState("");
+  const [group, setGroup] = useState("");
+  const [genN, setGenN] = useState(3);
+  const [chain, setChain] = useState("base");
+  const [balances, setBalances] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
 
-  const load = useCallback(() => api("/api/wallets").then(setData).catch((e) => setErr(e.message)), [api]);
-  useEffect(() => { load(); }, [load]);
+  const load = useCallback(
+    () =>
+      api("/api/wallets")
+        .then(setData)
+        .catch((e) => setErr(e.message)),
+    [api],
+  );
+  useEffect(() => {
+    load();
+  }, [load]);
 
   // Keep server DB in sync with Privy-linked wallets
   useEffect(() => {
-    const list = (privyWallets ?? []).filter((w) => w.walletClientType === "privy").map((w) => ({
-      privyWalletId: (w as any).id ?? w.address, address: w.address, source: "privy",
-    }));
+    const list = (privyWallets ?? [])
+      .filter((w) => w.walletClientType === "privy")
+      .map((w) => ({
+        privyWalletId: (w as any).id ?? w.address,
+        address: w.address,
+        source: "privy",
+      }));
     if (!list.length) return;
-    api("/api/wallets/sync", { body: { wallets: list } }).then(load).catch(() => {});
+    api("/api/wallets/sync", { body: { wallets: list } })
+      .then(load)
+      .catch(() => {});
   }, [privyWallets]); // eslint-disable-line
 
-  const run = async (fn: () => Promise<any>, ok?: string) => { setErr(null); setMsg(null); setBusy(true); try { await fn(); if (ok) setMsg(ok); await load(); } catch (e: any) { setErr(e.message); } finally { setBusy(false); } };
+  const run = async (fn: () => Promise<any>, ok?: string) => {
+    setErr(null);
+    setMsg(null);
+    setBusy(true);
+    try {
+      await fn();
+      if (ok) setMsg(ok);
+      await load();
+    } catch (e: any) {
+      setErr(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return (
     <>
-      {err && <div className="err">{err}</div>}{msg && <div className="notice">{msg}</div>}
+      {err && <div className="err">{err}</div>}
+      {msg && <div className="notice">{msg}</div>}
       <div className="card">
         <h2>Wallets ({data.wallets.length})</h2>
-        <p className="muted">Wallets are created and held by Privy. SkyBOT never stores or accepts raw private keys. Import uses Privy in the browser; export only via Privy UI. Server signing for scheduled mints needs a session signer (Settings / DEPLOY.md).</p>
+        <p className="muted">
+          Wallets are created and held by Privy. SkyBOT never stores or accepts raw private keys. Import uses Privy in the browser; export
+          only via Privy UI. Server signing for scheduled mints needs a session signer (Settings / DEPLOY.md).
+        </p>
         <div className="row" style={{ marginBottom: 10 }}>
           <ChainSelect value={chain} onChange={setChain} />
-          <button className="ghost" onClick={() => run(async () => { const r = await api("/api/wallets/balances", { body: { chain } }); setBalances(Object.fromEntries(r.balances.map((b: any) => [b.walletId, b.balance ?? "err"]))); }, "Balances loaded")}>Load balances</button>
+          <button
+            className="ghost"
+            onClick={() =>
+              run(async () => {
+                const r = await api("/api/wallets/balances", { body: { chain } });
+                setBalances(Object.fromEntries(r.balances.map((b: any) => [b.walletId, b.balance ?? "err"])));
+              }, "Balances loaded")
+            }
+          >
+            Load Balances
+          </button>
         </div>
         <table>
-          <thead><tr><th>Label</th><th>Address</th><th>Group</th><th>Balance</th><th></th></tr></thead>
+          <thead>
+            <tr>
+              <th>Label</th>
+              <th>Address</th>
+              <th>Group</th>
+              <th>Balance</th>
+              <th></th>
+            </tr>
+          </thead>
           <tbody>
             {data.wallets.map((w) => (
               <tr key={w.id}>
-                <td>{w.label} {w.isMain && <span className="pill accent">main</span>} <span className="muted">{w.source}</span></td>
+                <td>
+                  {w.label} {w.isMain && <span className="pill accent">main</span>} <span className="muted">{w.source}</span>
+                </td>
                 <td className="mono">{w.address}</td>
                 <td>{w.group ?? "—"}</td>
                 <td className="mono">{balances[w.id] ?? ""}</td>
                 <td className="row">
-                  {!w.isMain && <button className="ghost" onClick={() => run(() => api(`/api/wallets/${w.id}/main`, { body: {} }), "Main set")}>Set main</button>}
-                  <button className="danger" onClick={() => { if (confirm(`Remove ${w.label}?`)) run(() => api(`/api/wallets/${w.id}`, { method: "DELETE", body: { confirm: "DELETE" } }), "Removed"); }}>Remove</button>
+                  {!w.isMain && (
+                    <button className="ghost" onClick={() => run(() => api(`/api/wallets/${w.id}/main`, { body: {} }), "Main set")}>
+                      Set Main
+                    </button>
+                  )}
+                  <button
+                    className="danger"
+                    onClick={() => {
+                      if (confirm(`Remove ${w.label}?`))
+                        run(() => api(`/api/wallets/${w.id}`, { method: "DELETE", body: { confirm: "DELETE" } }), "Removed");
+                    }}
+                  >
+                    Remove
+                  </button>
                 </td>
               </tr>
             ))}
-            {!data.wallets.length && <tr><td colSpan={5} className="muted">No wallets yet.</td></tr>}
+            {!data.wallets.length && (
+              <tr>
+                <td colSpan={5} className="muted">
+                  No wallets yet.
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
 
       <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(300px,1fr))" }}>
-        <div className="card"><h2>Create wallets</h2>
+        <div className="card">
+          <h2>Create Wallets</h2>
           <p className="muted">Creates Privy embedded wallets owned by you, then syncs them here.</p>
           <div className="row">
             <input type="number" min={1} max={50} value={genN} onChange={(e) => setGenN(Number(e.target.value))} style={{ width: 80 }} />
             <input placeholder="Group (optional)" value={group} onChange={(e) => setGroup(e.target.value)} />
-            <button disabled={busy} onClick={() => run(async () => {
-              // Prefer server-side generation (needs Privy app secret); fall back to client createWallet loop.
-              try { await api("/api/wallets/generate", { body: { count: genN, group: group || null } }); }
-              catch {
-                for (let i = 0; i < genN; i++) await createWallet({ createAdditional: true });
+            <button
+              disabled={busy}
+              onClick={() =>
+                run(async () => {
+                  // Prefer server-side generation (needs Privy app secret); fall back to client createWallet loop.
+                  try {
+                    await api("/api/wallets/generate", { body: { count: genN, group: group || null } });
+                  } catch {
+                    for (let i = 0; i < genN; i++) await createWallet({ createAdditional: true });
+                  }
+                }, `Created ${genN}`)
               }
-            }, `Created ${genN}`)}>Generate</button>
+            >
+              Generate
+            </button>
           </div>
         </div>
-        <div className="card"><h2>Import private key</h2>
+        <div className="card">
+          <h2>Import Private Key</h2>
           <p className="muted">Imported into Privy — SkyBOT only keeps the address + Privy wallet id.</p>
           <div style={{ display: "grid", gap: 8 }}>
             <input type="password" autoComplete="off" placeholder="0x… private key" value={key} onChange={(e) => setKey(e.target.value)} />
             <input placeholder="Label" value={label} onChange={(e) => setLabel(e.target.value)} />
-            <button disabled={!key || busy} onClick={() => run(async () => {
-              // Client-side only: Privy encrypts the key to Privy. Never POST raw keys to SkyBOT.
-              const w = await importWallet({ privateKey: key });
-              await api("/api/wallets/sync", { body: { wallets: [{ privyWalletId: (w as any).id ?? (w as any).walletId ?? "", address: (w as any).address ?? (w as any).walletClient?.account?.address, label, group: group || null, source: "imported" }] } });
-              setKey("");
-            }, "Imported via Privy")}>Import via Privy</button>
-            <p className="muted" style={{ fontSize: 12 }}>Export your own key only through Privy&apos;s wallet UI — SkyBOT has no export API.</p>
+            <button
+              disabled={!key || busy}
+              onClick={() =>
+                run(async () => {
+                  // Client-side only: Privy encrypts the key to Privy. Never POST raw keys to SkyBOT.
+                  const w = await importWallet({ privateKey: key });
+                  await api("/api/wallets/sync", {
+                    body: {
+                      wallets: [
+                        {
+                          privyWalletId: (w as any).id ?? (w as any).walletId ?? "",
+                          address: (w as any).address ?? (w as any).walletClient?.account?.address,
+                          label,
+                          group: group || null,
+                          source: "imported",
+                        },
+                      ],
+                    },
+                  });
+                  setKey("");
+                }, "Imported via Privy")
+              }
+            >
+              Import via Privy
+            </button>
+            <p className="muted" style={{ fontSize: 12 }}>
+              Export your own key only through Privy&apos;s wallet UI — SkyBOT has no export API.
+            </p>
           </div>
         </div>
-        <div className="card"><h2>Groups</h2>
+        <div className="card">
+          <h2>Groups</h2>
           <div className="row">
             <input placeholder="New group" value={group} onChange={(e) => setGroup(e.target.value)} />
-            <button className="ghost" onClick={() => run(() => api("/api/groups", { body: { name: group } }), "Group created")}>Create</button>
+            <button className="ghost" onClick={() => run(() => api("/api/groups", { body: { name: group } }), "Group created")}>
+              Create
+            </button>
           </div>
-          <div style={{ marginTop: 10 }}>{data.groups.map((g) => <span key={g.name} className="pill" style={{ marginRight: 6 }}>{g.name} ({g.count})</span>)}</div>
-          <p className="muted" style={{ marginTop: 12 }}>Signed in as {user?.email?.address ?? "—"} · {privyWallets?.length ?? 0} Privy wallet(s) connected</p>
+          <div style={{ marginTop: 10 }}>
+            {data.groups.map((g) => (
+              <span key={g.name} className="pill" style={{ marginRight: 6 }}>
+                {g.name} ({g.count})
+              </span>
+            ))}
+          </div>
+          <p className="muted" style={{ marginTop: 12 }}>
+            Signed in as {user?.email?.address ?? "—"} · {privyWallets?.length ?? 0} Privy wallet(s) connected
+          </p>
         </div>
       </div>
     </>

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 /**
  * Telegram Mini App helpers: initData HMAC validation + PUBLIC_URL gate.
  * Spec: https://core.telegram.org/bots/webapps#validating-data-received-via-the-mini-app

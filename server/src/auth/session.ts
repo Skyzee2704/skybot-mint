@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 /**
  * Short-lived SkyBOT session for Telegram-first logins (Mini App fallback when Privy Telegram login is off).
  * Token = v1.<userId>.<expSec>.<hmac-sha256>, delivered ONLY as an httpOnly; Secure; SameSite=None cookie.
@@ -17,7 +18,9 @@ function key(): Buffer {
   const fromEnv = process.env.SESSION_SECRET?.trim();
   if (fromEnv && fromEnv.length >= 32) return (secret = Buffer.from(fromEnv));
   const file = path.join(env.dataDir, "session.key");
-  try { secret = fs.readFileSync(file); } catch {
+  try {
+    secret = fs.readFileSync(file);
+  } catch {
     fs.mkdirSync(env.dataDir, { recursive: true, mode: 0o700 });
     secret = randomBytes(48);
     fs.writeFileSync(file, secret, { mode: 0o600 });
@@ -38,10 +41,15 @@ export function verifySession(token: string | undefined | null): string | null {
   const parts = token.split(".");
   if (parts.length !== 4 || parts[0] !== "v1") return null;
   const body = parts.slice(0, 3).join(".");
-  const a = Buffer.from(mac(body)); const b = Buffer.from(parts[3]);
+  const a = Buffer.from(mac(body));
+  const b = Buffer.from(parts[3]);
   if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
   if (Number(parts[2]) < Date.now() / 1000) return null;
-  try { return Buffer.from(parts[1], "base64url").toString(); } catch { return null; }
+  try {
+    return Buffer.from(parts[1], "base64url").toString();
+  } catch {
+    return null;
+  }
 }
 
 export function readCookie(header: string | undefined, name = SESSION_COOKIE): string | null {

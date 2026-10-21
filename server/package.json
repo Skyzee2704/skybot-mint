@@ -1,36 +1,51 @@
 {
   "name": "@nft-mint-bot/server",
   "private": true,
-  "version": "0.1.0",
+  "version": "1.0.0",
   "type": "module",
-  "main": "dist/index.js",
+  "main": "dist/vercel.js",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
+    "dev": "tsx watch src/local.ts",
     "build": "tsc -p tsconfig.json",
-    "start": "node dist/index.js",
+    "start": "node dist/local.js",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "smoke": "tsx scripts/smoke.ts",
-    "telegram:test": "tsx scripts/telegram-test.ts"
+    "telegram:test": "tsx scripts/telegram-test.ts",
+    "db:migrate": "tsx src/scripts/migrate.ts",
+    "telegram:setup": "tsx src/scripts/telegram-setup.ts",
+    "migrate": "tsx src/scripts/migrate.ts"
   },
   "dependencies": {
     "@fastify/cors": "^11.3.1",
     "@fastify/helmet": "^13.2.0",
     "@libsql/client": "^0.18.0",
+    "@neondatabase/serverless": "^1.2.0",
     "@privy-io/node": "^0.36.0",
+    "@upstash/qstash": "^2.12.1",
+    "@upstash/ratelimit": "^2.2.0",
+    "@upstash/redis": "^1.39.0",
     "dotenv": "^18.0.8",
     "drizzle-orm": "^0.45.4",
     "ethers": "^6.17.0",
     "fastify": "^5.12.7",
     "grammy": "^1.46.0",
-    "postgres": "^3.4.9",
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.10",
     "@types/node": "^20.19.43",
     "drizzle-kit": "^0.31.11",
     "tsx": "^4.23.15",
     "typescript": "^5.9.3",
     "vitest": "^4.1.12"
-  }
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/vercel.d.ts",
+      "default": "./dist/vercel.js"
+    }
+  },
+  "types": "dist/vercel.d.ts",
+  "license": "AGPL-3.0-only"
 }

@@ -1,7 +1,11 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 import type { GasMode } from "./fees.js";
 
 export type Strategy = "seadrop_public" | "opensea_api" | "generic";
-export interface WalletQty { walletId: string; quantity: number }
+export interface WalletQty {
+  walletId: string;
+  quantity: number;
+}
 export interface MintRequest {
   chain: string;
   contract: string;
@@ -15,4 +19,8 @@ export interface MintRequest {
   runAt?: string | null; // ISO; null/undefined = now
   offsetMs?: number; // broadcast offset relative to runAt (can be negative, >= -5000)
 }
-export interface BuiltTx { to: string; data: string; value: bigint }
+export interface BuiltTx {
+  to: string;
+  data: string;
+  value: bigint;
+}

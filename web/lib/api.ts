@@ -1,17 +1,24 @@
 "use client";
+// SPDX-License-Identifier: AGPL-3.0-only
 
-const API_BASE = (typeof process !== "undefined" && process.env.NEXT_PUBLIC_API_URL
-  ? process.env.NEXT_PUBLIC_API_URL.replace(/\/$/, "")
-  : "");
+const API_BASE =
+  typeof process !== "undefined" && process.env.NEXT_PUBLIC_API_URL ? process.env.NEXT_PUBLIC_API_URL.replace(/\/$/, "") : "";
 
 function url(path: string) {
   if (path.startsWith("http")) return path;
   return `${API_BASE}${path.startsWith("/") ? path : "/" + path}`;
 }
 
-export async function api<T = any>(path: string, opts: {
-  method?: string; body?: unknown; token?: string | null; idToken?: string | null; telegramInitData?: string | null;
-} = {}): Promise<T> {
+export async function api<T = any>(
+  path: string,
+  opts: {
+    method?: string;
+    body?: unknown;
+    token?: string | null;
+    idToken?: string | null;
+    telegramInitData?: string | null;
+  } = {},
+): Promise<T> {
   const headers: Record<string, string> = { "x-skybot-csrf": "1" };
   if (opts.token) headers.authorization = `Bearer ${opts.token}`;
   if (opts.idToken) headers["privy-id-token"] = opts.idToken;
@@ -30,8 +37,11 @@ export async function api<T = any>(path: string, opts: {
 
 export function fmtEth(wei: string | null | undefined, digits = 6) {
   if (wei === null || wei === undefined) return "?";
-  const n = BigInt(wei); const neg = n < 0n; const a = neg ? -n : n;
-  const whole = a / 10n ** 18n; const frac = (a % 10n ** 18n).toString().padStart(18, "0").slice(0, digits).replace(/0+$/, "");
+  const n = BigInt(wei);
+  const neg = n < 0n;
+  const a = neg ? -n : n;
+  const whole = a / 10n ** 18n;
+  const frac = (a % 10n ** 18n).toString().padStart(18, "0").slice(0, digits).replace(/0+$/, "");
   return `${neg ? "-" : ""}${whole}${frac ? "." + frac : ""}`;
 }
 export const short = (a?: string | null) => (a ? `${a.slice(0, 6)}…${a.slice(-4)}` : "");
