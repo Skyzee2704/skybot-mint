@@ -23,7 +23,7 @@ export default function Landing() {
           <br />
           <span>Miss less.</span>
         </h1>
-        <p className="tag">
+        <p className="lead">
           SkyBOT Mint resolves any OpenSea drop or contract from a link, checks every wallet for allowlist and balance, simulates gas, then
           mints across your fleet — on web or Telegram.
         </p>
@@ -62,7 +62,10 @@ export default function Landing() {
           </div>
           <div className="card">
             <h3>Telegram Twin</h3>
-            <p className="muted">Link once, then /mint a link from chat. Same account, same wallets, same jobs.</p>
+            <p className="muted">
+              Open SkyBOT inside Telegram with the same account. /check any drop for every wallet&apos;s eligibility and get notified when
+              mints land.
+            </p>
           </div>
         </div>
       </div>
