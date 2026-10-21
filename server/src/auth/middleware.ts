@@ -2,7 +2,17 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { verifyPrivyAccessToken } from "./privy.js";
 import { privyConfigured } from "../config/env.js";
-import { upsertUserFromPrivy, checkRateLimit, userByTelegram, type AppUser } from "../users/service.js";
+import {
+  resolvePrivyUser,
+  checkRateLimit,
+  userByTelegram,
+  profileFromPrivyUser,
+  type AppUser,
+  type PrivyProfile,
+} from "../users/service.js";
+import { getDb } from "../db/client.js";
+import { users } from "../db/schema.js";
+import { eq } from "drizzle-orm";
 import { validateInitData } from "../bot/telegramWebApp.js";
 import { readCookie, verifySession } from "./session.js";
 import { requireUser } from "../users/service.js";
@@ -23,6 +33,31 @@ export function bearer(req: FastifyRequest): string | null {
 }
 
 /**
+ * Linked accounts for a verified Privy user. Prefers the identity token (verified locally, no API call);
+ * otherwise fetches from the Privy API only the first time we see this Privy id, so a Telegram-linked
+ * Privy login can be matched to an existing Telegram-first SkyBOT account.
+ */
+async function privyProfileFor(privyUserId: string, idToken: string | undefined): Promise<PrivyProfile> {
+  const { getPrivy } = await import("./privy.js");
+  if (idToken) {
+    try {
+      const u = await getPrivy().utils().auth().verifyIdentityToken(idToken);
+      if ((u as any)?.id === privyUserId) return profileFromPrivyUser(u as any);
+    } catch {
+      /* identity token is optional */
+    }
+  }
+  const known = (await getDb().select({ id: users.id }).from(users).where(eq(users.privyUserId, privyUserId)).limit(1))[0];
+  if (known) return {};
+  try {
+    return profileFromPrivyUser((await getPrivy().users()._get(privyUserId)) as any);
+  } catch (e: any) {
+    log.warn("privy user lookup failed", redactString(String(e?.message ?? e)).slice(0, 160));
+    return {};
+  }
+}
+
+/**
  * Authenticate private routes:
  * 1) Privy access token (primary)
  * 2) SkyBOT session cookie (Telegram-first)
@@ -33,23 +68,8 @@ export async function requireAuth(req: FastifyRequest, reply: FastifyReply) {
   if (token && privyConfigured()) {
     try {
       const claims = await verifyPrivyAccessToken(token);
-      const idToken = (req.headers["privy-id-token"] as string | undefined) ?? undefined;
-      let email: string | null = null;
-      let name: string | null = null;
-      if (idToken) {
-        try {
-          const { getPrivy } = await import("./privy.js");
-          const u = await getPrivy().utils().auth().verifyIdentityToken(idToken);
-          const emailAcc = (u.linked_accounts as any[])?.find((a) => a.type === "email");
-          const google = (u.linked_accounts as any[])?.find((a) => a.type === "google_oauth");
-          const tg = (u.linked_accounts as any[])?.find((a) => a.type === "telegram");
-          email = emailAcc?.address ?? google?.email ?? null;
-          name = google?.name ?? tg?.username ?? null;
-        } catch {
-          /* identity token optional */
-        }
-      }
-      const user = await upsertUserFromPrivy(claims.privyUserId, { email, name });
+      const profile = await privyProfileFor(claims.privyUserId, req.headers["privy-id-token"] as string | undefined);
+      const user = await resolvePrivyUser(claims.privyUserId, profile);
       if (user.disabled) return reply.code(403).send({ error: "Account disabled" });
       await checkRateLimit(user.id, req.routeOptions.url ?? req.url.split("?")[0]);
       req.user = user;
@@ -57,8 +77,11 @@ export async function requireAuth(req: FastifyRequest, reply: FastifyReply) {
       req.authVia = "privy";
       return;
     } catch (e: any) {
+      // Account conflicts are a definitive answer, not an auth failure — surface them.
+      if (e?.code === "ACCOUNT_CONFLICT" || e?.statusCode === 403 || e?.statusCode === 429)
+        return reply.code(e.statusCode ?? 409).send({ error: e.message, code: e.code });
       log.warn("privy auth failed", redactString(String(e?.message ?? e)));
-      // fall through to telegram initData
+      // fall through to telegram session / initData
     }
   }
 
@@ -87,7 +110,7 @@ export async function requireAuth(req: FastifyRequest, reply: FastifyReply) {
       const user = await userByTelegram(String(v.user.id));
       if (!user) {
         return reply.code(401).send({
-          error: "Telegram account not linked to SkyBOT. Open Settings → Connect Telegram, or /link in the bot.",
+          error: "Telegram account not linked to SkyBOT yet. Open SkyBOT from the bot menu to sign in.",
           code: "TELEGRAM_NOT_LINKED",
           telegramUserId: String(v.user.id),
         });

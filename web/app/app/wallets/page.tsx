@@ -3,7 +3,7 @@
 import { short } from "@/lib/api";
 import { useCallback, useEffect, useState } from "react";
 import { useCreateWallet, useImportWallet, useWallets, usePrivy } from "@privy-io/react-auth";
-import { useApi } from "@/components/AppShell";
+import { useApi, useShell } from "@/components/AppShell";
 import { ChainSelect } from "@/components/ChainSelect";
 
 export default function WalletsPage() {
@@ -11,7 +11,8 @@ export default function WalletsPage() {
   const { createWallet } = useCreateWallet();
   const { importWallet } = useImportWallet();
   const { wallets: privyWallets } = useWallets();
-  const { user } = usePrivy();
+  const { user, authenticated } = usePrivy();
+  const { connectPrivy } = useShell();
   const [data, setData] = useState<{ wallets: any[]; groups: any[] }>({ wallets: [], groups: [] });
   const [err, setErr] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
@@ -167,38 +168,51 @@ export default function WalletsPage() {
         <div className="card">
           <h2>Import Private Key</h2>
           <p className="muted">Imported into Privy — SkyBOT only keeps the address + Privy wallet id.</p>
-          <div style={{ display: "grid", gap: 8 }}>
-            <input type="password" autoComplete="off" placeholder="0x… private key" value={key} onChange={(e) => setKey(e.target.value)} />
-            <input placeholder="Label" value={label} onChange={(e) => setLabel(e.target.value)} />
-            <button
-              disabled={!key || busy}
-              onClick={() =>
-                run(async () => {
-                  // Client-side only: Privy encrypts the key to Privy. Never POST raw keys to SkyBOT.
-                  const w = await importWallet({ privateKey: key });
-                  await api("/api/wallets/sync", {
-                    body: {
-                      wallets: [
-                        {
-                          privyWalletId: (w as any).id ?? (w as any).walletId ?? "",
-                          address: (w as any).address ?? (w as any).walletClient?.account?.address,
-                          label,
-                          group: group || null,
-                          source: "imported",
-                        },
-                      ],
-                    },
-                  });
-                  setKey("");
-                }, "Imported via Privy")
-              }
-            >
-              Import via Privy
-            </button>
-            <p className="muted" style={{ fontSize: 12 }}>
-              Export your own key only through Privy&apos;s wallet UI — SkyBOT has no export API.
-            </p>
-          </div>
+          {!authenticated ? (
+            <div style={{ display: "grid", gap: 8 }}>
+              <p className="muted">Wallet import runs inside Privy, so it needs a Privy session. Connect with Telegram to continue.</p>
+              <button onClick={connectPrivy}>Connect with Privy</button>
+            </div>
+          ) : (
+            <div style={{ display: "grid", gap: 8 }}>
+              <input
+                type="password"
+                autoComplete="off"
+                placeholder="0x… private key"
+                value={key}
+                onChange={(e) => setKey(e.target.value)}
+              />
+              <input placeholder="Label" value={label} onChange={(e) => setLabel(e.target.value)} />
+              <button
+                disabled={!key || busy}
+                onClick={() =>
+                  run(async () => {
+                    // Client-side only: Privy encrypts the key to Privy. Never POST raw keys to SkyBOT.
+                    const w = await importWallet({ privateKey: key });
+                    await api("/api/wallets/sync", {
+                      body: {
+                        wallets: [
+                          {
+                            privyWalletId: (w as any).id ?? (w as any).walletId ?? "",
+                            address: (w as any).address ?? (w as any).walletClient?.account?.address,
+                            label,
+                            group: group || null,
+                            source: "imported",
+                          },
+                        ],
+                      },
+                    });
+                    setKey("");
+                  }, "Imported via Privy")
+                }
+              >
+                Import via Privy
+              </button>
+              <p className="muted" style={{ fontSize: 12 }}>
+                Export your own key only through Privy&apos;s wallet UI — SkyBOT has no export API.
+              </p>
+            </div>
+          )}
         </div>
         <div className="card">
           <h2>Groups</h2>

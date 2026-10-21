@@ -59,7 +59,9 @@ export function SkyPrivyProvider({ children }: { children: React.ReactNode }) {
     );
   }
 
-  const loginMethods = isMiniApp ? (["telegram", "email", "google"] as const) : (["email", "google"] as const);
+  // One identity everywhere: Telegram, email and Google all resolve to the same Privy user (and SkyBOT account).
+  // Telegram first inside the Mini App. No wallet login.
+  const loginMethods = isMiniApp ? (["telegram", "email", "google"] as const) : (["email", "google", "telegram"] as const);
 
   return (
     <PrivyProvider

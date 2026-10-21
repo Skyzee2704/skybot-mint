@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /**
  * SkyBOT Mint Telegram bot — multi-user + Mini App.
- * Account linking (works without public domain):
- *   (a) Web → Telegram: Settings generates code + https://t.me/<bot>?start=link_<code>
- *   (b) Telegram → Web: /link gives a code to paste in Settings
+ * Accounts are unified through Privy: opening the Mini App signs the user in with Telegram (seamless
+ * Privy login, verified-initData session as fallback), and the same SkyBOT account is used on the web
+ * when they sign in with Telegram there or link email/Google in Privy. No manual link codes.
+ * Legacy `start=link_<code>` deep links are still honoured for backward compatibility.
  * Mini App (requires PUBLIC_URL=https://…):
  *   Menu button + /start "Open Dashboard" open the dashboard inside Telegram.
  */
@@ -11,7 +12,7 @@ import { Bot, InlineKeyboard } from "grammy";
 import { env } from "../config/env.js";
 import { resolveTarget } from "../core/resolver/resolver.js";
 import { remember } from "../core/resolver/cache.js";
-import { consumeTelegramLink, userByTelegram, createReverseTelegramCode, unlinkTelegram, type AppUser } from "../users/service.js";
+import { consumeTelegramLink, userByTelegram, unlinkTelegram, type AppUser } from "../users/service.js";
 import { publicHttpsReady } from "./telegramWebApp.js";
 import { log, redactString } from "../util/log.js";
 import { formatEther } from "ethers";
@@ -66,8 +67,6 @@ export async function configureBotProfile(bot: Bot) {
   await bot.api.setMyShortDescription("Mint NFTs with SkyBOT. Tap the menu button to open the dashboard.").catch(() => {});
   await bot.api.setMyCommands([
     { command: "start", description: "Welcome and open the dashboard" },
-    { command: "link", description: "Get a code to paste on the web" },
-    { command: "unlink", description: "Disconnect Telegram from SkyBOT" },
     { command: "mint", description: "Resolve a drop: /mint <link|address>" },
     { command: "wallets", description: "List your wallets" },
     { command: "jobs", description: "Recent mint jobs" },
@@ -143,9 +142,8 @@ export function createBot(token: string, opts: ConstructorParameters<typeof Bot>
   const HELP = [
     "<b>SkyBOT Mint</b> — mint OpenSea drops &amp; any NFT contract.",
     "",
-    "<b>Link your account</b> (required before minting):",
-    "1. Open the dashboard → Settings → <i>Connect Telegram</i>, tap the deep link, or",
-    "2. Send /link here and paste the code into Settings.",
+    "<b>Sign in</b>: tap <b>Open Dashboard</b> (or the menu button). Your SkyBOT account is created with Telegram automatically.",
+    "On the web, choose <i>Telegram</i> on the sign-in screen to use the same account. Email and Google can be linked in Settings.",
     "",
     mini
       ? "Tap <b>Open Dashboard</b> or the menu button to open SkyBOT inside Telegram."
@@ -155,7 +153,6 @@ export function createBot(token: string, opts: ConstructorParameters<typeof Bot>
     "/mint &lt;link|address&gt; — drop summary + open dashboard",
     "/wallets — your wallets",
     "/jobs — recent jobs",
-    "/unlink — disconnect Telegram",
     "",
     `Dashboard: ${esc(dashUrl("/"))}`,
   ].join("\n");
@@ -172,7 +169,10 @@ export function createBot(token: string, opts: ConstructorParameters<typeof Bot>
           reply_markup: openDashboardKeyboard(),
         });
       } catch (e: any) {
-        await ctx.reply(`Could not link: ${esc(e.message)}\nGenerate a new code in Settings.`, { parse_mode: "HTML" });
+        await ctx.reply(`Could not link: ${esc(e.message)}\nTap Open Dashboard to sign in with Telegram instead.`, {
+          parse_mode: "HTML",
+          reply_markup: openDashboardKeyboard(),
+        });
       }
       return;
     }
@@ -186,18 +186,14 @@ export function createBot(token: string, opts: ConstructorParameters<typeof Bot>
     else await ctx.reply(`Welcome to <b>SkyBOT Mint</b>.\n\n${HELP}`, { parse_mode: "HTML", reply_markup: kb });
   });
 
+  // Legacy command: link codes are replaced by Privy sign-in. Kept so old instructions get a helpful answer.
   bot.command("link", async (ctx) => {
     const existing = await linkedUser(ctx);
-    if (existing) {
-      await ctx.reply(`Already linked as ${esc(existing.email ?? existing.id.slice(0, 8))}. /unlink first to re-link.`, {
-        parse_mode: "HTML",
-      });
-      return;
-    }
-    const { code, expiresAt } = await createReverseTelegramCode(String(ctx.from!.id), ctx.from?.username ?? null);
     await ctx.reply(
-      `Paste this one-time code in the dashboard → <b>Settings → Connect Telegram</b>:\n\n<code>${code}</code>\n\nExpires ${esc(expiresAt)}.`,
-      { parse_mode: "HTML" },
+      existing
+        ? `Already connected as ${esc(existing.email ?? existing.name ?? existing.id.slice(0, 8))}. Nothing else to do.`
+        : "No codes needed anymore. Tap <b>Open Dashboard</b> to sign in with Telegram, or pick <i>Telegram</i> on the web sign-in screen.",
+      { parse_mode: "HTML", reply_markup: openDashboardKeyboard() },
     );
   });
 
@@ -208,12 +204,15 @@ export function createBot(token: string, opts: ConstructorParameters<typeof Bot>
       return;
     }
     await unlinkTelegram(u.id);
-    await ctx.reply("Unlinked. You can /link again anytime.");
+    await ctx.reply("Disconnected. Open the dashboard from this chat any time to connect again.");
   });
 
   bot.command("wallets", async (ctx) => {
     const u = await linkedUser(ctx);
-    if (!u) return ctx.reply("Link your account first: open Settings in the dashboard, or /link.");
+    if (!u)
+      return ctx.reply("Open SkyBOT first: tap Open Dashboard or the menu button to sign in with Telegram.", {
+        reply_markup: openDashboardKeyboard(),
+      });
     const { listWallets } = await import("../users/service.js");
     const ws = await listWallets(u.id);
     if (!ws.length) return ctx.reply("No wallets yet. Create some in the dashboard.");
@@ -230,7 +229,10 @@ export function createBot(token: string, opts: ConstructorParameters<typeof Bot>
 
   bot.command("jobs", async (ctx) => {
     const u = await linkedUser(ctx);
-    if (!u) return ctx.reply("Link your account first.");
+    if (!u)
+      return ctx.reply("Open SkyBOT first: tap Open Dashboard or the menu button to sign in with Telegram.", {
+        reply_markup: openDashboardKeyboard(),
+      });
     const { listJobs } = await import("../core/jobs/repo.js");
     const js = await listJobs(u.id, 10);
     if (!js.length) return ctx.reply("No jobs yet.");
@@ -241,7 +243,10 @@ export function createBot(token: string, opts: ConstructorParameters<typeof Bot>
 
   bot.command("mint", async (ctx) => {
     const u = await linkedUser(ctx);
-    if (!u) return ctx.reply("Link your account first: Settings → Connect Telegram, or /link.");
+    if (!u)
+      return ctx.reply("Open SkyBOT first: tap Open Dashboard or the menu button to sign in with Telegram.", {
+        reply_markup: openDashboardKeyboard(),
+      });
     const arg = (ctx.message?.text ?? "").replace(/^\/mint(@\w+)?\s*/, "").trim();
     if (!arg) return ctx.reply("Usage: /mint &lt;opensea link | slug | 0xaddress&gt; [chain]", { parse_mode: "HTML" });
     const [input, chain] = arg.split(/\s+/);
@@ -264,7 +269,10 @@ export function createBot(token: string, opts: ConstructorParameters<typeof Bot>
   bot.on("message:text", async (ctx) => {
     if (ctx.message.text.startsWith("/")) return ctx.reply("Unknown command. /help");
     const u = await linkedUser(ctx);
-    if (!u) return ctx.reply("Link your account first. /help");
+    if (!u)
+      return ctx.reply("Open SkyBOT first: tap Open Dashboard or the menu button to sign in with Telegram.", {
+        reply_markup: openDashboardKeyboard(),
+      });
     const [input, chain] = ctx.message.text.trim().split(/\s+/);
     try {
       const t = remember(await resolveTarget({ input, chain }));

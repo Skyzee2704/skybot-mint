@@ -1,43 +1,29 @@
 "use client";
 // SPDX-License-Identifier: AGPL-3.0-only
 import { useEffect, useState } from "react";
-import { useApi } from "@/components/AppShell";
-import { usePrivy } from "@privy-io/react-auth";
-import { api as rawApi } from "@/lib/api";
+import { useApi, useShell } from "@/components/AppShell";
+import { useLinkAccount, usePrivy } from "@privy-io/react-auth";
+import { useTelegram } from "@/lib/telegram";
 
 export default function SettingsPage() {
   const api = useApi();
+  const { tgOnly, connectPrivy } = useShell();
+  const { isMiniApp, initData } = useTelegram();
   const [st, setSt] = useState<any>(null);
   const [edit, setEdit] = useState<Record<string, any>>({});
-  const [link, setLink] = useState<any>(null);
-  const [claim, setClaim] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [health, setHealth] = useState<any[] | null>(null);
-  const [me, setMe] = useState<any>(null);
-  const { login, authenticated, getAccessToken, user } = usePrivy();
-  const [attachWanted, setAttachWanted] = useState(false);
-  useEffect(() => {
-    api("/api/me")
-      .then(setMe)
-      .catch(() => {});
-  }, []); // eslint-disable-line
-  useEffect(() => {
-    if (!attachWanted || !authenticated) return;
-    (async () => {
-      try {
-        const token = await getAccessToken();
-        const idToken = await (user as any)?.getIdentityToken?.().catch?.(() => null);
-        const r = await rawApi("/api/account/attach-privy", { body: {}, token, idToken });
-        setMe((m: any) => ({ ...m, user: r.user }));
-        setMsg("Email/Google linked to this account");
-        setAttachWanted(false);
-      } catch (e: any) {
-        setErr(e.message);
-        setAttachWanted(false);
-      }
-    })();
-  }, [attachWanted, authenticated]); // eslint-disable-line
+  const { authenticated, user } = usePrivy();
+  const { linkEmail, linkGoogle, linkTelegram } = useLinkAccount({
+    onSuccess: () => {
+      setMsg("Login linked. You can now sign in with it to reach this same account.");
+      // Let the server pick up the newly linked account (email / Telegram) from the refreshed identity token.
+      api("/api/me").catch(() => {});
+      load().catch(() => {});
+    },
+    onError: (code: unknown) => setErr(`Could not link this login (${String(code)}). It may already belong to another account.`),
+  });
 
   const load = () =>
     api("/api/settings").then((s) => {
@@ -62,103 +48,79 @@ export default function SettingsPage() {
     }
   };
 
+  const email = user?.email?.address ?? null;
+  const google = user?.google?.email ?? null;
+  const telegram = user?.telegram?.username ?? (user?.telegram ? String(user.telegram.telegramUserId) : null);
+
   return (
     <>
       {err && <div className="err">{err}</div>}
       {msg && <div className="notice">{msg}</div>}
 
-      {me?.authVia === "telegram-session" && !me?.user?.email && (
-        <div className="card">
-          <h2>Add Email or Google</h2>
-          <p className="muted">You signed in with Telegram. Add an email or Google login so you can also use SkyBOT in a normal browser.</p>
-          <button
-            onClick={() => {
-              setAttachWanted(true);
-              if (!authenticated) login();
-            }}
-          >
-            Link Email / Google
-          </button>
-        </div>
-      )}
-
       <div className="card">
-        <h2>Connect Telegram</h2>
+        <h2>Sign-In Methods</h2>
         <p className="muted">
-          Link your Telegram so /mint, /wallets and job notifications use this SkyBOT account. No public domain needed.
+          Email, Google and Telegram all open the same SkyBOT account. Link each one once and use whichever is handy, on the web or inside
+          Telegram.
         </p>
-        {st?.telegram?.linked ? (
-          <div className="row">
-            <span className="pill accent">Linked @{st.telegram.username || st.telegram.linked}</span>
-            <button
-              className="ghost"
-              onClick={() =>
-                api("/api/telegram/unlink", { body: {} }).then(() => {
-                  setMsg("Unlinked");
-                  load();
-                })
-              }
-            >
-              Unlink
-            </button>
-          </div>
-        ) : (
+        {tgOnly || !authenticated ? (
           <>
-            <div className="row">
-              <button
-                onClick={async () => {
-                  const r = await api("/api/telegram/link-code", { body: {} });
-                  setLink(r);
-                }}
-              >
-                Generate Deep Link
-              </button>
-            </div>
-            {link && (
-              <div className="notice">
-                <p>Open this link on your phone (expires soon):</p>
-                {link.deepLink ? (
-                  <p>
-                    <a href={link.deepLink} target="_blank" rel="noreferrer">
-                      {link.deepLink}
-                    </a>
-                  </p>
-                ) : (
-                  <p className="mono">/start link_{link.code}</p>
-                )}
-                <p className="muted">
-                  Or tell the bot: <code>/start link_{link.code}</code>
-                </p>
-              </div>
-            )}
-            <hr style={{ borderColor: "var(--line)", margin: "16px 0" }} />
             <p className="muted">
-              Or paste a code from Telegram <b>/link</b>:
+              You are signed in with a Telegram session{st?.telegram?.username ? ` (@${st.telegram.username})` : ""}. Connect with Privy to
+              link email or Google and to import wallets.
             </p>
-            <div className="row">
-              <input
-                value={claim}
-                onChange={(e) => setClaim(e.target.value.trim())}
-                placeholder="code from /link"
-                style={{ maxWidth: 280 }}
-              />
-              <button
-                className="ghost"
-                disabled={!claim}
-                onClick={() =>
-                  api("/api/telegram/claim-code", { body: { code: claim } })
-                    .then(() => {
-                      setMsg("Linked!");
-                      setClaim("");
-                      load();
-                    })
-                    .catch((e) => setErr(e.message))
-                }
-              >
-                Claim
-              </button>
-            </div>
+            <button onClick={connectPrivy}>Connect with Privy</button>
           </>
+        ) : (
+          <table>
+            <tbody>
+              <tr>
+                <td>Telegram</td>
+                <td>{telegram ? <span className="pill accent">@{telegram}</span> : <span className="muted">Not linked</span>}</td>
+                <td>
+                  {!telegram && (
+                    <button
+                      className="ghost"
+                      onClick={() => linkTelegram(isMiniApp && initData ? { launchParams: { initDataRaw: initData } } : undefined)}
+                    >
+                      Link Telegram
+                    </button>
+                  )}
+                </td>
+              </tr>
+              <tr>
+                <td>Email</td>
+                <td>{email ? <span className="pill accent">{email}</span> : <span className="muted">Not linked</span>}</td>
+                <td>
+                  {!email && (
+                    <button className="ghost" onClick={linkEmail}>
+                      Link Email
+                    </button>
+                  )}
+                </td>
+              </tr>
+              <tr>
+                <td>Google</td>
+                <td>{google ? <span className="pill accent">{google}</span> : <span className="muted">Not linked</span>}</td>
+                <td>
+                  {!google && (
+                    <button className="ghost" onClick={linkGoogle}>
+                      Link Google
+                    </button>
+                  )}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        )}
+        {st?.telegram?.botUsername && (
+          <p className="muted" style={{ marginTop: 10 }}>
+            Bot:{" "}
+            <a href={`https://t.me/${st.telegram.botUsername}`} target="_blank" rel="noreferrer">
+              @{st.telegram.botUsername}
+            </a>{" "}
+            for /mint, /wallets and job notifications.
+          </p>
         )}
       </div>
 

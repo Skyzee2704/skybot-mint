@@ -14,34 +14,155 @@ export type WalletRow = typeof wallets.$inferSelect;
 
 const now = () => new Date().toISOString();
 
-export async function upsertUserFromPrivy(privyUserId: string, profile: { email?: string | null; name?: string | null }): Promise<AppUser> {
+export type PrivyProfile = {
+  email?: string | null;
+  name?: string | null;
+  /** Telegram account linked to the Privy user (from the identity token or the Privy API). */
+  telegram?: { id: string; username?: string | null } | null;
+};
+
+const httpError = (message: string, statusCode: number, code?: string) => Object.assign(new Error(message), { statusCode, code });
+
+async function userByPrivyId(privyUserId: string): Promise<AppUser | null> {
+  return (await getDb().select().from(users).where(eq(users.privyUserId, privyUserId)).limit(1))[0] ?? null;
+}
+
+async function ownedWalletCount(userId: string): Promise<number> {
+  return (await getDb().select({ id: wallets.id }).from(wallets).where(eq(wallets.userId, userId))).length;
+}
+
+/** Refresh profile fields and, when free, attach the Privy-linked Telegram id to an already-resolved user. */
+async function touchPrivyUser(u: AppUser, profile: PrivyProfile): Promise<AppUser> {
   const db = getDb();
-  const existing = await db.select().from(users).where(eq(users.privyUserId, privyUserId)).limit(1);
-  if (existing[0]) {
-    await db
-      .update(users)
-      .set({ lastSeenAt: now(), email: profile.email ?? existing[0].email, name: profile.name ?? existing[0].name })
-      .where(eq(users.id, existing[0].id));
-    return (await db.select().from(users).where(eq(users.id, existing[0].id)))[0]!;
+  const patch: Partial<typeof users.$inferInsert> = {
+    lastSeenAt: now(),
+    email: profile.email?.toLowerCase() ?? u.email,
+    name: u.name ?? profile.name ?? null,
+  };
+  const tg = profile.telegram;
+  if (tg?.id) {
+    if (!u.telegramUserId) {
+      const holder = await userByTelegram(tg.id);
+      if (!holder) {
+        patch.telegramUserId = tg.id;
+        patch.telegramUsername = tg.username ?? null;
+      } else if (holder.id !== u.id) {
+        // Never silently move a Telegram id between accounts.
+        log.warn("Privy-linked Telegram already belongs to another SkyBOT user; not re-linking", { userId: u.id });
+      }
+    } else if (u.telegramUserId === tg.id && tg.username && tg.username !== u.telegramUsername) {
+      patch.telegramUsername = tg.username;
+    }
   }
+  try {
+    await db.update(users).set(patch).where(eq(users.id, u.id));
+  } catch (e: any) {
+    // Lost a race for the Telegram id: keep the profile refresh, drop the link.
+    log.warn("user touch failed, retrying without Telegram link", { message: String(e?.message ?? e).slice(0, 120) });
+    delete patch.telegramUserId;
+    delete patch.telegramUsername;
+    await db.update(users).set(patch).where(eq(users.id, u.id));
+  }
+  return (await db.select().from(users).where(eq(users.id, u.id)))[0]!;
+}
+
+/**
+ * Resolve the SkyBOT account for a verified Privy user. One account per person, whatever the entry point:
+ *  1. Known Privy id → that account.
+ *  2. Privy user has a linked Telegram that already owns a SkyBOT account (Telegram-first / Mini App fallback)
+ *     → attach this Privy id to it. If that account is already bound to a different real Privy user AND owns
+ *     wallets, refuse with ACCOUNT_CONFLICT (wallets are owned by the other Privy user — never auto-merge).
+ *  3. Otherwise create a new account. Insert is idempotent (ON CONFLICT DO NOTHING) so parallel first-login
+ *     requests resolve to the same row instead of failing.
+ */
+export async function resolvePrivyUser(privyUserId: string, profile: PrivyProfile = {}, attempt = 0): Promise<AppUser> {
+  const db = getDb();
+  const existing = await userByPrivyId(privyUserId);
+  if (existing) return touchPrivyUser(existing, profile);
+
+  const tg = profile.telegram;
+  if (tg?.id) {
+    const tgUser = await userByTelegram(tg.id);
+    if (tgUser) {
+      const localOnly = tgUser.privyUserId.startsWith("tg:");
+      if (!localOnly && (await ownedWalletCount(tgUser.id)) > 0) {
+        log.warn("Account conflict: Telegram account is bound to a different Privy user that owns wallets", { userId: tgUser.id });
+        throw httpError(
+          "This Telegram account already belongs to a SkyBOT account that was created with a different login. Sign in with that original login (email or Google) and link Telegram from Settings, or contact the admin.",
+          409,
+          "ACCOUNT_CONFLICT",
+        );
+      }
+      await db
+        .update(users)
+        .set({
+          privyUserId,
+          telegramUsername: tg.username ?? tgUser.telegramUsername,
+          email: profile.email?.toLowerCase() ?? tgUser.email,
+          name: tgUser.name ?? profile.name ?? null,
+          lastSeenAt: now(),
+        })
+        .where(and(eq(users.id, tgUser.id), eq(users.privyUserId, tgUser.privyUserId)));
+      const attached = await userByPrivyId(privyUserId);
+      if (attached) {
+        log.info("Attached Privy login to existing Telegram account", { userId: attached.id, from: localOnly ? "local" : "privy" });
+        return attached;
+      }
+      // Concurrent request re-pointed the row first; retry resolution once.
+      if (attempt < 2) return resolvePrivyUser(privyUserId, profile, attempt + 1);
+      throw httpError("Could not resolve account, please retry", 409, "ACCOUNT_RACE");
+    }
+  }
+
   const count = (await db.select({ c: sql<number>`count(*)` }).from(users))[0]?.c ?? 0;
   const email = profile.email?.toLowerCase() ?? null;
-  const isAdmin = Number(count) === 0 || (email !== null && env.adminEmails.includes(email));
+  const isAdmin =
+    Number(count) === 0 || (email !== null && env.adminEmails.includes(email)) || (tg?.id ? env.adminTelegramIds.includes(tg.id) : false);
   const id = randomUUID();
   const t = now();
-  await db.insert(users).values({
-    id,
-    privyUserId,
-    email,
-    name: profile.name ?? null,
-    role: isAdmin ? "admin" : "user",
-    disabled: false,
-    createdAt: t,
-    lastSeenAt: t,
-  });
-  await db.insert(settings).values({ userId: id }).onConflictDoNothing();
-  log.info("New user", { role: isAdmin ? "admin" : "user", hasEmail: Boolean(email) });
-  return (await db.select().from(users).where(eq(users.id, id)))[0]!;
+  await db
+    .insert(users)
+    .values({
+      id,
+      privyUserId,
+      email,
+      name: profile.name ?? null,
+      role: isAdmin ? "admin" : "user",
+      disabled: false,
+      telegramUserId: tg?.id ?? null,
+      telegramUsername: tg?.username ?? null,
+      createdAt: t,
+      lastSeenAt: t,
+    })
+    .onConflictDoNothing();
+  const row = await userByPrivyId(privyUserId);
+  if (!row) {
+    // Insert skipped on a different unique key (e.g. Telegram id claimed concurrently) → resolve again.
+    if (attempt < 2) return resolvePrivyUser(privyUserId, profile, attempt + 1);
+    throw httpError("Could not create account, please retry", 409, "ACCOUNT_RACE");
+  }
+  await db.insert(settings).values({ userId: row.id }).onConflictDoNothing();
+  if (row.id === id) log.info("New user", { role: row.role, hasEmail: Boolean(email), hasTelegram: Boolean(tg?.id) });
+  return row;
+}
+
+/** @deprecated use resolvePrivyUser */
+export const upsertUserFromPrivy = (privyUserId: string, profile: PrivyProfile) => resolvePrivyUser(privyUserId, profile);
+
+/** Pull email / Google name / Telegram from a Privy user object (identity token or REST). */
+export function profileFromPrivyUser(u: { linked_accounts?: any[] } | null | undefined): PrivyProfile {
+  const accs = (u?.linked_accounts ?? []) as any[];
+  const emailAcc = accs.find((a) => a?.type === "email");
+  const google = accs.find((a) => a?.type === "google_oauth");
+  const tg = accs.find((a) => a?.type === "telegram");
+  // Only the numeric Telegram user id is comparable with initData user.id (never the opaque OIDC `sub`).
+  const rawTgId = tg?.telegram_user_id ?? tg?.telegramUserId;
+  const tgId = rawTgId !== undefined && /^\d+$/.test(String(rawTgId)) ? String(rawTgId) : null;
+  return {
+    email: emailAcc?.address ?? google?.email ?? null,
+    name: google?.name ?? (tg ? [tg.first_name, tg.last_name].filter(Boolean).join(" ") || tg.username : null) ?? null,
+    telegram: tgId ? { id: String(tgId), username: tg?.username ?? null } : null,
+  };
 }
 
 export async function requireUser(userId: string): Promise<AppUser> {
@@ -428,19 +549,26 @@ export async function upsertTelegramFirstUser(tg: {
   const id = randomUUID();
   const t = now();
   const name = [tg.first_name, tg.last_name].filter(Boolean).join(" ") || tg.username || null;
-  await db.insert(users).values({
-    id,
-    privyUserId: privyId,
-    email: null,
-    name,
-    role: isAdmin ? "admin" : "user",
-    disabled: false,
-    telegramUserId: tgId,
-    telegramUsername: tg.username ?? null,
-    createdAt: t,
-    lastSeenAt: t,
-  });
-  await db.insert(settings).values({ userId: id }).onConflictDoNothing();
+  await db
+    .insert(users)
+    .values({
+      id,
+      privyUserId: privyId,
+      email: null,
+      name,
+      role: isAdmin ? "admin" : "user",
+      disabled: false,
+      telegramUserId: tgId,
+      telegramUsername: tg.username ?? null,
+      createdAt: t,
+      lastSeenAt: t,
+    })
+    .onConflictDoNothing();
+  // Parallel first opens of the Mini App: whoever inserted first wins, everyone resolves to that row.
+  const row = (await userByTelegram(tgId)) ?? (await userByPrivyId(privyId));
+  if (!row) throw httpError("Could not create account, please retry", 409, "ACCOUNT_RACE");
+  await db.insert(settings).values({ userId: row.id }).onConflictDoNothing();
+  if (row.id !== id) return { user: await requireUser(row.id), created: false };
   log.info("New Telegram-first user", { role: isAdmin ? "admin" : "user", privyBacked: !privyId.startsWith("tg:") });
   return { user: await requireUser(id), created: true };
 }
@@ -449,22 +577,31 @@ export async function upsertTelegramFirstUser(tg: {
  * Attach a Privy (email/Google) login to a Telegram-first SkyBOT user. Caller must prove BOTH:
  * a valid SkyBOT session cookie (Telegram-verified) AND a valid Privy access token.
  */
-export async function attachPrivyToUser(userId: string, privyUserId: string, profile: { email?: string | null; name?: string | null }) {
+export async function attachPrivyToUser(userId: string, privyUserId: string, profile: PrivyProfile) {
   const db = getDb();
   const me = await requireUser(userId);
-  if (me.privyUserId === privyUserId) return me;
-  const other = (await db.select().from(users).where(eq(users.privyUserId, privyUserId)).limit(1))[0];
+  if (me.privyUserId === privyUserId) return touchPrivyUser(me, profile);
+  const other = await userByPrivyId(privyUserId);
   if (other && other.id !== userId) {
-    throw Object.assign(
-      new Error(
-        "That email/Google login already has its own SkyBOT account. Link Telegram from that account (Settings → Connect Telegram) instead.",
-      ),
-      { statusCode: 409 },
+    log.warn("attach-privy conflict: Privy login already owns another SkyBOT account", { userId });
+    throw httpError(
+      "That login already has its own SkyBOT account. Sign in with Telegram through Privy, then link email or Google from Settings so Privy keeps them together.",
+      409,
+      "ACCOUNT_CONFLICT",
+    );
+  }
+  // A real Privy user already owns this account's wallets: re-pointing would orphan them.
+  if (!me.privyUserId.startsWith("tg:") && (await ownedWalletCount(userId)) > 0) {
+    log.warn("attach-privy refused: account wallets belong to its current Privy user", { userId });
+    throw httpError(
+      "This account's wallets belong to its Telegram login. Use Connect with Privy (Telegram) first, then link email or Google from Settings.",
+      409,
+      "ACCOUNT_CONFLICT",
     );
   }
   await db
     .update(users)
     .set({ privyUserId, email: profile.email?.toLowerCase() ?? me.email, name: me.name ?? profile.name ?? null })
     .where(eq(users.id, userId));
-  return requireUser(userId);
+  return touchPrivyUser(await requireUser(userId), profile);
 }

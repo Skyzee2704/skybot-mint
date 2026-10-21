@@ -39,7 +39,7 @@ import { redactString, log } from "../util/log.js";
 import { dbMode, ensureDb } from "../db/client.js";
 import { signSession, verifySession, readCookie, sessionCookie, clearSessionCookie } from "../auth/session.js";
 import { verifyPrivyAccessToken, getPrivy } from "../auth/privy.js";
-import { upsertTelegramFirstUser, attachPrivyToUser, checkRateLimit } from "../users/service.js";
+import { upsertTelegramFirstUser, attachPrivyToUser, checkRateLimit, profileFromPrivyUser } from "../users/service.js";
 import { validateInitData, publicHttpsReady } from "../bot/telegramWebApp.js";
 import { handleWebhookUpdate, setupTelegramWebhook } from "../bot/telegram.js";
 
@@ -135,20 +135,17 @@ export async function buildServer(): Promise<FastifyInstance> {
     if (!sid || !tok) return reply.code(401).send({ error: "Need Telegram session and Privy login" });
     const claims = await verifyPrivyAccessToken(tok).catch(() => null);
     if (!claims) return reply.code(401).send({ error: "Invalid Privy token" });
-    let email: string | null = null;
-    let name: string | null = null;
+    let profile: ReturnType<typeof profileFromPrivyUser> = {};
     const idToken = req.headers["privy-id-token"] as string | undefined;
     if (idToken) {
       try {
         const u = await getPrivy().utils().auth().verifyIdentityToken(idToken);
-        const acc = (u.linked_accounts as any[]) ?? [];
-        email = acc.find((x) => x.type === "email")?.address ?? acc.find((x) => x.type === "google_oauth")?.email ?? null;
-        name = acc.find((x) => x.type === "google_oauth")?.name ?? null;
+        if ((u as any)?.id === claims.privyUserId) profile = profileFromPrivyUser(u as any);
       } catch {
         /* optional */
       }
     }
-    return { user: publicUser(await attachPrivyToUser(sid, claims.privyUserId, { email, name })) };
+    return { user: publicUser(await attachPrivyToUser(sid, claims.privyUserId, profile)) };
   });
 
   /** Telegram webhook (Vercel). Secret header ALWAYS required; 404 when webhook mode isn't configured. */
@@ -179,7 +176,7 @@ export async function buildServer(): Promise<FastifyInstance> {
           steps: [
             "Create an app at https://dashboard.privy.io (or use the existing SkyBOT Mint app)",
             "Set PRIVY_APP_ID and PRIVY_APP_SECRET in the environment",
-            "Enable Email and Google login methods",
+            "Enable Email, Google and Telegram login methods (Telegram: OAuth Client ID + secret from @BotFather, plus bot token and name for Mini App seamless login)",
             "Add your domain(s) under Allowed origins (include http://localhost:3000 for local)",
             "Embedded wallets: create on login = all users (or create on demand)",
             "For scheduled mints: create an authorization key, register a key quorum, set PRIVY_AUTH_PRIVATE_KEY + PRIVY_AUTH_KEY_QUORUM_ID, and add the quorum as a session signer on user wallets",
@@ -280,7 +277,7 @@ export async function buildServer(): Promise<FastifyInstance> {
       return updateSettings(req.user!.id, b);
     });
 
-    // Telegram link (web ↔ bot) — works without public domain
+    // Legacy link-code endpoints (superseded by Privy account linking; kept for backward compatibility, not used by the UI)
     a.post("/api/telegram/link-code", async (req) => createTelegramLinkCode(req.user!.id));
     a.post("/api/telegram/unlink", async (req) => {
       await unlinkTelegram(req.user!.id);
