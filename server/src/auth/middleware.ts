@@ -4,6 +4,8 @@ import { verifyPrivyAccessToken } from "./privy.js";
 import { privyConfigured } from "../config/env.js";
 import {
   resolvePrivyUser,
+  userByPrivyId,
+  touchPrivyUser,
   checkRateLimit,
   userByTelegram,
   profileFromPrivyUser,
@@ -12,9 +14,6 @@ import {
   type AppUser,
   type PrivyProfile,
 } from "../users/service.js";
-import { getDb } from "../db/client.js";
-import { users } from "../db/schema.js";
-import { eq } from "drizzle-orm";
 import { validateInitData } from "../bot/telegramWebApp.js";
 import { readCookie, verifySession } from "./session.js";
 import { requireUser } from "../users/service.js";
@@ -39,7 +38,7 @@ export function bearer(req: FastifyRequest): string | null {
  * otherwise fetches from the Privy API only the first time we see this Privy id, so a Telegram-linked
  * Privy login can be matched to an existing Telegram-first SkyBOT account.
  */
-async function privyProfileFor(privyUserId: string, idToken: string | undefined): Promise<PrivyProfile> {
+async function privyProfileFor(privyUserId: string, idToken: string | undefined, known: boolean): Promise<PrivyProfile> {
   const { getPrivy } = await import("./privy.js");
   if (idToken) {
     try {
@@ -49,7 +48,6 @@ async function privyProfileFor(privyUserId: string, idToken: string | undefined)
       /* identity token is optional */
     }
   }
-  const known = (await getDb().select({ id: users.id }).from(users).where(eq(users.privyUserId, privyUserId)).limit(1))[0];
   if (known) return {};
   try {
     return profileFromPrivyUser((await getPrivy().users()._get(privyUserId)) as any);
@@ -70,8 +68,10 @@ export async function requireAuth(req: FastifyRequest, reply: FastifyReply) {
   if (token && privyConfigured()) {
     try {
       const claims = await verifyPrivyAccessToken(token);
-      const profile = await privyProfileFor(claims.privyUserId, req.headers["privy-id-token"] as string | undefined);
-      const user = await resolvePrivyUser(claims.privyUserId, profile);
+      // One lookup for the common case (returning user); full resolution only for first logins.
+      const known = await userByPrivyId(claims.privyUserId);
+      const profile = await privyProfileFor(claims.privyUserId, req.headers["privy-id-token"] as string | undefined, Boolean(known));
+      const user = known ? await touchPrivyUser(known, profile) : await resolvePrivyUser(claims.privyUserId, profile);
       if (user.disabled) return reply.code(403).send({ error: "Account disabled" });
       await checkRateLimit(user.id, req.routeOptions.url ?? req.url.split("?")[0]);
       req.user = await syncRole(user);

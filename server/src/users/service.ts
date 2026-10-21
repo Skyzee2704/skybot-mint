@@ -48,7 +48,7 @@ export async function syncRole<T extends AppUser>(u: T): Promise<T> {
 
 const httpError = (message: string, statusCode: number, code?: string) => Object.assign(new Error(message), { statusCode, code });
 
-async function userByPrivyId(privyUserId: string): Promise<AppUser | null> {
+export async function userByPrivyId(privyUserId: string): Promise<AppUser | null> {
   return (await getDb().select().from(users).where(eq(users.privyUserId, privyUserId)).limit(1))[0] ?? null;
 }
 
@@ -57,8 +57,17 @@ async function ownedWalletCount(userId: string): Promise<number> {
 }
 
 /** Refresh profile fields and, when free, attach the Privy-linked Telegram id to an already-resolved user. */
-async function touchPrivyUser(u: AppUser, profile: PrivyProfile): Promise<AppUser> {
+const TOUCH_EVERY_MS = 5 * 60_000;
+
+export async function touchPrivyUser(u: AppUser, profile: PrivyProfile): Promise<AppUser> {
   const db = getDb();
+  // Hot path: nothing new to record → skip the UPDATE + re-SELECT round trips (lastSeenAt is refreshed every 5 min).
+  const email = profile.email?.toLowerCase() ?? u.email;
+  const fresh = Date.now() - Date.parse(u.lastSeenAt ?? "") < TOUCH_EVERY_MS;
+  const tgNews = Boolean(
+    profile.telegram?.id && (!u.telegramUserId || (profile.telegram.username && profile.telegram.username !== u.telegramUsername)),
+  );
+  if (fresh && email === u.email && (u.name || !profile.name) && !tgNews) return u;
   const patch: Partial<typeof users.$inferInsert> = {
     lastSeenAt: now(),
     email: profile.email?.toLowerCase() ?? u.email,
@@ -228,11 +237,20 @@ export async function listWallets(userId: string) {
   return (await getDb().select().from(wallets).where(eq(wallets.userId, userId))).map(walletView);
 }
 
-export async function listGroups(userId: string) {
+export async function listGroups(userId: string, walletList?: { group: string | null }[]) {
   const db = getDb();
-  const gs = await db.select().from(groups).where(eq(groups.userId, userId));
-  const ws = await db.select().from(wallets).where(eq(wallets.userId, userId));
-  return gs.map((g) => ({ name: g.name, count: ws.filter((w) => w.groupName === g.name).length }));
+  const [gs, ws] = await Promise.all([
+    db.select().from(groups).where(eq(groups.userId, userId)),
+    walletList ? Promise.resolve(walletList) : listWallets(userId),
+  ]);
+  return gs.map((g) => ({ name: g.name, count: ws.filter((w) => w.group === g.name).length }));
+}
+
+/** Wallets + groups for one user with the two queries in parallel (Wallets page first paint). */
+export async function walletsAndGroups(userId: string) {
+  const db = getDb();
+  const [ws, gs] = await Promise.all([listWallets(userId), db.select().from(groups).where(eq(groups.userId, userId))]);
+  return { wallets: ws, groups: gs.map((g) => ({ name: g.name, count: ws.filter((w) => w.group === g.name).length })) };
 }
 
 export async function getWallet(userId: string, id: string): Promise<WalletRow> {

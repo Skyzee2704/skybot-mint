@@ -472,3 +472,72 @@ html.tg-mini-app main.app {
   border: 1px solid var(--line);
   vertical-align: middle;
 }
+
+/* Loading skeletons (Wallets / Mint first paint) */
+.skeleton {
+  display: inline-block;
+  min-width: 40px;
+  height: 14px;
+  border-radius: 8px;
+  background: linear-gradient(90deg, var(--panel-2) 0%, var(--line) 50%, var(--panel-2) 100%);
+  background-size: 200% 100%;
+  animation: sk-shimmer 1.2s ease-in-out infinite;
+  vertical-align: middle;
+}
+@keyframes sk-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+/* Segmented choice (Check all wallets / Select wallets) */
+.segmented {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 3px;
+  gap: 2px;
+}
+.segmented button {
+  background: transparent;
+  color: var(--cream-dim);
+  padding: 7px 14px;
+}
+.segmented button.on {
+  background: var(--orange);
+  color: #120800;
+}
+.segmented button:hover {
+  box-shadow: none;
+}
+.wallet-pick {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 6px;
+  margin-top: 10px;
+}
+.wallet-pick label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  cursor: pointer;
+}
+.wallet-pick label.on {
+  border-color: var(--orange);
+}
+.wallet-pick input {
+  width: auto;
+}
+.stage-list {
+  font-size: 12px;
+  margin-top: 2px;
+}
+.row .spacer {
+  flex: 1;
+}

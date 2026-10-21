@@ -1,7 +1,8 @@
 "use client";
 // SPDX-License-Identifier: AGPL-3.0-only
 import { short } from "@/lib/api";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useWalletList } from "@/lib/wallets";
 import { useCreateWallet, useImportWallet, useWallets, usePrivy } from "@privy-io/react-auth";
 import { useApi, useShell } from "@/components/AppShell";
 import { ChainSelect } from "@/components/ChainSelect";
@@ -12,8 +13,10 @@ export default function WalletsPage() {
   const { importWallet } = useImportWallet();
   const { wallets: privyWallets } = useWallets();
   const { user, authenticated } = usePrivy();
-  const { connectPrivy } = useShell();
-  const [data, setData] = useState<{ wallets: any[]; groups: any[] }>({ wallets: [], groups: [] });
+  const { connectPrivy, userId } = useShell();
+  const list = useWalletList(api, userId);
+  const data = { wallets: list.wallets as any[], groups: list.groups };
+  const load = list.reload;
   const [err, setErr] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [key, setKey] = useState("");
@@ -22,33 +25,46 @@ export default function WalletsPage() {
   const [genN, setGenN] = useState(3);
   const [chain, setChain] = useState("base");
   const [balances, setBalances] = useState<Record<string, string>>({});
+  const [balLoading, setBalLoading] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  const load = useCallback(
-    () =>
-      api("/api/wallets")
-        .then(setData)
-        .catch((e) => setErr(e.message)),
-    [api],
-  );
+  // Balances load lazily (after the list is on screen), all wallets in parallel server-side, 15 s server cache.
+  const balKey = `${chain}:${data.wallets.map((w) => w.id).join(",")}`;
+  const lastBalKey = useRef("");
+  const loadBalances = async (force = false) => {
+    if (!data.wallets.length || (!force && lastBalKey.current === balKey)) return;
+    lastBalKey.current = balKey;
+    setBalLoading(true);
+    try {
+      const r = await api("/api/wallets/balances", { body: { chain } });
+      setBalances(Object.fromEntries(r.balances.map((b: any) => [b.walletId, b.balance ?? "error"])));
+    } catch {
+      /* balances are best-effort */
+    } finally {
+      setBalLoading(false);
+    }
+  };
+  useEffect(() => setBalances({}), [chain]);
   useEffect(() => {
-    load();
-  }, [load]);
+    if (!list.refreshing) void loadBalances();
+  }, [balKey, list.refreshing]); // eslint-disable-line
 
-  // Keep server DB in sync with Privy-linked wallets
+  // Keep server DB in sync with Privy-linked wallets — only when Privy knows a wallet we don't (no reload otherwise).
   useEffect(() => {
-    const list = (privyWallets ?? [])
-      .filter((w) => w.walletClientType === "privy")
+    if (list.refreshing) return;
+    const known = new Set(data.wallets.map((w) => w.address.toLowerCase()));
+    const missing = (privyWallets ?? [])
+      .filter((w) => w.walletClientType === "privy" && !known.has(w.address.toLowerCase()))
       .map((w) => ({
         privyWalletId: (w as any).id ?? w.address,
         address: w.address,
         source: "privy",
       }));
-    if (!list.length) return;
-    api("/api/wallets/sync", { body: { wallets: list } })
+    if (!missing.length) return;
+    api("/api/wallets/sync", { body: { wallets: missing } })
       .then(load)
       .catch(() => {});
-  }, [privyWallets]); // eslint-disable-line
+  }, [privyWallets, list.refreshing]); // eslint-disable-line
 
   const run = async (fn: () => Promise<any>, ok?: string) => {
     setErr(null);
@@ -67,26 +83,25 @@ export default function WalletsPage() {
 
   return (
     <>
-      {err && <div className="err">{err}</div>}
+      {(err ?? list.err) && <div className="err">{err ?? list.err}</div>}
       {msg && <div className="notice">{msg}</div>}
       <div className="card">
-        <h2>Wallets ({data.wallets.length})</h2>
+        <h2>
+          Wallets ({list.loading ? "…" : data.wallets.length}){" "}
+          {list.refreshing && !list.loading && (
+            <span className="muted" style={{ fontSize: 13, fontWeight: 400 }}>
+              updating…
+            </span>
+          )}
+        </h2>
         <p className="muted">
           Wallets are created and held by Privy. SkyBOT never stores or accepts raw private keys. Import uses Privy in the browser; export
           only via Privy UI. Server signing for scheduled mints needs a session signer (Settings / DEPLOY.md).
         </p>
         <div className="row" style={{ marginBottom: 10 }}>
           <ChainSelect value={chain} onChange={setChain} />
-          <button
-            className="ghost"
-            onClick={() =>
-              run(async () => {
-                const r = await api("/api/wallets/balances", { body: { chain } });
-                setBalances(Object.fromEntries(r.balances.map((b: any) => [b.walletId, b.balance ?? "err"])));
-              }, "Balances loaded")
-            }
-          >
-            Load Balances
+          <button className="ghost" disabled={balLoading} onClick={() => loadBalances(true)}>
+            {balLoading ? "Refreshing…" : "Refresh Balances"}
           </button>
         </div>
         <table className="cards">
@@ -111,7 +126,17 @@ export default function WalletsPage() {
                   <span className="addr-short">{short(w.address)}</span>
                 </td>
                 <td>{w.group ?? "—"}</td>
-                <td className="mono">{balances[w.id] ?? ""}</td>
+                <td className="mono">
+                  {balances[w.id] !== undefined ? (
+                    balances[w.id] === "error" ? (
+                      <span className="muted">unavailable</span>
+                    ) : (
+                      Number(balances[w.id]).toFixed(5)
+                    )
+                  ) : (
+                    <span className="skeleton" style={{ width: 70 }} />
+                  )}
+                </td>
                 <td className="row actions">
                   {!w.isMain && (
                     <button className="ghost" onClick={() => run(() => api(`/api/wallets/${w.id}/main`, { body: {} }), "Main set")}>
@@ -130,7 +155,17 @@ export default function WalletsPage() {
                 </td>
               </tr>
             ))}
-            {!data.wallets.length && (
+            {list.loading &&
+              [0, 1, 2].map((i) => (
+                <tr key={`sk${i}`}>
+                  {[90, 260, 50, 70, 120].map((wd, j) => (
+                    <td key={j}>
+                      <span className="skeleton" style={{ width: wd }} />
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            {!list.loading && !data.wallets.length && (
               <tr>
                 <td colSpan={5} className="muted">
                   No wallets yet.

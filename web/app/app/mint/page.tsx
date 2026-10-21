@@ -4,7 +4,9 @@ import { useEffect, useMemo, useState } from "react";
 import { STRATEGY_LABELS } from "@/lib/labels";
 import Link from "next/link";
 import { fmtEth, short } from "@/lib/api";
-import { useApi } from "@/components/AppShell";
+import { useApi, useShell } from "@/components/AppShell";
+import { usePrivy, useSignMessage } from "@privy-io/react-auth";
+import { useWalletList } from "@/lib/wallets";
 import { ChainSelect } from "@/components/ChainSelect";
 import { ConfirmBox } from "@/components/Confirm";
 
@@ -13,6 +15,13 @@ const STRAT = STRATEGY_LABELS as Record<Strategy, string>;
 
 export default function MintPage() {
   const api = useApi();
+  const { userId, tgOnly, connectPrivy } = useShell();
+  const { authenticated } = usePrivy();
+  const { signMessage } = useSignMessage();
+  const walletList = useWalletList(api, userId);
+  const [scope, setScope] = useState<"all" | "select">("all");
+  const [picked, setPicked] = useState<Record<string, boolean>>({});
+  const [qtyMode, setQtyMode] = useState<"max" | "custom">("max");
   const [input, setInput] = useState("");
   const [chain, setChain] = useState("");
   const [t, setT] = useState<any>(null);
@@ -24,7 +33,8 @@ export default function MintPage() {
   const [tokenId, setTokenId] = useState("");
   const [qty, setQty] = useState(1);
   const [elig, setElig] = useState<any>(null);
-  const [sel, setSel] = useState<Record<string, number>>({});
+  const [sel, setSel] = useState<Record<string, boolean>>({});
+  const [verifyNote, setVerifyNote] = useState<string | null>(null);
   const [gasMode, setGasMode] = useState("normal");
   const [when, setWhen] = useState<"now" | "stage" | "custom">("now");
   const [stageStart, setStageStart] = useState("");
@@ -83,21 +93,56 @@ export default function MintPage() {
     return { signature: sig, priceWei: wei, tokenId: cand?.needsTokenId ? tokenId : undefined };
   };
 
-  const checkElig = async () => {
+  const pickedIds = Object.keys(picked).filter((k) => picked[k]);
+  const walletIds = scope === "all" ? undefined : pickedIds;
+
+  /** Browser-side OpenSea sign-in (Privy embedded wallet, off-chain, no gas). Returns proofs for the server. */
+  const openseaProofs = async (ids: string[]) => {
+    const { messages } = await api("/api/opensea/siwe/prepare", { body: { walletIds: ids } });
+    const proofs: any[] = [];
+    let failed = 0;
+    for (const m of messages) {
+      try {
+        const { signature } = await signMessage({ message: m.message }, { address: m.address, uiOptions: { showWalletUIs: false } });
+        proofs.push({ walletId: m.walletId, fields: m.fields, signature });
+      } catch {
+        failed++;
+      }
+    }
+    return { proofs, failed };
+  };
+
+  const checkElig = async (opts: { verify?: boolean } = {}) => {
     setErr(null);
     setSim(null);
-    setBusy("Checking wallets…");
+    setVerifyNote(null);
+    setBusy(opts.verify ? "Verifying with OpenSea…" : "Checking wallets…");
     try {
-      const r = await api("/api/eligibility", {
-        body: { chain: t.chain.key, contract: t.contract, input: t.input, strategy, quantity: qty, generic: genericPayload() },
-      });
+      const base = { chain: t.chain.key, contract: t.contract, input: t.input, strategy, walletIds, generic: genericPayload() };
+      let r = await api("/api/eligibility", { body: base });
+      const need = r.rows.filter((x: any) => x.needsOpenSeaLogin).map((x: any) => x.walletId);
+      if (need.length && (opts.verify || r.openseaAutoVerify)) {
+        if (!authenticated) setVerifyNote("OpenSea verification signs with your Privy wallet. Connect with Privy first.");
+        else {
+          setBusy(`Verifying ${need.length} wallet(s) with OpenSea…`);
+          const { proofs, failed } = await openseaProofs(need);
+          if (proofs.length) r = await api("/api/eligibility", { body: { ...base, siwe: proofs } });
+          if (failed)
+            setVerifyNote(`${failed} wallet(s) could not sign the OpenSea sign-in message (only Privy wallets on this device can sign).`);
+        }
+      }
       setElig(r);
-      setSel(Object.fromEntries(r.rows.filter((x: any) => x.eligibleIgnoringBalance).map((x: any) => [x.walletId, x.suggestedQty || qty])));
+      setSel(Object.fromEntries(r.rows.filter((x: any) => x.eligibleIgnoringBalance).map((x: any) => [x.walletId, true])));
     } catch (e: any) {
       setErr(e.message);
     } finally {
       setBusy(null);
     }
+  };
+  /** Quantity per selected wallet: the stage maximum still available to it, or the custom number (capped). */
+  const qtyFor = (r: any) => {
+    const max = Math.max(0, r.suggestedQty ?? 0);
+    return qtyMode === "max" ? max : Math.min(Math.max(1, qty), max || qty);
   };
   const runAt = when === "now" ? null : when === "stage" ? stageStart || null : custom ? new Date(custom).toISOString() : null;
   const simulate = async () => {
@@ -113,9 +158,9 @@ export default function MintPage() {
             input: t.input,
             strategy,
             slug: t.slug,
-            wallets: Object.entries(sel)
-              .filter(([, q]) => q > 0)
-              .map(([walletId, quantity]) => ({ walletId, quantity })),
+            wallets: rows
+              .filter((r: any) => sel[r.walletId] && qtyFor(r) > 0)
+              .map((r: any) => ({ walletId: r.walletId, quantity: qtyFor(r) })),
             generic: genericPayload(),
             gasMode,
             runAt,
@@ -250,14 +295,64 @@ export default function MintPage() {
                 )}
               </>
             )}
-            <label>
-              qty{" "}
-              <input type="number" min={1} max={100} value={qty} onChange={(e) => setQty(Number(e.target.value))} style={{ width: 70 }} />
-            </label>
-            <button disabled={!strategy || !!busy} onClick={checkElig}>
-              Check Wallets
-            </button>
           </div>
+          <div className="row" style={{ marginTop: 12 }}>
+            <div className="segmented" role="radiogroup" aria-label="Wallets to check">
+              <button className={scope === "all" ? "on" : ""} onClick={() => setScope("all")}>
+                Check all wallets
+              </button>
+              <button className={scope === "select" ? "on" : ""} onClick={() => setScope("select")}>
+                Select wallets
+              </button>
+            </div>
+            <button disabled={!strategy || !!busy || (scope === "select" && !pickedIds.length)} onClick={() => checkElig()}>
+              Check Eligibility
+            </button>
+            <span className="muted">
+              {scope === "all"
+                ? walletList.loading
+                  ? "Loading wallets…"
+                  : `${walletList.wallets.length} wallet(s)`
+                : `${pickedIds.length} of ${walletList.wallets.length} selected`}
+            </span>
+          </div>
+          {scope === "select" && (
+            <>
+              <div className="row" style={{ marginTop: 8 }}>
+                <button className="ghost" onClick={() => setPicked(Object.fromEntries(walletList.wallets.map((w) => [w.id, true])))}>
+                  Select All
+                </button>
+                <button className="ghost" onClick={() => setPicked({})}>
+                  Clear
+                </button>
+              </div>
+              <div className="wallet-pick">
+                {walletList.loading &&
+                  [0, 1, 2].map((i) => (
+                    <label key={i}>
+                      <span className="skeleton" style={{ width: 160 }} />
+                    </label>
+                  ))}
+                {walletList.wallets.map((w) => (
+                  <label key={w.id} className={picked[w.id] ? "on" : ""}>
+                    <input
+                      type="checkbox"
+                      checked={Boolean(picked[w.id])}
+                      onChange={(e) => setPicked((p) => ({ ...p, [w.id]: e.target.checked }))}
+                    />
+                    <span>
+                      {w.label} <span className="mono muted">{short(w.address)}</span>
+                    </span>
+                  </label>
+                ))}
+                {!walletList.loading && !walletList.wallets.length && (
+                  <span className="muted">
+                    No wallets yet. Add some on <Link href="/app/wallets">Wallets</Link>.
+                  </span>
+                )}
+              </div>
+            </>
+          )}
         </div>
       )}
 
@@ -269,99 +364,119 @@ export default function MintPage() {
               {n}
             </div>
           ))}
+          {rows.some((r: any) => r.needsOpenSeaLogin) && (
+            <div className="notice row" style={{ justifyContent: "space-between" }}>
+              <span>
+                {rows.filter((r: any) => r.needsOpenSeaLogin).length} wallet(s) need OpenSea verification for this stage. Each wallet signs
+                OpenSea&apos;s sign-in message in your browser: off-chain, no gas, no balance needed. Signing in accepts OpenSea&apos;s
+                Terms for that wallet.
+              </span>
+              {tgOnly && !authenticated ? (
+                <button onClick={connectPrivy}>Connect with Privy</button>
+              ) : (
+                <button disabled={!!busy} onClick={() => checkElig({ verify: true })}>
+                  Verify with OpenSea
+                </button>
+              )}
+            </div>
+          )}
+          {verifyNote && <div className="notice">{verifyNote}</div>}
           <div className="row" style={{ marginBottom: 8 }}>
             <button
               className="ghost"
               onClick={() =>
-                setSel(Object.fromEntries(rows.filter((r: any) => r.eligible).map((r: any) => [r.walletId, r.suggestedQty || qty])))
+                setSel(Object.fromEntries(rows.filter((r: any) => r.eligibleIgnoringBalance).map((r: any) => [r.walletId, true])))
               }
             >
               Select Eligible
             </button>
             <button
               className="ghost"
-              onClick={() =>
-                setSel(
-                  Object.fromEntries(
-                    rows.filter((r: any) => r.access?.status === "yes").map((r: any) => [r.walletId, r.suggestedQty || qty]),
-                  ),
-                )
-              }
+              onClick={() => setSel(Object.fromEntries(rows.filter((r: any) => r.eligible).map((r: any) => [r.walletId, true])))}
             >
-              Select Allowlisted
+              Select Ready to Mint
             </button>
             <button className="ghost" onClick={() => setSel({})}>
               Clear
             </button>
-            <span className="muted">{Object.keys(sel).length} wallets</span>
+            <span className="spacer" />
+            <label>
+              Quantity per wallet{" "}
+              <select value={qtyMode} onChange={(e) => setQtyMode(e.target.value as "max" | "custom")} style={{ width: "auto" }}>
+                <option value="max">Max allowed</option>
+                <option value="custom">Custom</option>
+              </select>
+            </label>
+            {qtyMode === "custom" && (
+              <input
+                type="number"
+                min={1}
+                max={1000}
+                value={qty}
+                onChange={(e) => setQty(Math.max(1, Number(e.target.value) || 1))}
+                style={{ width: 80 }}
+                aria-label="Quantity per wallet"
+              />
+            )}
+            <span className="muted">{Object.values(sel).filter(Boolean).length} selected</span>
           </div>
           <table>
             <thead>
               <tr>
                 <th></th>
                 <th>Wallet</th>
-                <th>Allowlisted</th>
-                <th className="hide-sm">Sim</th>
-                <th>Balance</th>
+                <th>Eligibility</th>
+                <th className="hide-sm">Simulation</th>
                 <th>Qty</th>
-                <th>Blockers</th>
+                <th>Mint Readiness</th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((r: any) => (
-                <tr key={r.walletId}>
-                  <td>
-                    <input
-                      type="checkbox"
-                      checked={r.walletId in sel}
-                      onChange={(e) =>
-                        setSel((s) => {
-                          const n = { ...s };
-                          if (e.target.checked) n[r.walletId] = r.suggestedQty || qty;
-                          else delete n[r.walletId];
-                          return n;
-                        })
-                      }
-                    />
-                  </td>
-                  <td>
-                    {r.label} <span className="mono muted">{short(r.address)}</span>
-                  </td>
-                  <td>
-                    <Access a={r.access} />
-                  </td>
-                  <td className="hide-sm">
-                    {r.simulation ? (
-                      r.simulation.ok === true ? (
-                        <span className="ok">ok</span>
-                      ) : r.simulation.ok === false ? (
+              {rows.map((r: any) => {
+                const other = r.reasons.filter((x: string) => !x.startsWith("insufficient balance"));
+                return (
+                  <tr key={r.walletId}>
+                    <td>
+                      <input
+                        type="checkbox"
+                        checked={Boolean(sel[r.walletId])}
+                        onChange={(e) => setSel((s) => ({ ...s, [r.walletId]: e.target.checked }))}
+                      />
+                    </td>
+                    <td>
+                      {r.label} <span className="mono muted">{short(r.address)}</span>
+                    </td>
+                    <td>
+                      <Access a={r.access} stages={r.stages} />
+                    </td>
+                    <td className="hide-sm">
+                      {r.simulation?.ok === true ? (
+                        <span className="ok">passes</span>
+                      ) : r.simulation?.ok === false ? (
                         <span className="bad">{r.simulation.reason}</span>
                       ) : (
                         <span className="muted">—</span>
-                      )
-                    ) : (
-                      "—"
-                    )}
-                  </td>
-                  <td className="mono">
-                    <span className={r.balanceOk ? "ok" : "bad"}>{Number(r.balance).toFixed(5)}</span>
-                  </td>
-                  <td>
-                    <input
-                      type="number"
-                      min={0}
-                      max={100}
-                      style={{ width: 64 }}
-                      value={sel[r.walletId] ?? 0}
-                      onChange={(e) => setSel((s) => ({ ...s, [r.walletId]: Number(e.target.value) }))}
-                    />
-                  </td>
-                  <td className={r.eligible ? "muted" : "bad"}>{r.reasons.join("; ") || "—"}</td>
-                </tr>
-              ))}
+                      )}
+                    </td>
+                    <td className="mono">{sel[r.walletId] ? qtyFor(r) : <span className="muted">{r.suggestedQty}</span>}</td>
+                    <td>
+                      {other.length > 0 && <div className="bad">{other.join("; ")}</div>}
+                      {r.balanceOk ? (
+                        <span className="ok">
+                          Funded ({Number(r.balance).toFixed(5)} {sym})
+                        </span>
+                      ) : (
+                        <span className="warn">
+                          Needs ~{Number(r.estCost).toFixed(6)} {sym} · has {Number(r.balance).toFixed(5)}
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
               {!rows.length && (
                 <tr>
-                  <td colSpan={7} className="muted">
+                  <td colSpan={6} className="muted">
                     No wallets. Add some on <Link href="/app/wallets">Wallets</Link>.
                   </td>
                 </tr>
@@ -399,7 +514,7 @@ export default function MintPage() {
                 <input type="number" value={offsetMs} onChange={(e) => setOffsetMs(Number(e.target.value))} style={{ width: 90 }} />
               </label>
             )}
-            <button disabled={!Object.values(sel).some((q) => q > 0) || !!busy} onClick={simulate}>
+            <button disabled={!rows.some((r: any) => sel[r.walletId] && qtyFor(r) > 0) || !!busy} onClick={simulate}>
               Simulate
             </button>
           </div>
@@ -461,15 +576,33 @@ export default function MintPage() {
   );
 }
 
-function Access({ a }: { a: any }) {
+const ACCESS_LABEL: Record<string, string> = {
+  yes: "Eligible",
+  public: "Eligible (public)",
+  no: "Not eligible",
+  unknown: "Unknown",
+  "n/a": "No allowlist",
+};
+
+function Access({ a, stages }: { a: any; stages?: any[] | null }) {
   if (!a) return <span className="muted">—</span>;
   const cls = a.status === "yes" || a.status === "public" ? "ok" : a.status === "no" ? "bad" : "muted";
   return (
     <div>
-      <b className={cls}>{a.status}</b>
+      <b className={cls}>{ACCESS_LABEL[a.status] ?? a.status}</b>
       <div className="muted" style={{ fontSize: 12 }}>
+        {a.detail ? `${a.detail} · ` : ""}
         {a.source}
       </div>
+      {stages && stages.length > 1 && (
+        <div className="stage-list">
+          {stages.map((s: any) => (
+            <span key={s.uuid ?? s.label} className={s.eligible ? "ok" : s.eligible === false ? "bad" : "muted"} style={{ marginRight: 8 }}>
+              {s.label ?? s.type}: {s.eligible ? "yes" : s.eligible === false ? "no" : "?"}
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

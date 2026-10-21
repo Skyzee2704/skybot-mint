@@ -2,15 +2,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import Link from "next/link";
 import { usePrivy } from "@privy-io/react-auth";
-import { useRouter } from "next/navigation";
-import { useEffect } from "react";
+import { useTelegram } from "@/lib/telegram";
 
+/** Public landing page. Always reachable, signed in or not (no redirect); signed-in users get "Open Dashboard". */
 export default function Landing() {
   const { ready, authenticated, login } = usePrivy();
-  const router = useRouter();
-  useEffect(() => {
-    if (ready && authenticated) router.replace("/app/mint");
-  }, [ready, authenticated, router]);
+  const { isMiniApp } = useTelegram();
+  // Inside Telegram the dashboard signs in with Telegram automatically, so the landing just links to it.
+  const signedIn = ready && (authenticated || isMiniApp);
 
   return (
     <div className="hero">
@@ -28,13 +27,21 @@ export default function Landing() {
           SkyBOT Mint resolves any OpenSea drop or contract from a link, checks every wallet for allowlist and balance, simulates gas, then
           mints across your fleet — on web or Telegram.
         </p>
-        <div className="row" style={{ justifyContent: "center" }}>
-          <button onClick={login} disabled={!ready}>
-            {authenticated ? "Open App" : "Sign In with Email or Google"}
-          </button>
-          <Link className="btn ghost" href="/app/mint">
-            Enter App
-          </Link>
+        <div className="row" style={{ justifyContent: "center", minHeight: 44 }}>
+          {!ready ? (
+            <span className="skeleton" style={{ width: 220, height: 40 }} />
+          ) : signedIn ? (
+            <Link className="btn" href="/app/mint">
+              Open Dashboard
+            </Link>
+          ) : (
+            <>
+              <button onClick={login}>Sign In with Email or Google</button>
+              <Link className="btn ghost" href="/app/mint">
+                Enter App
+              </Link>
+            </>
+          )}
         </div>
         <div className="features">
           <div className="card">

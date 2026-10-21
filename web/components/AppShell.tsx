@@ -6,6 +6,7 @@ import { getIdentityToken, usePrivy } from "@privy-io/react-auth";
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { useTelegram } from "@/lib/telegram";
+import { clearWalletCache } from "@/lib/wallets";
 
 /** How long the Mini App waits for Privy's seamless Telegram login before using the verified-initData fallback. */
 const SEAMLESS_WAIT_MS = 2500;
@@ -15,8 +16,10 @@ type ShellState = {
   tgOnly: boolean;
   /** Open Privy's Telegram login so Privy-only features (wallet import, generation) work. */
   connectPrivy: () => void;
+  /** SkyBOT user id once /api/me resolved (scopes client caches). */
+  userId: string | null;
 };
-const ShellCtx = createContext<ShellState>({ tgOnly: false, connectPrivy: () => {} });
+const ShellCtx = createContext<ShellState>({ tgOnly: false, connectPrivy: () => {}, userId: null });
 export const useShell = () => useContext(ShellCtx);
 
 /** Identity token (if enabled in the Privy dashboard) lets the server match linked Telegram/email without an API call. */
@@ -129,7 +132,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           {me?.user?.email ?? user?.email?.address ?? (me?.user?.telegramUsername ? `@${me.user.telegramUsername}` : "signed in")}
         </span>
         {!tgOnly && !isMiniApp && (
-          <button className="ghost" onClick={() => logout().then(() => router.push("/"))}>
+          <button
+            className="ghost"
+            onClick={() => {
+              clearWalletCache();
+              logout().then(() => router.push("/"));
+            }}
+          >
             Sign Out
           </button>
         )}
@@ -142,7 +151,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         )}
         {err && authenticated && <div className="err">{err}</div>}
-        <ShellCtx.Provider value={{ tgOnly, connectPrivy }}>{children}</ShellCtx.Provider>
+        <ShellCtx.Provider value={{ tgOnly, connectPrivy, userId: me?.user?.id ?? null }}>{children}</ShellCtx.Provider>
       </main>
     </>
   );
