@@ -18,6 +18,8 @@ export interface MintRequest {
   gasLimit?: number;
   runAt?: string | null; // ISO; null/undefined = now
   offsetMs?: number; // broadcast offset relative to runAt (can be negative, >= -5000)
+  /** Public stage only: include these wallets even though their simulation failed (explicit user override). */
+  forceWalletIds?: string[];
 }
 export interface BuiltTx {
   to: string;

@@ -10,10 +10,14 @@ import { genericMintedBy } from "../resolver/generic.js";
 import { listWallets } from "../../users/service.js";
 import { getFees } from "./fees.js";
 import { cachedBalance } from "../../util/balanceCache.js";
+import { walletMaxQty } from "./qty.js";
 import { MintBuildError, buildMintTx } from "./build.js";
 import { MintRequest, Strategy } from "./types.js";
 import { cachedJwt, eligibilityWithJwt, jwtFromSignature, validateSiweFields } from "../resolver/openseaAuth.js";
 import type { OsStage } from "../resolver/opensea.js";
+import { and, eq } from "drizzle-orm";
+import { getDb } from "../../db/client.js";
+import { openseaVerdicts } from "../../db/schema.js";
 
 export interface StageVerdict {
   uuid: string | null;
@@ -24,6 +28,8 @@ export interface StageVerdict {
   maxPerWallet: number | null;
   priceWei: string | null;
 }
+
+export type NoteItem = { kind: "stage_upcoming"; label: string; start: string | null; needsVerification: boolean } | { kind: "no_stage" };
 
 export interface SiweProof {
   walletId: string;
@@ -41,7 +47,12 @@ export interface EligibilityRow {
   mintedSoFar: number | null;
   maxPerWallet: number | null;
   remainingForWallet: number | null;
+  /** Upper bound for the per-wallet quantity stepper. */
+  maxQty: number;
   suggestedQty: number;
+  /** Price per NFT and estimated max gas per mint tx (wei) — lets the UI price any quantity. */
+  unitPriceWei: string;
+  gasCostWei: string;
   estCostWei: string;
   estCost: string;
   /** Allowlist / access verdict — independent of balance. */
@@ -116,6 +127,42 @@ export interface EligibilityOptions {
   siwe?: SiweProof[];
 }
 
+/* ---------- saved OpenSea verdicts (per wallet + drop), reused by later checks and the Telegram /check ---------- */
+type CachedVerdict = { stages: Awaited<ReturnType<typeof eligibilityWithJwt>>; checkedAt: string };
+const VERDICT_TTL_MS = 24 * 3600_000;
+
+async function loadVerdicts(userId: string, slug: string): Promise<Map<string, CachedVerdict>> {
+  try {
+    const rows = await getDb()
+      .select()
+      .from(openseaVerdicts)
+      .where(and(eq(openseaVerdicts.userId, userId), eq(openseaVerdicts.slug, slug)));
+    return new Map(
+      rows
+        .filter((r) => Date.now() - Date.parse(r.checkedAt) < VERDICT_TTL_MS)
+        .map((r) => [r.walletId, { stages: JSON.parse(r.stagesJson), checkedAt: r.checkedAt }]),
+    );
+  } catch {
+    return new Map();
+  }
+}
+
+async function saveVerdicts(userId: string, walletId: string, slug: string, stages: CachedVerdict["stages"]) {
+  const row = {
+    id: `${walletId}:${slug}`,
+    userId,
+    walletId,
+    slug,
+    stagesJson: JSON.stringify(stages),
+    checkedAt: new Date().toISOString(),
+  };
+  await getDb()
+    .insert(openseaVerdicts)
+    .values(row)
+    .onConflictDoUpdate({ target: openseaVerdicts.id, set: { stagesJson: row.stagesJson, checkedAt: row.checkedAt } })
+    .catch(() => {});
+}
+
 const isPublicStage = (s: OsStage | null | undefined) => /public/i.test(s?.stage_type ?? "");
 
 export async function checkEligibility(
@@ -132,6 +179,8 @@ export async function checkEligibility(
   priceWei: string | null;
   maxFeePerGas: string;
   notes: string[];
+  /** Structured notes (timestamps stay ISO here; the client / bot formats them in the viewer's timezone). */
+  noteItems: NoteItem[];
   allowlistInfo: Record<string, unknown>;
 }> {
   const chain = requireChain(t.chain.key);
@@ -187,11 +236,9 @@ export async function checkEligibility(
         : null,
     openseaWalletLogin: Boolean(opts.openseaWalletLogin),
   };
-  if (useOs && !activeOs && nextOs)
-    notes.push(
-      `"${nextOs.label ?? nextOs.stage_type}" has not started yet${nextOs.start_time ? ` (starts ${nextOs.start_time})` : ""}. OpenSea only reveals upcoming-stage allowlists to the wallet itself, so each wallet signs OpenSea's sign-in message (off-chain, no gas, no balance needed).`,
-    );
-  if (useOs && !activeOs && !nextOs) notes.push("This drop has no active or upcoming stage on OpenSea.");
+  const noteItems: NoteItem[] = [];
+  if (useOs && !activeOs && !nextOs) noteItems.push({ kind: "no_stage" });
+  const cachedVerdicts = useOs && t.slug && targetOs ? await loadVerdicts(userId, t.slug) : new Map<string, CachedVerdict>();
 
   const rows = await mapLimit(list, useOs ? 3 : 6, async (w): Promise<EligibilityRow> => {
     const [balance, minted] = await Promise.all([
@@ -272,9 +319,11 @@ export async function checkEligibility(
             validateSiweFields(proof.fields, w.address);
             jwt = await jwtFromSignature(proof.fields, proof.signature);
           }
-          if (!jwt) needsOpenSeaLogin = true;
+          const cached = cachedVerdicts.get(w.id);
+          if (!jwt && !cached) needsOpenSeaLogin = true;
           else {
-            const res = await eligibilityWithJwt(jwt, t.slug);
+            const res = jwt ? await eligibilityWithJwt(jwt, t.slug) : cached!.stages;
+            if (jwt) await saveVerdicts(userId, w.id, t.slug, res);
             const all = drop?.stages?.length
               ? drop.stages
               : [activeOs, nextOs].filter(Boolean as any as (x: OsStage | null) => x is OsStage);
@@ -295,7 +344,7 @@ export async function checkEligibility(
             if (target?.eligible === true) {
               access = {
                 status: isPublicStage(targetOs) ? "public" : "yes",
-                source: "OpenSea eligibility API",
+                source: jwt ? "OpenSea eligibility API" : "OpenSea eligibility API (saved result)",
                 detail: `eligible for "${label}"${activeOs ? "" : " (upcoming)"}`,
               };
               legacy = "eligible";
@@ -304,7 +353,7 @@ export async function checkEligibility(
               const later = stages.find((s) => s.eligible && s.uuid !== targetOs.uuid);
               access = {
                 status: "no",
-                source: "OpenSea eligibility API",
+                source: jwt ? "OpenSea eligibility API" : "OpenSea eligibility API (saved result)",
                 detail: `not eligible for "${label}"${later ? `; eligible for "${later.label ?? later.type}"` : ""}`,
               };
               legacy = "not_eligible";
@@ -357,7 +406,14 @@ export async function checkEligibility(
       mintedSoFar: minted,
       maxPerWallet,
       remainingForWallet: d.remaining,
+      maxQty: walletMaxQty({
+        maxPerWallet: stages?.find((x) => x.uuid === targetOs?.uuid)?.maxPerWallet ?? maxPerWallet,
+        minted,
+        supplyRemaining: supplyRemaining !== null ? Number(supplyRemaining > 100000n ? 100000n : supplyRemaining) : null,
+      }),
       suggestedQty: d.suggestedQty,
+      unitPriceWei: price.toString(),
+      gasCostWei: gasCost.toString(),
       estCostWei: cost.toString(),
       estCost: formatEther(cost),
       access,
@@ -374,5 +430,20 @@ export async function checkEligibility(
   const targetStage = targetOs
     ? { label: targetOs.label ?? null, type: targetOs.stage_type ?? null, start: targetOs.start_time ?? null, active: Boolean(activeOs) }
     : null;
-  return { rows, targetStage, priceWei: priceKnown?.toString() ?? null, maxFeePerGas: fees.maxFeePerGas.toString(), notes, allowlistInfo };
+  if (useOs && !activeOs && nextOs)
+    noteItems.push({
+      kind: "stage_upcoming",
+      label: nextOs.label ?? nextOs.stage_type ?? "Next stage",
+      start: nextOs.start_time ?? null,
+      needsVerification: rows.some((r) => r.needsOpenSeaLogin),
+    });
+  return {
+    rows,
+    targetStage,
+    noteItems,
+    priceWei: priceKnown?.toString() ?? null,
+    maxFeePerGas: fees.maxFeePerGas.toString(),
+    notes,
+    allowlistInfo,
+  };
 }

@@ -9,6 +9,8 @@ import { buildMintTx } from "./build.js";
 import { getFees } from "./fees.js";
 import { MintRequest } from "./types.js";
 import { createPlan } from "../plans.js";
+import { simulateIgnoringBalance } from "./access.js";
+import { getAddress, toQuantity } from "ethers";
 
 export interface SimRow {
   walletId: string;
@@ -24,7 +26,50 @@ export interface SimRow {
   totalMaxWei: string;
   to: string | null;
   selector: string | null;
+  /** Raw technical error (for the details view). */
   error: string | null;
+  /** Plain-English reason shown to the user when the wallet can't mint. */
+  reason: string | null;
+  /** Contract accepts the call when the wallet is funded (state-override sim). */
+  passesIgnoringBalance: boolean | null;
+  balanceWei: string;
+  funded: boolean;
+  /** Will be included in the mint plan. */
+  mintable: boolean;
+  /** Excluded only because of a failed simulation on a public stage — user may include it explicitly. */
+  overridable: boolean;
+}
+
+/** Turn API / revert errors into a short plain-English reason. */
+export function explainMintError(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const m = String(raw);
+  if (/not eligible|not on (the )?allow ?list|NOT_ELIGIBLE|allowlist/i.test(m)) return "Not on the allowlist for this stage.";
+  if (/InvalidProof|InvalidSignature|PayerNotAllowed|TokenGatedNotTokenOwner/.test(m))
+    return "Not on the allowlist (proof or signature rejected).";
+  if (/NotActive|not active|no active stage|\b409\b/i.test(m)) return "Stage hasn't started yet.";
+  if (/MaxMintedPerWallet|per[- ]wallet|exceeds max.*wallet/i.test(m)) return "Over the per-wallet mint limit.";
+  if (/MaxSupply|sold out|exceeds.*supply/i.test(m)) return "Sold out (or not enough supply left for this quantity).";
+  if (/IncorrectPayment|wrong (payment|value)|msg\.value/i.test(m)) return "Wrong payment amount for this stage.";
+  if (/insufficient funds|INSUFFICIENT_FUNDS|exceeds balance/i.test(m)) return "Not enough balance for price + gas.";
+  if (/paused/i.test(m)) return "Minting is paused on the contract.";
+  return `Simulation reverted: ${m.slice(0, 160)}`;
+}
+
+/** eth_estimateGas with a fake balance (works for unfunded wallets on RPCs that support state overrides). */
+async function estimateIgnoringBalance(pool: ReturnType<typeof getPool>, tx: { from: string; to: string; data: string; value: bigint }) {
+  const from = getAddress(tx.from);
+  return pool.read(
+    async (p) =>
+      BigInt(
+        await p.send("eth_estimateGas", [
+          { from, to: getAddress(tx.to), data: tx.data, value: toQuantity(tx.value) },
+          "latest",
+          { [from]: { balance: "0x" + (10n ** 30n).toString(16) } },
+        ]),
+      ),
+    "estimateGas+stateOverride",
+  );
 }
 
 export function fallbackGas(strategy: MintRequest["strategy"], qty: number): bigint {
@@ -44,20 +89,29 @@ export async function simulateMint(t: ResolvedTarget, req: MintRequest, userId: 
   const runAtMs = req.runAt ? new Date(req.runAt).getTime() : Date.now();
   const beforeStart = runAtMs > Date.now() + 2000;
 
+  const publicStage =
+    req.strategy === "seadrop_public" ||
+    (req.strategy === "opensea_api" && /public/i.test((t.opensea?.drop?.active_stage ?? t.opensea?.drop?.next_stage)?.stage_type ?? ""));
+  const force = new Set(req.forceWalletIds ?? []);
+
   const rows: SimRow[] = await Promise.all(
     req.wallets.map(async (wq): Promise<SimRow> => {
       const w = await getWallet(userId, wq.walletId);
-      const base = { walletId: w.id, label: w.label, address: w.address, quantity: wq.quantity };
+      const balance = await pool.read((p) => p.getBalance(w.address), "balance").catch(() => 0n);
+      const base = { walletId: w.id, label: w.label, address: w.address, quantity: wq.quantity, balanceWei: balance.toString() };
       let tx;
       try {
         tx = await buildMintTx(t, req, w.address, wq.quantity, undefined, userId);
       } catch (e: any) {
         const notActive = e.code === "NOT_ACTIVE";
+        const unfundedOnly = e.code === "INSUFFICIENT_FUNDS"; // OpenSea checked the allowlist first and only balance failed
         const gl = BigInt(req.gasLimit ?? fallbackGas(req.strategy, wq.quantity));
+        const expected = notActive && beforeStart;
+        const overridable = publicStage && !unfundedOnly && !notActive;
         return {
           ...base,
           ok: false,
-          expectedRevertBeforeStart: notActive && beforeStart,
+          expectedRevertBeforeStart: expected,
           gasEstimate: null,
           gasLimit: gl.toString(),
           valueWei: "0",
@@ -66,45 +120,71 @@ export async function simulateMint(t: ResolvedTarget, req: MintRequest, userId: 
           to: null,
           selector: null,
           error: e.message,
+          reason: expected
+            ? "Stage hasn't started yet. The transaction is built and checked again at start time."
+            : explainMintError(e.message),
+          passesIgnoringBalance: unfundedOnly ? true : null,
+          funded: false,
+          mintable: expected || (unfundedOnly && beforeStart) || (overridable && force.has(w.id)),
+          overridable,
         };
       }
+      const sim = await simulateIgnoringBalance(pool, { from: w.address, to: tx.to, data: tx.data, value: tx.value });
       let gasEstimate: bigint | null = null;
-      let error: string | null = null;
       try {
-        await pool.read((p) => p.call({ from: w.address, to: tx.to, data: tx.data, value: tx.value }), "eth_call");
         gasEstimate = await pool.read((p) => p.estimateGas({ from: w.address, to: tx.to, data: tx.data, value: tx.value }), "estimateGas");
-      } catch (e: any) {
-        error = revertReason(e);
+      } catch {
+        if (sim.ok)
+          gasEstimate = await estimateIgnoringBalance(pool, { from: w.address, to: tx.to, data: tx.data, value: tx.value }).catch(
+            () => null,
+          );
       }
       const gasLimit = BigInt(req.gasLimit ?? (gasEstimate ? (gasEstimate * 125n) / 100n : fallbackGas(req.strategy, wq.quantity)));
       const maxGas = gasLimit * fees.maxFeePerGas;
+      const need = tx.value + maxGas;
+      const funded = balance >= need;
+      const failed = sim.ok === false;
+      const expected = failed && beforeStart && /NotActive|not active|before start|stage/i.test(sim.reason ?? "");
+      const passes = sim.ok;
+      let reason: string | null = null;
+      if (failed && !expected) reason = explainMintError(sim.reason);
+      else if (expected) reason = "Stage hasn't started yet. Checked again at start time.";
+      else if (!funded)
+        reason = `Needs ~${formatEther(need)} ${chain.nativeSymbol} (has ${formatEther(balance)}).${beforeStart ? " Fund it before the start time." : ""}`;
+      const overridable = publicStage && failed && !expected;
+      const mintable = ((passes !== false || expected) && (funded || beforeStart)) || (overridable && force.has(w.id));
       return {
         ...base,
-        ok: error === null,
-        expectedRevertBeforeStart: error !== null && beforeStart,
+        ok: passes === true && funded,
+        expectedRevertBeforeStart: expected,
         gasEstimate: gasEstimate?.toString() ?? null,
         gasLimit: gasLimit.toString(),
         valueWei: tx.value.toString(),
         maxGasCostWei: maxGas.toString(),
-        totalMaxWei: (tx.value + maxGas).toString(),
+        totalMaxWei: need.toString(),
         to: tx.to,
         selector: tx.data.slice(0, 10),
-        error,
+        error: failed ? (sim.reason ?? null) : passes === null ? sim.reason : null,
+        reason,
+        passesIgnoringBalance: passes,
+        funded,
+        mintable,
+        overridable,
       };
     }),
   );
 
-  const totalValue = rows.reduce((a, r) => a + BigInt(r.valueWei), 0n);
-  const totalGas = rows.reduce((a, r) => a + BigInt(r.maxGasCostWei), 0n);
-  const totalNfts = rows.reduce((a, r) => a + r.quantity, 0);
+  const totalValue = rows.filter((r) => r.mintable).reduce((a, r) => a + BigInt(r.valueWei), 0n);
+  const totalGas = rows.filter((r) => r.mintable).reduce((a, r) => a + BigInt(r.maxGasCostWei), 0n);
+  const totalNfts = rows.filter((r) => r.mintable).reduce((a, r) => a + r.quantity, 0);
   const blockers: string[] = [];
   try {
     await assertDailyBudget(userId, chain, totalValue + totalGas);
   } catch (e: any) {
     blockers.push(e.message);
   }
-  const failed = rows.filter((r) => !r.ok && !r.expectedRevertBeforeStart);
-  if (failed.length === rows.length && rows.length) blockers.push("Every wallet failed simulation");
+  if (rows.length && !rows.some((r) => r.mintable))
+    blockers.push("No selected wallet can mint right now. See the reason next to each wallet.");
 
   const caps = await capsFor(userId, chain);
   const summary = {
@@ -124,7 +204,7 @@ export async function simulateMint(t: ResolvedTarget, req: MintRequest, userId: 
     runAt: req.runAt ?? null,
     scheduled: beforeStart,
   };
-  const okRows = rows.filter((r) => r.ok || r.expectedRevertBeforeStart);
+  const okRows = rows.filter((r) => r.mintable);
   const plan =
     blockers.length || okRows.length === 0
       ? null

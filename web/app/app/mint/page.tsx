@@ -9,6 +9,9 @@ import { usePrivy, useSignMessage } from "@privy-io/react-auth";
 import { useWalletList } from "@/lib/wallets";
 import { ChainSelect } from "@/components/ChainSelect";
 import { ConfirmBox } from "@/components/Confirm";
+import { formatDateTime, localTimeZone, zoneLabel, zonedWallTimeToDate } from "@/lib/time";
+import { useNow } from "@/lib/useNow";
+import { clampQty } from "@nft-mint-bot/server/qty";
 
 type Strategy = "seadrop_public" | "opensea_api" | "generic";
 const STRAT = STRATEGY_LABELS as Record<Strategy, string>;
@@ -21,7 +24,6 @@ export default function MintPage() {
   const walletList = useWalletList(api, userId);
   const [scope, setScope] = useState<"all" | "select">("all");
   const [picked, setPicked] = useState<Record<string, boolean>>({});
-  const [qtyMode, setQtyMode] = useState<"max" | "custom">("max");
   const [input, setInput] = useState("");
   const [chain, setChain] = useState("");
   const [t, setT] = useState<any>(null);
@@ -31,7 +33,8 @@ export default function MintPage() {
   const [sig, setSig] = useState("");
   const [priceEth, setPriceEth] = useState("");
   const [tokenId, setTokenId] = useState("");
-  const [qty, setQty] = useState(1);
+  const [qtys, setQtys] = useState<Record<string, number>>({});
+  const [force, setForce] = useState<Record<string, boolean>>({});
   const [elig, setElig] = useState<any>(null);
   const [sel, setSel] = useState<Record<string, boolean>>({});
   const [verifyNote, setVerifyNote] = useState<string | null>(null);
@@ -42,6 +45,11 @@ export default function MintPage() {
   const [offsetMs, setOffsetMs] = useState(0);
   const [sim, setSim] = useState<any>(null);
   const [job, setJob] = useState<any>(null);
+  const now = useNow(1000);
+  const [tz, setTz] = useState<string | null>(null);
+  useEffect(() => setTz(localTimeZone()), []);
+  const fmt = (when: string | number | Date | null | undefined, relative = true) =>
+    when ? formatDateTime(when, { timeZone: tz ?? undefined, relative, now }) : "";
 
   const doResolve = async (inp = input, ch = chain) => {
     if (!inp.trim()) return;
@@ -133,19 +141,22 @@ export default function MintPage() {
       }
       setElig(r);
       setSel(Object.fromEntries(r.rows.filter((x: any) => x.eligibleIgnoringBalance).map((x: any) => [x.walletId, true])));
+      setQtys(Object.fromEntries(r.rows.map((x: any) => [x.walletId, clampQty(x.suggestedQty || 1, Math.max(1, x.maxQty ?? 1))])));
+      setForce({});
     } catch (e: any) {
       setErr(e.message);
     } finally {
       setBusy(null);
     }
   };
-  /** Quantity per selected wallet: the stage maximum still available to it, or the custom number (capped). */
-  const qtyFor = (r: any) => {
-    const max = Math.max(0, r.suggestedQty ?? 0);
-    return qtyMode === "max" ? max : Math.min(Math.max(1, qty), max || qty);
-  };
-  const runAt = when === "now" ? null : when === "stage" ? stageStart || null : custom ? new Date(custom).toISOString() : null;
-  const simulate = async () => {
+  /** Stepper bound: stage per-wallet limit minus already minted (at least 1 so any wallet can be simulated). */
+  const maxFor = (r: any) => Math.max(1, r.maxQty ?? 1);
+  const qtyFor = (r: any) => clampQty(qtys[r.walletId] ?? 1, maxFor(r));
+  const setQtyFor = (r: any, q: number) => setQtys((m) => ({ ...m, [r.walletId]: clampQty(q, maxFor(r)) }));
+  const rowCostWei = (r: any) => BigInt(r.unitPriceWei ?? "0") * BigInt(qtyFor(r)) + BigInt(r.gasCostWei ?? "0");
+  const customDate = when === "custom" && custom ? zonedWallTimeToDate(custom, tz ?? "UTC") : null;
+  const runAt = when === "now" ? null : when === "stage" ? stageStart || null : customDate ? customDate.toISOString() : null;
+  const simulate = async (forceIds: string[] = []) => {
     setErr(null);
     setSim(null);
     setBusy("Simulating…");
@@ -165,6 +176,7 @@ export default function MintPage() {
             gasMode,
             runAt,
             offsetMs,
+            forceWalletIds: forceIds.length ? forceIds : undefined,
           },
         }),
       );
@@ -176,6 +188,10 @@ export default function MintPage() {
   };
   const rows = elig?.rows ?? [];
   const sym = t?.chain?.nativeSymbol ?? "";
+  const selRows = rows.filter((r: any) => sel[r.walletId]);
+  const totalWei = selRows.reduce((a: bigint, r: any) => a + rowCostWei(r), 0n);
+  const totalNfts = selRows.reduce((a: number, r: any) => a + qtyFor(r), 0);
+  const forceIds = Object.keys(force).filter((k) => force[k]);
 
   return (
     <>
@@ -220,7 +236,7 @@ export default function MintPage() {
             </div>
             <div className="kv">
               <b>Recommended</b>
-              {t.recommendedStrategy}
+              {STRAT[t.recommendedStrategy as Strategy] ?? "Not mintable with SkyBOT"}
             </div>
           </div>
           {t.stages?.length > 0 && (
@@ -228,18 +244,38 @@ export default function MintPage() {
               <thead>
                 <tr>
                   <th>Stage</th>
-                  <th>Type</th>
+                  <th className="hide-sm">Type</th>
                   <th>Price</th>
-                  <th>Status</th>
+                  <th className="hide-sm">Max / wallet</th>
+                  <th>Schedule</th>
                 </tr>
               </thead>
               <tbody>
                 {t.stages.map((s: any, i: number) => (
                   <tr key={i}>
                     <td>{s.name}</td>
-                    <td>{s.type}</td>
-                    <td>{s.priceWei != null ? `${fmtEth(s.priceWei)} ${sym}` : "?"}</td>
-                    <td className={s.status === "active" ? "ok" : s.status === "upcoming" ? "warn" : "muted"}>{s.status}</td>
+                    <td className="hide-sm">{STAGE_TYPE[s.type] ?? s.type}</td>
+                    <td>{s.priceWei == null ? "Unknown" : s.priceWei === "0" ? "Free" : `${fmtEth(s.priceWei)} ${sym}`}</td>
+                    <td className="hide-sm">{s.maxPerWallet ?? "—"}</td>
+                    <td className={s.status === "active" ? "ok" : s.status === "upcoming" ? "warn" : "muted"}>
+                      {s.status === "active" ? (
+                        <>Live now{s.end ? <div className="muted small">ends {fmt(s.end)}</div> : null}</>
+                      ) : s.status === "upcoming" ? (
+                        s.start ? (
+                          `Starts ${fmt(s.start)}`
+                        ) : (
+                          "Upcoming"
+                        )
+                      ) : s.status === "ended" ? (
+                        s.end ? (
+                          `Ended ${fmt(s.end, false)}`
+                        ) : (
+                          "Ended"
+                        )
+                      ) : (
+                        "Unknown"
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -359,6 +395,18 @@ export default function MintPage() {
       {elig && (
         <div className="card">
           <h2>2 · Wallet Eligibility</h2>
+          {elig.noteItems?.map((n: any, i: number) => (
+            <div key={`ni${i}`} className="notice">
+              {n.kind === "stage_upcoming" ? (
+                <>
+                  <b>{n.label}</b> starts {n.start ? fmt(n.start) : "soon"}.
+                  {n.needsVerification ? " Verify each wallet with OpenSea to check eligibility early — free, no gas." : ""}
+                </>
+              ) : (
+                "No mint stage is live or scheduled right now."
+              )}
+            </div>
+          ))}
           {elig.notes?.map((n: string) => (
             <div key={n} className="notice">
               {n}
@@ -367,9 +415,8 @@ export default function MintPage() {
           {rows.some((r: any) => r.needsOpenSeaLogin) && (
             <div className="notice row" style={{ justifyContent: "space-between" }}>
               <span>
-                {rows.filter((r: any) => r.needsOpenSeaLogin).length} wallet(s) need OpenSea verification for this stage. Each wallet signs
-                OpenSea&apos;s sign-in message in your browser: off-chain, no gas, no balance needed. Signing in accepts OpenSea&apos;s
-                Terms for that wallet.
+                {rows.filter((r: any) => r.needsOpenSeaLogin).length} wallet(s) need OpenSea verification. Each wallet signs OpenSea&apos;s
+                sign-in message in your browser (off-chain, no gas) and accepts OpenSea&apos;s Terms.
               </span>
               {tgOnly && !authenticated ? (
                 <button onClick={connectPrivy}>Connect with Privy</button>
@@ -399,26 +446,16 @@ export default function MintPage() {
             <button className="ghost" onClick={() => setSel({})}>
               Clear
             </button>
+            <button
+              className="ghost"
+              onClick={() => setQtys((m) => ({ ...m, ...Object.fromEntries(rows.map((r: any) => [r.walletId, maxFor(r)])) }))}
+            >
+              Set All to Max
+            </button>
             <span className="spacer" />
-            <label>
-              Quantity per wallet{" "}
-              <select value={qtyMode} onChange={(e) => setQtyMode(e.target.value as "max" | "custom")} style={{ width: "auto" }}>
-                <option value="max">Max allowed</option>
-                <option value="custom">Custom</option>
-              </select>
-            </label>
-            {qtyMode === "custom" && (
-              <input
-                type="number"
-                min={1}
-                max={1000}
-                value={qty}
-                onChange={(e) => setQty(Math.max(1, Number(e.target.value) || 1))}
-                style={{ width: 80 }}
-                aria-label="Quantity per wallet"
-              />
-            )}
-            <span className="muted">{Object.values(sel).filter(Boolean).length} selected</span>
+            <span className="muted">
+              {selRows.length} selected · {totalNfts} NFT(s) · ~{fmtEth(totalWei.toString())} {sym}
+            </span>
           </div>
           <table>
             <thead>
@@ -427,8 +464,9 @@ export default function MintPage() {
                 <th>Wallet</th>
                 <th>Eligibility</th>
                 <th className="hide-sm">Simulation</th>
-                <th>Qty</th>
-                <th>Mint Readiness</th>
+                <th>Quantity</th>
+                <th>Est. Cost</th>
+                <th className="hide-sm">Balance</th>
               </tr>
             </thead>
             <tbody>
@@ -458,25 +496,48 @@ export default function MintPage() {
                         <span className="muted">—</span>
                       )}
                     </td>
-                    <td className="mono">{sel[r.walletId] ? qtyFor(r) : <span className="muted">{r.suggestedQty}</span>}</td>
                     <td>
-                      {other.length > 0 && <div className="bad">{other.join("; ")}</div>}
-                      {r.balanceOk ? (
-                        <span className="ok">
-                          Funded ({Number(r.balance).toFixed(5)} {sym})
-                        </span>
-                      ) : (
-                        <span className="warn">
-                          Needs ~{Number(r.estCost).toFixed(6)} {sym} · has {Number(r.balance).toFixed(5)}
-                        </span>
-                      )}
+                      <div className="stepper" aria-label={`Quantity for ${r.label}`}>
+                        <button
+                          className="ghost"
+                          disabled={qtyFor(r) <= 1}
+                          onClick={() => setQtyFor(r, qtyFor(r) - 1)}
+                          aria-label="Decrease"
+                        >
+                          −
+                        </button>
+                        <input
+                          inputMode="numeric"
+                          value={qtyFor(r)}
+                          onChange={(e) => setQtyFor(r, Number(e.target.value.replace(/\D/g, "")) || 1)}
+                          aria-label="Quantity"
+                        />
+                        <button
+                          className="ghost"
+                          disabled={qtyFor(r) >= maxFor(r)}
+                          onClick={() => setQtyFor(r, qtyFor(r) + 1)}
+                          aria-label="Increase"
+                        >
+                          +
+                        </button>
+                      </div>
+                      <div className="muted small">{r.maxQty > 0 ? `max ${r.maxQty}` : "none left"}</div>
+                      {other.length > 0 && <div className="bad small">{other.join("; ")}</div>}
+                    </td>
+                    <td className="mono">
+                      ~{fmtEth(rowCostWei(r).toString())} {sym}
+                    </td>
+                    <td className="hide-sm">
+                      <span className={BigInt(r.balanceWei ?? "0") >= rowCostWei(r) ? "ok" : "warn"}>
+                        {fmtEth(r.balanceWei, 5)} {sym}
+                      </span>
                     </td>
                   </tr>
                 );
               })}
               {!rows.length && (
                 <tr>
-                  <td colSpan={6} className="muted">
+                  <td colSpan={7} className="muted">
                     No wallets. Add some on <Link href="/app/wallets">Wallets</Link>.
                   </td>
                 </tr>
@@ -485,16 +546,19 @@ export default function MintPage() {
           </table>
           <h2 style={{ marginTop: 16 }}>3 · Timing</h2>
           <div className="row">
-            <select value={gasMode} onChange={(e) => setGasMode(e.target.value)} style={{ width: "auto" }}>
-              <option value="eco">eco</option>
-              <option value="normal">normal</option>
-              <option value="aggressive">aggressive</option>
-            </select>
+            <label>
+              Gas{" "}
+              <select value={gasMode} onChange={(e) => setGasMode(e.target.value)} style={{ width: "auto" }}>
+                <option value="eco">Eco</option>
+                <option value="normal">Normal</option>
+                <option value="aggressive">Aggressive</option>
+              </select>
+            </label>
             <label>
               <input type="radio" checked={when === "now"} onChange={() => setWhen("now")} /> Now
             </label>
             <label>
-              <input type="radio" checked={when === "stage"} disabled={!stageStart} onChange={() => setWhen("stage")} /> Stage Start
+              <input type="radio" checked={when === "stage"} disabled={!stageStart} onChange={() => setWhen("stage")} /> At stage start
             </label>
             <label>
               <input type="radio" checked={when === "custom"} onChange={() => setWhen("custom")} /> Custom
@@ -509,15 +573,22 @@ export default function MintPage() {
               style={{ width: "auto" }}
             />
             {when !== "now" && (
-              <label>
-                offset ms{" "}
+              <label title="Send this many milliseconds before (negative) or after (positive) the chosen time">
+                Offset (ms){" "}
                 <input type="number" value={offsetMs} onChange={(e) => setOffsetMs(Number(e.target.value))} style={{ width: 90 }} />
               </label>
             )}
-            <button disabled={!rows.some((r: any) => sel[r.walletId] && qtyFor(r) > 0) || !!busy} onClick={simulate}>
+            <button disabled={!selRows.length || !!busy || (when === "custom" && !customDate)} onClick={() => simulate()}>
               Simulate
             </button>
           </div>
+          <p className="muted small" style={{ marginTop: 8 }}>
+            {tz ? `Times use your timezone: ${zoneLabel(tz)}.` : ""}
+            {when === "stage" && stageStart ? ` Runs at ${fmt(stageStart)}.` : ""}
+            {when === "custom" && customDate ? ` Runs at ${fmt(customDate)}.` : ""}
+            {when === "custom" && custom && !customDate ? " That local time doesn't exist in your timezone (clock change)." : ""}
+            {when === "custom" && customDate && customDate.getTime() < now ? " This time is in the past, so it runs immediately." : ""}
+          </p>
         </div>
       )}
 
@@ -546,6 +617,61 @@ export default function MintPage() {
               {sim.summary.dailySpent} / {sim.summary.dailyCap}
             </div>
           </div>
+          {sim.summary.runAt && <p className="muted">Scheduled for {fmt(sim.summary.runAt)}</p>}
+          <table style={{ marginTop: 8 }}>
+            <thead>
+              <tr>
+                <th>Wallet</th>
+                <th>Qty</th>
+                <th>Result</th>
+                <th className="hide-sm">Max Cost</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sim.rows.map((r: any) => (
+                <tr key={r.walletId}>
+                  <td>
+                    {r.label} <span className="mono muted">{short(r.address)}</span>
+                  </td>
+                  <td className="mono">{r.quantity}</td>
+                  <td>
+                    {r.mintable ? (
+                      <span className="ok">{r.reason ? "Will mint · " : "Ready to mint"}</span>
+                    ) : (
+                      <span className="bad">Won&apos;t mint · </span>
+                    )}
+                    {r.reason && <span className={r.mintable ? "muted" : ""}>{r.reason}</span>}
+                    {r.overridable && (
+                      <label className="small" style={{ display: "block", marginTop: 4 }}>
+                        <input
+                          type="checkbox"
+                          checked={Boolean(force[r.walletId])}
+                          onChange={(e) => setForce((f) => ({ ...f, [r.walletId]: e.target.checked }))}
+                        />{" "}
+                        Public stage: include anyway (the transaction may fail and still cost gas)
+                      </label>
+                    )}
+                    {r.error && r.reason && !r.mintable && (
+                      <details className="small muted">
+                        <summary>Technical details</summary>
+                        <span className="mono">{r.error}</span>
+                      </details>
+                    )}
+                  </td>
+                  <td className="mono hide-sm">
+                    {fmtEth(r.totalMaxWei)} {sym}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {sim.rows.some((r: any) => r.overridable) && (
+            <div className="row" style={{ marginTop: 8 }}>
+              <button className="ghost" disabled={!!busy} onClick={() => simulate(forceIds)}>
+                Re-simulate{forceIds.length ? ` including ${forceIds.length} override(s)` : ""}
+              </button>
+            </div>
+          )}
           {sim.blockers?.map((b: string) => (
             <div key={b} className="err">
               {b}
@@ -567,7 +693,8 @@ export default function MintPage() {
           )}
           {job && (
             <div className="notice">
-              Job <span className="mono">{job.id}</span> {job.status}. Track on <Link href="/app/jobs">Jobs</Link>.
+              {job.status === "scheduled" ? "Mint scheduled" : "Mint started"}
+              {job.runAt ? ` for ${fmt(job.runAt)}` : ""}. Track it on <Link href="/app/jobs">Jobs</Link>.
             </div>
           )}
         </div>
@@ -575,6 +702,14 @@ export default function MintPage() {
     </>
   );
 }
+
+const STAGE_TYPE: Record<string, string> = {
+  public: "Public",
+  signed: "Allowlist (signed)",
+  allowlist: "Allowlist",
+  token_gated: "Token-gated",
+  unknown: "Unknown",
+};
 
 const ACCESS_LABEL: Record<string, string> = {
   yes: "Eligible",
