@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { getIdentityToken, usePrivy } from "@privy-io/react-auth";
+import { localTimeZone } from "@/lib/time";
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { useTelegram } from "@/lib/telegram";
@@ -31,6 +32,17 @@ async function idTokenOrNull() {
   }
 }
 
+/** Silently remember the browser timezone so Telegram messages use it too. Never blocks or surfaces errors. */
+function saveTimeZone(saved: string | null | undefined, auth: { token?: string | null; idToken?: string | null }) {
+  try {
+    const tz = localTimeZone();
+    if (!tz || tz === saved) return;
+    void api("/api/me/timezone", { method: "PUT", body: { timeZone: tz }, ...auth }).catch(() => {});
+  } catch {
+    /* ignore */
+  }
+}
+
 export function AppShell({ children }: { children: React.ReactNode }) {
   const { ready, authenticated, login, logout, getAccessToken, user } = usePrivy();
   const { isMiniApp, initData, webApp } = useTelegram();
@@ -55,6 +67,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           setMe(r);
           setTgOnly(false);
           setErr(null);
+          saveTimeZone(r?.user?.timezone, { token, idToken });
           return;
         }
         // Mini App: Privy's seamless Telegram login didn't sign us in → verified-initData SkyBOT session (fallback).
@@ -63,6 +76,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           if (cancelled) return;
           setMe({ user: sess.user, authVia: "telegram-session" });
           setTgOnly(true);
+          saveTimeZone(sess.user?.timezone, {});
           return;
         }
         if (!isMiniApp) login();

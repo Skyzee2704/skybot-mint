@@ -44,6 +44,14 @@
     ".": {
       "types": "./dist/vercel.d.ts",
       "default": "./dist/vercel.js"
+    },
+    "./time": {
+      "types": "./dist/util/time.d.ts",
+      "default": "./dist/util/time.js"
+    },
+    "./qty": {
+      "types": "./dist/core/mint/qty.d.ts",
+      "default": "./dist/core/mint/qty.js"
     }
   },
   "types": "dist/vercel.d.ts",

@@ -4,12 +4,37 @@ import { Fragment, useEffect, useState } from "react";
 import { strategyLabel } from "@/lib/labels";
 import { useApi } from "@/components/AppShell";
 import { short } from "@/lib/api";
+import { formatDateTime, formatShort, localTimeZone } from "@/lib/time";
+import { useNow } from "@/lib/useNow";
+
+const STATUS: Record<string, string> = {
+  scheduled: "Scheduled",
+  waiting_unlock: "Waiting",
+  running: "Running",
+  done: "Done",
+  failed: "Failed",
+  cancelled: "Cancelled",
+};
+const RESULT: Record<string, string> = {
+  pending: "Pending",
+  signed: "Signed",
+  broadcast: "Sent",
+  confirmed: "Confirmed",
+  reverted: "Reverted",
+  failed: "Failed",
+  timeout: "Timed out",
+};
+const ISO_RE = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z/g;
 
 export default function JobsPage() {
   const api = useApi();
   const [jobs, setJobs] = useState<any[]>([]);
   const [open, setOpen] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [tz, setTz] = useState<string | undefined>(undefined);
+  useEffect(() => setTz(localTimeZone()), []);
+  const now = useNow(1000);
+  const fmt = (w: string) => formatDateTime(w, { timeZone: tz, now });
   const load = () =>
     api("/api/jobs")
       .then((r) => setJobs(r.jobs))
@@ -26,7 +51,7 @@ export default function JobsPage() {
       <table>
         <thead>
           <tr>
-            <th>Created</th>
+            <th>When</th>
             <th>Status</th>
             <th>Chain</th>
             <th>Contract</th>
@@ -39,8 +64,17 @@ export default function JobsPage() {
           {jobs.map((j) => (
             <Fragment key={j.id}>
               <tr onClick={() => setOpen(open === j.id ? null : j.id)} style={{ cursor: "pointer" }}>
-                <td>{new Date(j.createdAt).toLocaleString()}</td>
-                <td className={j.status === "done" ? "ok" : j.status === "failed" ? "bad" : "warn"}>{j.status}</td>
+                <td>
+                  {j.runAt && ["scheduled", "waiting_unlock"].includes(j.status) ? (
+                    <>
+                      Runs {fmt(j.runAt)}
+                      <div className="muted small">created {fmt(j.createdAt)}</div>
+                    </>
+                  ) : (
+                    fmt(j.createdAt)
+                  )}
+                </td>
+                <td className={j.status === "done" ? "ok" : j.status === "failed" ? "bad" : "warn"}>{STATUS[j.status] ?? j.status}</td>
                 <td>{j.chain}</td>
                 <td className="mono">{short(j.target)}</td>
                 <td>{strategyLabel(j.strategy)}</td>
@@ -82,10 +116,10 @@ export default function JobsPage() {
                           <tr key={r.walletId}>
                             <td className="mono">{short(r.address)}</td>
                             <td>{r.quantity}</td>
-                            <td>{r.status}</td>
+                            <td>{RESULT[r.status] ?? r.status}</td>
                             <td>
                               {r.txHash ? (
-                                <a className="mono" href={r.explorer} target="_blank">
+                                <a className="mono" href={r.explorer} target="_blank" rel="noreferrer">
                                   {short(r.txHash)}
                                 </a>
                               ) : (
@@ -98,7 +132,7 @@ export default function JobsPage() {
                       </tbody>
                     </table>
                     <pre className="mono muted" style={{ whiteSpace: "pre-wrap" }}>
-                      {(j.log || []).join("\n")}
+                      {(j.log || []).map((l: string) => l.replace(ISO_RE, (m) => formatShort(m, { timeZone: tz }))).join("\n")}
                     </pre>
                   </td>
                 </tr>
@@ -108,7 +142,7 @@ export default function JobsPage() {
           {!jobs.length && (
             <tr>
               <td colSpan={7} className="muted">
-                No jobs yet.
+                No jobs yet. Simulate and confirm a mint on the Mint page to create one.
               </td>
             </tr>
           )}

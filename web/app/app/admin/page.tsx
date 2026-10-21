@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { useEffect, useState } from "react";
 import { useApi } from "@/components/AppShell";
+import { formatDateTime } from "@/lib/time";
 
 export default function AdminPage() {
   const api = useApi();
@@ -40,7 +41,7 @@ export default function AdminPage() {
               <td>{u.walletCount}</td>
               <td>{u.jobCount}</td>
               <td>{u.telegramLinked ? `@${u.telegramUsername || "linked"}` : "—"}</td>
-              <td className="muted">{new Date(u.lastSeenAt).toLocaleString()}</td>
+              <td className="muted">{u.lastSeenAt ? formatDateTime(u.lastSeenAt) : "—"}</td>
               <td>
                 {u.role !== "admin" && (
                   <button
