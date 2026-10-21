@@ -149,6 +149,13 @@ const DDL = [
     id TEXT PRIMARY KEY, user_id TEXT NOT NULL, at TEXT NOT NULL, action TEXT NOT NULL,
     chain TEXT, target TEXT, detail_json TEXT NOT NULL DEFAULT '{}')`,
   `CREATE INDEX IF NOT EXISTS audit_user_idx ON audit_log(user_id, action)`,
+  `CREATE TABLE IF NOT EXISTS opensea_verdicts (
+    id TEXT PRIMARY KEY, user_id TEXT NOT NULL, wallet_id TEXT NOT NULL, slug TEXT NOT NULL,
+    stages_json TEXT NOT NULL, checked_at TEXT NOT NULL)`,
+  `CREATE INDEX IF NOT EXISTS osv_user_slug ON opensea_verdicts(user_id, slug)`,
+  `CREATE TABLE IF NOT EXISTS wallet_tombstones (
+    id TEXT PRIMARY KEY, user_id TEXT NOT NULL, address TEXT NOT NULL, privy_wallet_id TEXT, removed_at TEXT NOT NULL)`,
+  `CREATE INDEX IF NOT EXISTS wallet_tombstones_user ON wallet_tombstones(user_id)`,
   `CREATE TABLE IF NOT EXISTS rate_buckets (
     key TEXT PRIMARY KEY, count INTEGER NOT NULL DEFAULT 0, window_start INTEGER NOT NULL)`,
 ];
@@ -166,10 +173,16 @@ CREATE TABLE telegram_links_v2 (code TEXT PRIMARY KEY, user_id TEXT NOT NULL, ex
 INSERT INTO telegram_links_v2 (code,user_id,expires_at,meta_json) SELECT code,user_id,expires_at,'{}' FROM telegram_links;
 DROP TABLE telegram_links; ALTER TABLE telegram_links_v2 RENAME TO telegram_links; PRAGMA foreign_keys=ON;`);
     }
+    const ucols = await c.execute("PRAGMA table_info(users)");
+    if (!ucols.rows.some((r: any) => r.name === "timezone")) await c.execute("ALTER TABLE users ADD COLUMN timezone TEXT");
+    const wcols = await c.execute("PRAGMA table_info(wallets)");
+    if (!wcols.rows.some((r: any) => r.name === "removed_at")) await c.execute("ALTER TABLE wallets ADD COLUMN removed_at TEXT");
     c.close();
   } else {
     for (const s of DDL) await exec!(s);
     await exec!(`ALTER TABLE telegram_links ADD COLUMN IF NOT EXISTS meta_json TEXT NOT NULL DEFAULT '{}'`);
+    await exec!(`ALTER TABLE users ADD COLUMN IF NOT EXISTS timezone TEXT`);
+    await exec!(`ALTER TABLE wallets ADD COLUMN IF NOT EXISTS removed_at TEXT`);
   }
 }
 

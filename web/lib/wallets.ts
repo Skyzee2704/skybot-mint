@@ -10,8 +10,14 @@ export type WalletItem = {
   source: string;
   isMain: boolean;
   privyWalletId: string | null;
+  removedAt?: string | null;
 };
-export type WalletData = { wallets: WalletItem[]; groups: { name: string; count: number }[] };
+export type WalletData = {
+  wallets: WalletItem[];
+  groups: { name: string; count: number }[];
+  /** Wallets hidden from SkyBOT (still in Privy custody). */
+  removedWallets?: WalletItem[];
+};
 
 const PREFIX = "skybot:wallets:v1";
 let KEY = PREFIX;
@@ -96,5 +102,24 @@ export function useWalletList(
     void reload();
   }, [reload]);
 
-  return { data, wallets: data?.wallets ?? [], groups: data?.groups ?? [], loading: !data && refreshing, refreshing, err, reload };
+  /** Optimistic local update (also written to the cache so a reload never flashes stale rows). */
+  const mutate = useCallback((fn: (d: WalletData) => WalletData) => {
+    setData((d) => {
+      const next = fn(d ?? { wallets: [], groups: [], removedWallets: [] });
+      writeCache(next);
+      return next;
+    });
+  }, []);
+
+  return {
+    data,
+    wallets: data?.wallets ?? [],
+    groups: data?.groups ?? [],
+    removedWallets: data?.removedWallets ?? [],
+    loading: !data && refreshing,
+    refreshing,
+    err,
+    reload,
+    mutate,
+  };
 }

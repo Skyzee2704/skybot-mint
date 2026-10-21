@@ -10,6 +10,8 @@ export const users = sqliteTable(
     email: text("email"),
     name: text("name"),
     role: text("role").notNull().default("user"),
+    /** IANA timezone reported by the user's browser (auto-saved); used for Telegram messages. */
+    timezone: text("timezone"),
     disabled: integer("disabled", { mode: "boolean" }).notNull().default(false),
     telegramUserId: text("telegram_user_id").unique(),
     telegramUsername: text("telegram_username"),
@@ -34,6 +36,8 @@ export const wallets = sqliteTable(
     hdIndex: integer("hd_index"),
     isMain: integer("is_main", { mode: "boolean" }).notNull().default(false),
     createdAt: text("created_at").notNull(),
+    /** Soft delete: hidden from SkyBOT (lists, sync, eligibility, mint, withdraw). Privy custody is untouched. */
+    removedAt: text("removed_at"),
   },
   (t) => [uniqueIndex("wallets_user_addr").on(t.userId, t.address), index("wallets_user_idx").on(t.userId)],
 );
@@ -143,4 +147,31 @@ export const auditLog = sqliteTable(
     detailJson: text("detail_json").notNull().default("{}"),
   },
   (t) => [index("audit_user_idx").on(t.userId, t.action)],
+);
+
+/** Last OpenSea eligibility-API verdicts per wallet + drop (so /check and later visits don't need a new sign-in). */
+export const openseaVerdicts = sqliteTable(
+  "opensea_verdicts",
+  {
+    id: text("id").primaryKey(), // `${walletId}:${slug}`
+    userId: text("user_id").notNull(),
+    walletId: text("wallet_id").notNull(),
+    slug: text("slug").notNull(),
+    stagesJson: text("stages_json").notNull(),
+    checkedAt: text("checked_at").notNull(),
+  },
+  (t) => [index("osv_user_slug").on(t.userId, t.slug)],
+);
+
+/** Wallets permanently removed (archived in Privy + deleted here). Sync never re-adds these addresses. */
+export const walletTombstones = sqliteTable(
+  "wallet_tombstones",
+  {
+    id: text("id").primaryKey(), // `${userId}:${address}`
+    userId: text("user_id").notNull(),
+    address: text("address").notNull(),
+    privyWalletId: text("privy_wallet_id"),
+    removedAt: text("removed_at").notNull(),
+  },
+  (t) => [index("wallet_tombstones_user").on(t.userId)],
 );

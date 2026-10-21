@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { eq, and, sql, desc } from "drizzle-orm";
+import { eq, and, sql, desc, isNull, isNotNull } from "drizzle-orm";
 import { randomBytes, randomUUID } from "node:crypto";
 import { getAddress } from "ethers";
 import { getDb } from "../db/client.js";
-import { users, wallets, groups, settings, telegramLinks, jobs } from "../db/schema.js";
+import { users, wallets, groups, settings, telegramLinks, jobs, walletTombstones } from "../db/schema.js";
 import { env } from "../config/env.js";
 import { createPrivyWallets, getPrivy } from "../auth/privy.js";
 import { privyConfigured } from "../config/env.js";
@@ -210,6 +210,7 @@ export function publicUser(u: AppUser) {
     email: u.email,
     name: u.name,
     role: roleFor(u),
+    timezone: u.timezone ?? null,
     telegramLinked: Boolean(u.telegramUserId),
     telegramUsername: u.telegramUsername,
     privyBacked: !u.privyUserId.startsWith("tg:"),
@@ -230,11 +231,28 @@ export function walletView(w: WalletRow) {
     privyWalletId: w.privyWalletId,
     hdIndex: w.hdIndex,
     createdAt: w.createdAt,
+    removedAt: w.removedAt ?? null,
   };
 }
 
+/** Active (not removed) wallets. Every feature — eligibility, /check, mint, withdraw, jobs — goes through this. */
 export async function listWallets(userId: string) {
-  return (await getDb().select().from(wallets).where(eq(wallets.userId, userId))).map(walletView);
+  return (
+    await getDb()
+      .select()
+      .from(wallets)
+      .where(and(eq(wallets.userId, userId), isNull(wallets.removedAt)))
+  ).map(walletView);
+}
+
+/** Wallets the user hid from SkyBOT (still in Privy custody); restorable. */
+export async function listRemovedWallets(userId: string) {
+  return (
+    await getDb()
+      .select()
+      .from(wallets)
+      .where(and(eq(wallets.userId, userId), isNotNull(wallets.removedAt)))
+  ).map(walletView);
 }
 
 export async function listGroups(userId: string, walletList?: { group: string | null }[]) {
@@ -249,11 +267,19 @@ export async function listGroups(userId: string, walletList?: { group: string | 
 /** Wallets + groups for one user with the two queries in parallel (Wallets page first paint). */
 export async function walletsAndGroups(userId: string) {
   const db = getDb();
-  const [ws, gs] = await Promise.all([listWallets(userId), db.select().from(groups).where(eq(groups.userId, userId))]);
-  return { wallets: ws, groups: gs.map((g) => ({ name: g.name, count: ws.filter((w) => w.group === g.name).length })) };
+  const [ws, gs, removed] = await Promise.all([
+    listWallets(userId),
+    db.select().from(groups).where(eq(groups.userId, userId)),
+    listRemovedWallets(userId),
+  ]);
+  return {
+    wallets: ws,
+    groups: gs.map((g) => ({ name: g.name, count: ws.filter((w) => w.group === g.name).length })),
+    removedWallets: removed,
+  };
 }
 
-export async function getWallet(userId: string, id: string): Promise<WalletRow> {
+export async function getWallet(userId: string, id: string, opts: { includeRemoved?: boolean } = {}): Promise<WalletRow> {
   const w = (
     await getDb()
       .select()
@@ -261,13 +287,27 @@ export async function getWallet(userId: string, id: string): Promise<WalletRow> 
       .where(and(eq(wallets.userId, userId), eq(wallets.id, id)))
       .limit(1)
   )[0];
+  if (w && w.removedAt && !opts.includeRemoved)
+    throw Object.assign(new Error(`Wallet ${w.label || w.address} was removed from SkyBOT. Restore it on the Wallets page to use it.`), {
+      statusCode: 404,
+      code: "WALLET_REMOVED",
+    });
   if (!w) throw Object.assign(new Error("Wallet not found"), { statusCode: 404 });
   return w;
 }
 
 export async function syncPrivyWallet(
   userId: string,
-  input: { privyWalletId: string; address: string; label?: string; group?: string | null; source?: string; hdIndex?: number | null },
+  input: {
+    privyWalletId: string;
+    address: string;
+    label?: string;
+    group?: string | null;
+    source?: string;
+    hdIndex?: number | null;
+    /** Explicit user action (import / restore) — allowed to bring back a removed wallet. */
+    restore?: boolean;
+  },
 ) {
   const db = getDb();
   const address = getAddress(input.address);
@@ -278,6 +318,19 @@ export async function syncPrivyWallet(
       .where(and(eq(wallets.userId, userId), eq(wallets.address, address)))
       .limit(1)
   )[0];
+  // Background sync must never resurrect a wallet the user removed.
+  if (existing?.removedAt && !input.restore) return { ...walletView(existing), skipped: "removed" as const };
+  if (!existing) {
+    const tomb = (
+      await db
+        .select()
+        .from(walletTombstones)
+        .where(eq(walletTombstones.id, `${userId}:${address}`))
+        .limit(1)
+    )[0];
+    if (tomb && !input.restore) return { id: null, address, skipped: "deleted" as const };
+    if (tomb) await db.delete(walletTombstones).where(eq(walletTombstones.id, tomb.id));
+  }
   if (existing) {
     await db
       .update(wallets)
@@ -285,12 +338,13 @@ export async function syncPrivyWallet(
         privyWalletId: input.privyWalletId,
         label: input.label ?? existing.label,
         groupName: input.group === undefined ? existing.groupName : input.group,
+        removedAt: null,
       })
       .where(eq(wallets.id, existing.id));
     return walletView((await db.select().from(wallets).where(eq(wallets.id, existing.id)))[0]!);
   }
   const id = randomUUID();
-  const count = (await db.select().from(wallets).where(eq(wallets.userId, userId))).length;
+  const count = (await listWallets(userId)).length;
   await db.insert(wallets).values({
     id,
     userId,
@@ -350,11 +404,84 @@ export async function updateWallet(userId: string, id: string, patch: { label?: 
   return walletView(await getWallet(userId, id));
 }
 
-export async function removeWallet(userId: string, id: string) {
-  await getWallet(userId, id);
+/**
+ * Hide a wallet from SkyBOT (soft delete). Privy custody is untouched — funds stay in the wallet.
+ * Pending jobs drop the wallet (or are cancelled when it was their only wallet).
+ */
+export async function hideWallet(userId: string, id: string) {
+  const w = await getWallet(userId, id);
   await getDb()
-    .delete(wallets)
+    .update(wallets)
+    .set({ removedAt: now(), isMain: false })
     .where(and(eq(wallets.userId, userId), eq(wallets.id, id)));
+  if (w.isMain) await promoteMain(userId);
+  return detachWalletFromJobs(userId, w);
+}
+
+/** Permanently delete our row and leave a tombstone so Privy sync never re-adds it. */
+export async function hardDeleteWallet(userId: string, id: string) {
+  const w = await getWallet(userId, id, { includeRemoved: true });
+  const db = getDb();
+  await db
+    .insert(walletTombstones)
+    .values({ id: `${userId}:${w.address}`, userId, address: w.address, privyWalletId: w.privyWalletId, removedAt: now() })
+    .onConflictDoUpdate({ target: walletTombstones.id, set: { removedAt: now() } });
+  const jobsNote = await detachWalletFromJobs(userId, w);
+  await db.delete(wallets).where(and(eq(wallets.userId, userId), eq(wallets.id, id)));
+  if (w.isMain) await promoteMain(userId);
+  return jobsNote;
+}
+
+/** Kept for older callers: hides the wallet. */
+export async function removeWallet(userId: string, id: string) {
+  return hideWallet(userId, id);
+}
+
+export async function restoreWallet(userId: string, id: string) {
+  const w = await getWallet(userId, id, { includeRemoved: true });
+  if (!w.removedAt) return walletView(w);
+  await getDb().update(wallets).set({ removedAt: null }).where(eq(wallets.id, w.id));
+  if (!(await listWallets(userId)).some((x) => x.isMain)) await setMain(userId, w.id);
+  return walletView((await getDb().select().from(wallets).where(eq(wallets.id, w.id)))[0]!);
+}
+
+async function promoteMain(userId: string) {
+  const rest = await listWallets(userId);
+  if (rest.length && !rest.some((x) => x.isMain)) await setMain(userId, rest[0]!.id);
+}
+
+/** Remove a wallet from scheduled / waiting jobs. Returns how many jobs were cancelled or trimmed. */
+export async function detachWalletFromJobs(userId: string, w: { id: string; label: string; address: string }) {
+  const db = getDb();
+  const pending = await db
+    .select()
+    .from(jobs)
+    .where(and(eq(jobs.userId, userId), sql`${jobs.status} in ('scheduled','waiting_unlock')`));
+  let cancelled = 0;
+  let trimmed = 0;
+  const name = w.label || `${w.address.slice(0, 6)}…${w.address.slice(-4)}`;
+  for (const j of pending) {
+    const req = JSON.parse(j.requestJson);
+    const ws: { walletId: string }[] = req.wallets ?? [];
+    if (!ws.some((x) => x.walletId === w.id)) continue;
+    const left = ws.filter((x) => x.walletId !== w.id);
+    const log = JSON.parse(j.logJson || "[]");
+    log.push(`${now()} Wallet ${name} was removed, so it was taken out of this job.`);
+    if (!left.length) {
+      cancelled++;
+      await db
+        .update(jobs)
+        .set({ status: "cancelled", error: `Cancelled: wallet ${name} was removed.`, logJson: JSON.stringify(log) })
+        .where(eq(jobs.id, j.id));
+    } else {
+      trimmed++;
+      await db
+        .update(jobs)
+        .set({ requestJson: JSON.stringify({ ...req, wallets: left }), logJson: JSON.stringify(log) })
+        .where(eq(jobs.id, j.id));
+    }
+  }
+  return { cancelledJobs: cancelled, trimmedJobs: trimmed };
 }
 
 export async function setMain(userId: string, id: string) {
@@ -488,6 +615,14 @@ export async function claimReverseTelegramCode(userId: string, code: string) {
 
 export async function unlinkTelegram(userId: string) {
   await getDb().update(users).set({ telegramUserId: null, telegramUsername: null }).where(eq(users.id, userId));
+}
+
+/** Save the browser-reported IANA timezone (silent, on every app open; only writes when it changed). */
+export async function setUserTimeZone(u: AppUser, timeZone: string) {
+  const { isValidTimeZone } = await import("../util/time.js");
+  if (!isValidTimeZone(timeZone) || timeZone.length > 64) throw httpError("Unknown timezone", 400, "BAD_TIMEZONE");
+  if (u.timezone !== timeZone) await getDb().update(users).set({ timezone: timeZone }).where(eq(users.id, u.id));
+  return timeZone;
 }
 
 export async function userByTelegram(telegramUserId: string) {

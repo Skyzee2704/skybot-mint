@@ -23,7 +23,6 @@ import {
   generateWallets,
   syncPrivyWallet,
   updateWallet,
-  removeWallet,
   setMain,
   createGroup,
   deleteGroup,
@@ -54,7 +53,7 @@ const mintReq = z.object({
   strategy,
   slug: z.string().nullable().optional(),
   wallets: z
-    .array(z.object({ walletId: z.string(), quantity: z.number().int().min(1).max(100) }))
+    .array(z.object({ walletId: z.string(), quantity: z.number().int().min(1).max(1000) }))
     .min(1)
     .max(500),
   generic: z
@@ -64,6 +63,7 @@ const mintReq = z.object({
   gasLimit: z.number().int().min(21000).max(5_000_000).optional(),
   runAt: z.string().datetime().nullable().optional(),
   offsetMs: z.number().int().min(-5000).max(60000).optional(),
+  forceWalletIds: z.array(z.string().max(100)).max(500).optional(),
 });
 
 export async function buildServer(): Promise<FastifyInstance> {
@@ -204,6 +204,11 @@ export async function buildServer(): Promise<FastifyInstance> {
   app.register(async (a) => {
     a.addHook("onRequest", requireAuth);
 
+    a.put("/api/me/timezone", async (req) => {
+      const { timeZone } = z.object({ timeZone: z.string().min(1).max(64) }).parse(req.body);
+      const { setUserTimeZone } = await import("../users/service.js");
+      return { timeZone: await setUserTimeZone(req.user!, timeZone) };
+    });
     a.get("/api/me", async (req) => ({ user: publicUser(req.user!), authVia: req.authVia, serverSigning: privyServerSigningReady() }));
 
     a.get("/api/chains/health", async () =>
@@ -308,6 +313,7 @@ export async function buildServer(): Promise<FastifyInstance> {
                 group: z.string().max(48).nullable().optional(),
                 source: z.string().optional(),
                 hdIndex: z.number().int().nullable().optional(),
+                restore: z.boolean().optional(),
               }),
             )
             .max(100),
@@ -338,10 +344,21 @@ export async function buildServer(): Promise<FastifyInstance> {
       const b = z.object({ label: z.string().max(64).optional(), group: z.string().max(48).nullable().optional() }).parse(req.body);
       return { wallet: await updateWallet(req.user!.id, (req.params as any).id, b) };
     });
+    a.get("/api/wallets/:id/removal-check", async (req, reply) => {
+      reply.header("cache-control", "private, no-store");
+      await checkRateLimit(req.user!.id, "wallet-removal-check", 20);
+      const { checkWalletRemoval } = await import("../users/walletRemoval.js");
+      const { privy: _p, ...chk } = await checkWalletRemoval(req.user!, (req.params as any).id);
+      return chk;
+    });
     a.delete("/api/wallets/:id", async (req) => {
-      z.object({ confirm: z.literal("DELETE") }).parse(req.body ?? {});
-      await removeWallet(req.user!.id, (req.params as any).id);
-      return { ok: true };
+      const b = z.object({ confirm: z.literal("DELETE"), mode: z.enum(["delete", "hide"]).default("hide") }).parse(req.body ?? {});
+      const { removeWalletForUser } = await import("../users/walletRemoval.js");
+      return { ok: true, ...(await removeWalletForUser(req.user!, (req.params as any).id, b.mode)) };
+    });
+    a.post("/api/wallets/:id/restore", async (req) => {
+      const { restoreWallet } = await import("../users/service.js");
+      return { wallet: await restoreWallet(req.user!.id, (req.params as any).id) };
     });
     a.post("/api/wallets/:id/main", async (req) => {
       await setMain(req.user!.id, (req.params as any).id);

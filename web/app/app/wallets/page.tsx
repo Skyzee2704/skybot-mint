@@ -6,6 +6,7 @@ import { useWalletList } from "@/lib/wallets";
 import { useCreateWallet, useImportWallet, useWallets, usePrivy } from "@privy-io/react-auth";
 import { useApi, useShell } from "@/components/AppShell";
 import { ChainSelect } from "@/components/ChainSelect";
+import Link from "next/link";
 
 export default function WalletsPage() {
   const api = useApi();
@@ -15,7 +16,12 @@ export default function WalletsPage() {
   const { user, authenticated } = usePrivy();
   const { connectPrivy, userId } = useShell();
   const list = useWalletList(api, userId);
-  const data = { wallets: list.wallets as any[], groups: list.groups };
+  // Wallets removed in this session stay hidden even if an in-flight refresh still returns them.
+  const goneIds = useRef(new Set<string>());
+  const goneAddrs = useRef(new Set<string>());
+  const data = { wallets: (list.wallets as any[]).filter((w) => !goneIds.current.has(w.id)), groups: list.groups };
+  const removedList = list.removedWallets as any[];
+  const [removal, setRemoval] = useState<{ w: any; chk: any | null; loading: boolean } | null>(null);
   const load = list.reload;
   const [err, setErr] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
@@ -52,7 +58,8 @@ export default function WalletsPage() {
   // Keep server DB in sync with Privy-linked wallets — only when Privy knows a wallet we don't (no reload otherwise).
   useEffect(() => {
     if (list.refreshing) return;
-    const known = new Set(data.wallets.map((w) => w.address.toLowerCase()));
+    // Removed / deleted wallets still exist in Privy — never re-sync them (the server refuses too).
+    const known = new Set([...list.wallets, ...removedList].map((w: any) => w.address.toLowerCase()).concat([...goneAddrs.current]));
     const missing = (privyWallets ?? [])
       .filter((w) => w.walletClientType === "privy" && !known.has(w.address.toLowerCase()))
       .map((w) => ({
@@ -62,9 +69,49 @@ export default function WalletsPage() {
       }));
     if (!missing.length) return;
     api("/api/wallets/sync", { body: { wallets: missing } })
-      .then(load)
+      .then((r: any) => {
+        for (const x of r?.wallets ?? []) if (x?.skipped) goneAddrs.current.add(String(x.address).toLowerCase());
+        if ((r?.wallets ?? []).some((x: any) => !x?.skipped)) void load();
+      })
       .catch(() => {});
   }, [privyWallets, list.refreshing]); // eslint-disable-line
+
+  const startRemoval = async (w: any) => {
+    setErr(null);
+    setMsg(null);
+    setRemoval({ w, chk: null, loading: true });
+    try {
+      const chk = await api(`/api/wallets/${w.id}/removal-check`);
+      setRemoval({ w, chk, loading: false });
+    } catch (e: any) {
+      setRemoval(null);
+      setErr(e.message);
+    }
+  };
+  const removeWallet = async (w: any, mode: "delete" | "hide") => {
+    setBusy(true);
+    setErr(null);
+    // Optimistic: drop the row now (and from the cache) so it never flashes back.
+    goneIds.current.add(w.id);
+    goneAddrs.current.add(w.address.toLowerCase());
+    list.mutate((d) => ({
+      ...d,
+      wallets: d.wallets.filter((x) => x.id !== w.id),
+      removedWallets: mode === "hide" ? [...(d.removedWallets ?? []), { ...w, removedAt: new Date().toISOString() }] : d.removedWallets,
+    }));
+    try {
+      const r = await api(`/api/wallets/${w.id}`, { method: "DELETE", body: { confirm: "DELETE", mode } });
+      setMsg(r.message ?? "Wallet removed.");
+      setRemoval(null);
+    } catch (e: any) {
+      goneIds.current.delete(w.id);
+      goneAddrs.current.delete(w.address.toLowerCase());
+      setErr(e.message);
+    } finally {
+      await load();
+      setBusy(false);
+    }
+  };
 
   const run = async (fn: () => Promise<any>, ok?: string) => {
     setErr(null);
@@ -96,7 +143,7 @@ export default function WalletsPage() {
         </h2>
         <p className="muted">
           Wallets are created and held by Privy. SkyBOT never stores or accepts raw private keys. Import uses Privy in the browser; export
-          only via Privy UI. Server signing for scheduled mints needs a session signer (Settings / DEPLOY.md).
+          only via Privy UI. Removing a wallet never moves funds: empty wallets can be deleted, others are hidden and can be restored.
         </p>
         <div className="row" style={{ marginBottom: 10 }}>
           <ChainSelect value={chain} onChange={setChain} />
@@ -143,13 +190,7 @@ export default function WalletsPage() {
                       Set Main
                     </button>
                   )}
-                  <button
-                    className="danger"
-                    onClick={() => {
-                      if (confirm(`Remove ${w.label}?`))
-                        run(() => api(`/api/wallets/${w.id}`, { method: "DELETE", body: { confirm: "DELETE" } }), "Removed");
-                    }}
-                  >
+                  <button className="danger" disabled={busy} onClick={() => startRemoval(w)}>
                     Remove
                   </button>
                 </td>
@@ -174,6 +215,47 @@ export default function WalletsPage() {
             )}
           </tbody>
         </table>
+        {removal && (
+          <RemovalPanel
+            removal={removal}
+            busy={busy}
+            onCancel={() => setRemoval(null)}
+            onRemove={(mode) => removeWallet(removal.w, mode)}
+          />
+        )}
+        {removedList.length > 0 && (
+          <details style={{ marginTop: 12 }}>
+            <summary className="muted">Removed wallets ({removedList.length})</summary>
+            <p className="muted small">Hidden from SkyBOT. They stay in your Privy account with their funds.</p>
+            <table>
+              <tbody>
+                {removedList.map((w: any) => (
+                  <tr key={w.id}>
+                    <td>{w.label}</td>
+                    <td className="mono">{short(w.address)}</td>
+                    <td>
+                      <button
+                        className="ghost"
+                        disabled={busy}
+                        onClick={() =>
+                          run(
+                            async () => {
+                              goneIds.current.delete(w.id);
+                              await api(`/api/wallets/${w.id}/restore`, { body: {} });
+                            },
+                            `${w.label || "Wallet"} restored`,
+                          )
+                        }
+                      >
+                        Restore
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </details>
+        )}
       </div>
 
       <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(300px,1fr))" }}>
@@ -233,6 +315,7 @@ export default function WalletsPage() {
                             label,
                             group: group || null,
                             source: "imported",
+                            restore: true,
                           },
                         ],
                       },
@@ -270,5 +353,81 @@ export default function WalletsPage() {
         </div>
       </div>
     </>
+  );
+}
+
+function RemovalPanel({
+  removal,
+  busy,
+  onCancel,
+  onRemove,
+}: {
+  removal: { w: any; chk: any | null; loading: boolean };
+  busy: boolean;
+  onCancel: () => void;
+  onRemove: (mode: "delete" | "hide") => void;
+}) {
+  const { w, chk, loading } = removal;
+  const funded: any[] = chk?.funded ?? [];
+  const held = funded
+    .map(
+      (f) =>
+        `${Number(f.balance)
+          .toFixed(6)
+          .replace(/\.?0+$/, "")} ${f.symbol} on ${f.chainName}`,
+    )
+    .join(", ");
+  return (
+    <div className="notice" role="dialog" aria-label={`Remove ${w.label}`} style={{ marginTop: 12 }}>
+      <b>
+        Remove {w.label || "wallet"} <span className="mono muted">{short(w.address)}</span>
+      </b>
+      {loading && <p className="muted">Checking balances on all chains…</p>}
+      {chk && (
+        <>
+          {funded.length > 0 ? (
+            <p className="warn">
+              This wallet still holds {held} — withdraw first or it will be hidden, not deleted.{" "}
+              <Link href={`/app/withdraw?wallet=${encodeURIComponent(w.id)}`}>Withdraw first</Link>
+            </p>
+          ) : chk.canDelete && chk.deleteMode !== "hide_only" ? (
+            <p>
+              Empty on all {chk.balances.length} chains.{" "}
+              {chk.deleteMode === "archive_and_delete"
+                ? "Delete removes it from SkyBOT and archives it in Privy (it can no longer sign)."
+                : "Delete removes it from SkyBOT."}
+            </p>
+          ) : null}
+          {(chk.notes ?? []).map((n: string) => (
+            <p key={n} className="muted small">
+              {n}
+            </p>
+          ))}
+          <div className="row">
+            {chk.canDelete && chk.deleteMode !== "hide_only" && (
+              <button
+                className="danger"
+                disabled={busy}
+                onClick={() => {
+                  if (confirm(`Delete ${w.label || "this wallet"} permanently? This can't be undone in SkyBOT.`)) onRemove("delete");
+                }}
+              >
+                Delete Permanently
+              </button>
+            )}
+            <button
+              className={chk.canDelete && chk.deleteMode !== "hide_only" ? "ghost" : ""}
+              disabled={busy}
+              onClick={() => onRemove("hide")}
+            >
+              Hide from SkyBOT
+            </button>
+            <button className="ghost" disabled={busy} onClick={onCancel}>
+              Cancel
+            </button>
+          </div>
+        </>
+      )}
+    </div>
   );
 }

@@ -29,6 +29,10 @@ export default function WithdrawPage() {
   const [run, setRun] = useState<RunState>({});
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {
+    const w = new URLSearchParams(window.location.search).get("wallet");
+    if (w) setPicked({ [w]: true });
+  }, []);
 
   useEffect(() => {
     setBalances({});
