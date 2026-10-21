@@ -8,7 +8,7 @@ import { formatDateTime, isValidTimeZone } from "../util/time.js";
 import type { ResolvedTarget } from "../core/resolver/resolver.js";
 import type { EligibilityRow } from "../core/mint/eligibility.js";
 import { sortStages } from "../core/resolver/stageOrder.js";
-import { groupByStage, verdictText } from "../core/mint/stageEligibility.js";
+import { groupByStage, nameList, summarizeGroup } from "../core/mint/stageEligibility.js";
 
 export const esc = (s: unknown) =>
   String(s ?? "")
@@ -45,13 +45,6 @@ export function parseCheckArgs(text: string): { input: string; chain?: string } 
 
 const shortAddr = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 
-function stageLine(s: ResolvedTarget["stages"][number], sym: string, tz: string | null, now: number) {
-  const price = s.priceWei !== null ? (s.priceWei === "0" ? "Free" : `${formatEther(s.priceWei)} ${sym}`) : "price unknown";
-  const limit = s.maxPerWallet ? ` · max ${s.maxPerWallet}/wallet` : "";
-  const when = stageWhen(s, tz, now);
-  return `• <b>${esc(s.name)}</b> — ${price}${limit}${when ? `\n   ${when}` : ""}`;
-}
-
 function verdict(r: EligibilityRow): { label: "Eligible" | "Not eligible" | "Unknown"; why: string } {
   if (r.needsOpenSeaLogin) return { label: "Unknown", why: "not verified yet" };
   const a = r.access;
@@ -64,7 +57,6 @@ function verdict(r: EligibilityRow): { label: "Eligible" | "Not eligible" | "Unk
 }
 
 const ICON = { Eligible: "✅", "Not eligible": "❌", Unknown: "❔" } as const;
-const STATE_ICON = { eligible: "✅", not_eligible: "❌", unverified: "❔", unknown: "❔" } as const;
 
 export interface CheckView {
   target: ResolvedTarget;
@@ -83,56 +75,119 @@ function stageWhen(s: ResolvedTarget["stages"][number], tz: string | null, now: 
 
 const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
 
-/** Telegram HTML message(s), each ≤ 3900 chars, split on line boundaries. */
+function priceText(s: ResolvedTarget["stages"][number], sym: string) {
+  return s.priceWei !== null ? (s.priceWei === "0" ? "Free" : `${formatEther(s.priceWei)} ${sym}`) : "price unknown";
+}
+
+/**
+ * Telegram HTML message(s), each ≤ 3900 chars. One section per allowlist phase (soonest first) with its own price,
+ * limit, time and count; eligible wallets listed, the rest collapsed into count lines. Public stages: one line each.
+ * Long output splits between sections, never inside one.
+ */
 export function formatCheck(v: CheckView): string[] {
   const now = v.now ?? Date.now();
   const tz = isValidTimeZone(v.timeZone ?? undefined) ? v.timeZone! : null;
   const t = v.target;
   const sym = t.chain.nativeSymbol;
   const groups = v.rows.length ? groupByStage(t.stages, v.rows, v.targetStage) : [];
-  const unverified = new Set(groups.flatMap((g) => g.wallets.filter((w) => w.state === "unverified").map((w) => w.walletId)));
+  const grouped = new Set(groups.map((g) => g.stage));
+  const blocks: string[][] = [];
 
-  const lines: string[] = [];
-  if (!v.rows.length) lines.push("<b>No wallets yet</b> — add wallets in SkyBOT to check eligibility.");
-  else if (groups.length)
-    lines.push(`<b>${groups.map((g) => `${esc(g.stage.name)}: ${g.eligible} of ${g.total} eligible`).join(" · ")}</b>`);
+  const head: string[] = [];
+  if (!v.rows.length) head.push("<b>No wallets yet</b> — add wallets in SkyBOT to check eligibility.");
+  else if (groups.length) head.push(`<b>${groups.map((g) => `${esc(g.stage.name)}: ${g.eligible}/${g.total}`).join(" · ")}</b> eligible`);
   else {
-    // No allowlist stage (public or on-chain mint): one overall verdict per wallet.
     const ok = v.rows.filter((r) => verdict(r).label === "Eligible").length;
-    lines.push(`<b>${ok} of ${plural(v.rows.length, "wallet")} eligible</b>`);
+    head.push(`<b>${ok} of ${plural(v.rows.length, "wallet")} eligible</b>`);
   }
-  lines.push("");
-  lines.push(`<b>${esc(t.name ?? "Unknown collection")}</b> on ${esc(t.chain.name)}`);
-  lines.push(`<code>${t.contract}</code>`);
-  if (t.supply.max || t.supply.total) lines.push(`Supply: ${t.supply.total ?? "?"} / ${t.supply.max ?? "?"}`);
-  if (t.stages.length) {
-    lines.push("", "<b>Stages</b>");
-    for (const s of sortStages(t.stages)) lines.push(stageLine(s, sym, tz, now));
-  }
-  if (groups.length) {
-    for (const g of groups) {
-      const when = stageWhen(g.stage, tz, now);
-      lines.push("", `<b>${esc(g.stage.name)}</b>${when ? ` — ${when}` : ""}`);
-      for (const w of g.wallets)
-        lines.push(`${STATE_ICON[w.state]} ${esc(w.label)} <code>${shortAddr(w.address)}</code> — ${esc(verdictText(w))}`);
+  head.push("", `<b>${esc(t.name ?? "Unknown collection")}</b> on ${esc(t.chain.name)}`, `<code>${t.contract}</code>`);
+  if (t.supply.max || t.supply.total) head.push(`Supply: ${t.supply.total ?? "?"} / ${t.supply.max ?? "?"}`);
+  blocks.push(head);
+
+  for (const g of groups) {
+    const s = g.stage;
+    const when = stageWhen(s, tz, now);
+    const sum = summarizeGroup(g);
+    const b = [
+      "",
+      `<b>${esc(s.name)}</b> · ${g.eligible}/${g.total} eligible`,
+      `${priceText(s, sym)}${s.maxPerWallet ? ` · max ${s.maxPerWallet}/wallet` : ""}${when ? ` · ${when}` : ""}`,
+    ];
+    for (const w of sum.eligible)
+      b.push(
+        `✅ ${esc(w.label)} <code>${shortAddr(w.address)}</code>${w.max ? ` (max ${w.max})` : ""}${w.note ? ` · ${esc(w.note)}` : ""}`,
+      );
+    if (sum.notEligible.length) {
+      if (!sum.eligible.length && !sum.unknown.length)
+        b.push(g.total === 1 ? `❌ Not eligible: ${esc(sum.notEligible[0]!.label)}` : `❌ None of your ${g.total} wallets are eligible`);
+      else b.push(`❌ ${sum.notEligible.length} not eligible${esc(nameList(sum.notEligible))}`);
     }
-  } else if (v.rows.length) {
-    lines.push("", "<b>Wallets</b>");
+    if (sum.unknown.length) {
+      const what = sum.unknown.every((w) => w.state === "unverified") ? "not verified yet" : "unknown";
+      b.push(`❔ ${sum.unknown.length} ${what}${esc(nameList(sum.unknown))}`);
+    }
+    blocks.push(b);
+  }
+
+  // Everything that isn't a phase section: public / ended / no-wallet stage list, one line each.
+  const rest = sortStages(t.stages).filter((s) => !grouped.has(s));
+  if (rest.length) {
+    const b = ["", groups.length ? "<b>Other stages</b>" : "<b>Stages</b>"];
+    for (const s of rest) {
+      const when = stageWhen(s, tz, now);
+      const open = /public/i.test(s.name) || s.type === "public" ? " · open to all" : "";
+      b.push(
+        `• <b>${esc(s.name)}</b> · ${priceText(s, sym)}${s.maxPerWallet ? ` · max ${s.maxPerWallet}/wallet` : ""}${when ? ` · ${when}` : ""}${open}`,
+      );
+    }
+    blocks.push(b);
+  }
+
+  if (!groups.length && v.rows.length) {
+    const b = ["", "<b>Wallets</b>"];
     for (const r of v.rows) {
       const x = verdict(r);
-      lines.push(
+      b.push(
         `${ICON[x.label]} ${esc(r.label)} <code>${shortAddr(r.address)}</code> — ${x.label.toLowerCase()}${x.why ? ` (${esc(x.why)})` : ""}`,
       );
     }
+    blocks.push(b);
   }
-  if (unverified.size || v.rows.some((r) => r.needsOpenSeaLogin))
-    lines.push(
-      "",
-      `❔ ${plural(Math.max(unverified.size, v.rows.filter((r) => r.needsOpenSeaLogin).length), "wallet")} not verified yet. Open SkyBOT once and future checks run automatically.`,
-    );
-  lines.push("", tz ? `Times shown in ${esc(tz.replace(/_/g, " "))}.` : "Times shown in UTC. Open SkyBOT once to use your own time zone.");
-  lines.push("<i>Read-only check. No transactions were sent.</i>");
-  return splitMessage(lines);
+
+  const foot: string[] = [];
+  const unverified = new Set(groups.flatMap((g) => g.wallets.filter((w) => w.state === "unverified").map((w) => w.walletId)));
+  for (const r of v.rows) if (r.needsOpenSeaLogin) unverified.add(r.walletId);
+  if (unverified.size)
+    foot.push("", `❔ ${plural(unverified.size, "wallet")} not verified yet. Open SkyBOT once and future checks run automatically.`);
+  foot.push("", tz ? `Times shown in ${esc(tz.replace(/_/g, " "))}.` : "Times shown in UTC. Open SkyBOT once to use your own time zone.");
+  foot.push("<i>Read-only check. No transactions were sent.</i>");
+  blocks.push(foot);
+  return splitBlocks(blocks);
+}
+
+/** Pack blocks (sections) into messages ≤ max chars; a block larger than max falls back to line splitting. */
+export function splitBlocks(blocks: string[][], max = 3900): string[] {
+  const out: string[] = [];
+  let cur: string[] = [];
+  const len = (ls: string[]) => ls.join("\n").length;
+  for (const b of blocks) {
+    if (cur.length && len([...cur, ...b]) > max) {
+      out.push(cur.join("\n").trim());
+      cur = [];
+    }
+    if (len(b) > max) {
+      out.push(
+        ...splitMessage(
+          b.filter((l, i) => i > 0 || l !== ""),
+          max,
+        ),
+      );
+      continue;
+    }
+    cur.push(...(cur.length ? b : b.filter((l, i) => i > 0 || l !== "")));
+  }
+  if (cur.length) out.push(cur.join("\n").trim());
+  return out.filter(Boolean);
 }
 
 export function splitMessage(lines: string[], max = 3900): string[] {

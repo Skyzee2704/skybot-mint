@@ -55,7 +55,7 @@ const row = (label: string, access: any, extra: any = {}) => ({
 
 describe("/check formatting", () => {
   const now = Date.parse("2026-10-21T14:40:00Z");
-  it("per-stage headline and sections, human times in the user's zone, Public excluded, escaped HTML", () => {
+  it("per-phase headline and sections, human times in the user's zone, Public on one line, escaped HTML", () => {
     const [msg] = formatCheck({
       target,
       rows: [
@@ -67,72 +67,115 @@ describe("/check formatting", () => {
       timeZone: "Asia/Kolkata",
       now,
     });
-    const lines = msg.split("\n");
-    expect(lines[0]).toBe("<b>GTD: 1 of 3 eligible</b>");
+    expect(msg.split("\n")[0]).toBe("<b>GTD: 1/3</b> eligible");
     expect(msg).toContain("Kabuki &lt;Killers&gt;");
-    expect(msg).toContain("<b>GTD</b> — starts Thu, 22 Oct 2026 · 19:30 (UTC+5:30) · in 23h 20m");
-    expect(msg).toContain("✅ Main <code>0x668B…27A0</code> — eligible (max 2)");
-    expect(msg).toContain("❌ Alt <code>0x668B…27A0</code> — not eligible");
-    expect(msg).toContain("❔ New <code>0x668B…27A0</code> — not verified yet");
-    expect(msg).toContain("1 wallet not verified yet.");
-    // Public stays in the stage summary but gets no per-wallet section.
-    expect(msg).toContain("• <b>Public</b> — Free");
-    expect(msg).not.toMatch(/^<b>Public<\/b> —/m);
-    // No redundant or duplicated wording.
-    expect(msg).not.toMatch(/GTD: (yes|no)|Public stage: \?|not eligible for/);
+    expect(msg).toContain(
+      "<b>GTD</b> · 1/3 eligible\n0.00075 ETH · max 2/wallet · starts Thu, 22 Oct 2026 · 19:30 (UTC+5:30) · in 23h 20m",
+    );
+    expect(msg).toContain("✅ Main <code>0x668B…27A0</code> (max 2)");
+    expect(msg).toContain("❌ 1 not eligible: Alt");
+    expect(msg).toContain("❔ 1 not verified yet: New");
+    expect(msg).toContain("1 wallet not verified yet. Open SkyBOT once");
+    // Public: one summary line only, no wallet section; stage details never repeated.
+    expect(msg).toMatch(/• <b>Public<\/b> · Free · starts .* · open to all/);
+    expect(msg.match(/Thu, 22 Oct 2026 · 19:30/g)?.length).toBe(1);
+    expect(msg).not.toMatch(/GTD: (yes|no)|Public stage: \?|not eligible for|Wallets \(/);
     expect(msg).toContain("Times shown in Asia/Kolkata.");
     expect(msg).toContain("Read-only check. No transactions were sent.");
     expect(msg).not.toMatch(/\d{4}-\d{2}-\d{2}T/);
   });
-  it("one section per allowlist stage, soonest first, verdicts from OpenSea per-stage results", () => {
-    const t3 = {
+  it("many phases × many wallets: every allowlist phase gets a compact section, soonest first", () => {
+    const phases = ["Trenchettes Phase", "Founders Phase", "GTD Phase", "FCFS Phase"];
+    const t5 = {
       ...target,
       stages: [
-        { name: "FCFS", type: "signed", priceWei: "1", start: "2026-10-22T15:00:00Z", end: null, maxPerWallet: 2, status: "upcoming" },
         {
-          name: "Public (on-chain)",
+          name: "Public Mint",
           type: "public",
           priceWei: "1",
-          start: "2026-10-22T16:00:00Z",
+          start: "2026-10-23T18:00:00Z",
           end: null,
-          maxPerWallet: 1000,
+          maxPerWallet: 5,
           status: "upcoming",
         },
-        ...target.stages.slice(0, 1),
+        ...phases
+          .map((name, k) => ({
+            name,
+            type: "signed",
+            priceWei: "3000000000000000",
+            start: `2026-10-22T1${4 + k}:00:00Z`,
+            end: null,
+            maxPerWallet: 2,
+            status: "upcoming",
+          }))
+          .reverse(),
       ],
     };
-    const st = [
-      { label: "GTD", type: "signed", eligible: false, maxPerWallet: null },
-      { label: "FCFS", type: "signed", eligible: true, maxPerWallet: 2 },
-    ];
+    const rows = Array.from({ length: 25 }, (_, n) =>
+      row(
+        `wallet-${n + 1}`,
+        { status: n === 24 ? "unknown" : "no", source: "x" },
+        {
+          walletId: `w${n}`,
+          needsOpenSeaLogin: n === 24,
+          stages:
+            n === 24
+              ? null
+              : phases.map((label, k) => ({
+                  label,
+                  type: "signed",
+                  eligible: k === 2 ? n < 2 : k === 0 ? false : n % 5 === 0,
+                  maxPerWallet: 2,
+                })),
+        },
+      ),
+    );
+    const parts = formatCheck({
+      target: t5,
+      rows: rows as any,
+      targetStage: { label: "Trenchettes Phase", start: null, active: false },
+      timeZone: "UTC",
+      now,
+    });
+    const msg = parts.join("\n");
+    expect(msg.split("\n")[0]).toBe("<b>Trenchettes Phase: 0/25 · Founders Phase: 5/25 · GTD Phase: 2/25 · FCFS Phase: 5/25</b> eligible");
+    const pos = phases.map((p) => msg.indexOf(`<b>${p}</b> · `));
+    expect(pos.every((p, i) => p > 0 && (i === 0 || p > pos[i - 1]!))).toBe(true);
+    const gtd = msg.slice(pos[2], pos[3]);
+    expect(gtd).toContain("✅ wallet-1 <code>0x668B…27A0</code> (max 2)");
+    expect(gtd).toContain("✅ wallet-2 ");
+    expect(gtd).toContain("❌ 22 not eligible\n");
+    expect(gtd).toContain("❔ 1 not verified yet: wallet-25");
+    expect(msg.slice(pos[0], pos[1])).toContain("❌ 24 not eligible");
+    expect(msg).not.toMatch(/<b>Public Mint<\/b> · \d+\/25/);
+    expect(msg).toContain("• <b>Public Mint</b> · ");
+    // Compact: 25 wallets × 4 phases still fits well inside one Telegram message.
+    expect(parts.length).toBe(1);
+    expect(msg.length).toBeLessThan(2500);
+  });
+  it("no wallet eligible in a phase: one line", () => {
     const [msg] = formatCheck({
-      target: t3,
-      rows: [row("wallet-1", { status: "no", source: "x" }, { stages: st })] as any,
+      target,
+      rows: [row("a", { status: "no", source: "x" }, { walletId: "a" }), row("b", { status: "no", source: "x" }, { walletId: "b" })] as any,
       targetStage: { label: "GTD", start: null, active: false },
       timeZone: "UTC",
       now,
     });
-    expect(msg.split("\n")[0]).toBe("<b>GTD: 0 of 1 eligible · FCFS: 1 of 1 eligible</b>");
-    const gtd = msg.indexOf("<b>GTD</b> — starts");
-    const fcfs = msg.indexOf("<b>FCFS</b> — starts");
-    expect(gtd).toBeGreaterThan(0);
-    expect(fcfs).toBeGreaterThan(gtd);
-    expect(msg.slice(gtd, fcfs)).toContain("❌ wallet-1");
-    expect(msg.slice(fcfs)).toContain("✅ wallet-1 <code>0x668B…27A0</code> — eligible (max 2)");
-    expect(msg).not.toContain("<b>Public (on-chain)</b> —  starts");
-    expect(msg).not.toContain("not verified yet");
+    expect(msg).toContain("❌ None of your 2 wallets are eligible");
   });
-  it("public-only drops keep a simple per-wallet list", () => {
-    const tp = { ...target, stages: target.stages.slice(1) };
-    const [msg] = formatCheck({
-      target: tp,
-      rows: [row("w", { status: "public", source: "x" })] as any,
-      targetStage: null,
-      timeZone: "UTC",
-      now,
-    });
-    expect(msg.split("\n")[0]).toBe("<b>1 of 1 wallet eligible</b>");
-    expect(msg).toContain("✅ w <code>0x668B…27A0</code> — eligible");
+  it("overflow splits between phase sections, never inside one", async () => {
+    const { splitBlocks } = await import("../src/bot/check.js");
+    const blocks = Array.from({ length: 30 }, (_, k) => [
+      "",
+      `<b>Phase ${k}</b>`,
+      ...Array.from({ length: 12 }, (_, i) => `✅ w${i} ${"x".repeat(20)}`),
+    ]);
+    const parts = splitBlocks(blocks, 1000);
+    expect(parts.length).toBeGreaterThan(1);
+    for (const p of parts) {
+      expect(p.length).toBeLessThanOrEqual(1000);
+      expect(p.startsWith("<b>Phase ")).toBe(true);
+    }
   });
   it("labels UTC when the user's timezone is unknown", () => {
     const [msg] = formatCheck({ target, rows: [], targetStage: null, timeZone: null, now });

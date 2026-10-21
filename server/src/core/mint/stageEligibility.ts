@@ -12,6 +12,7 @@ export interface StageLike {
   end?: string | null;
   status?: string | null;
   maxPerWallet?: number | null;
+  priceWei?: string | null;
 }
 
 export interface RowLike {
@@ -94,4 +95,24 @@ export function verdictText(v: WalletStageVerdict): string {
   if (v.state === "not_eligible") return "not eligible";
   if (v.state === "unverified") return "not verified yet";
   return "unknown";
+}
+
+export interface GroupSummary {
+  eligible: WalletStageVerdict[];
+  notEligible: WalletStageVerdict[];
+  unknown: WalletStageVerdict[];
+}
+
+/** Split a phase's verdicts into eligible / not eligible / unknown (unverified counts as unknown). */
+export function summarizeGroup(g: StageGroup): GroupSummary {
+  return {
+    eligible: g.wallets.filter((w) => w.state === "eligible"),
+    notEligible: g.wallets.filter((w) => w.state === "not_eligible"),
+    unknown: g.wallets.filter((w) => w.state === "unverified" || w.state === "unknown"),
+  };
+}
+
+/** Names inline only for short lists, so 20+ wallets stay one line. */
+export function nameList(ws: { label: string }[], max = 3): string {
+  return ws.length && ws.length <= max ? `: ${ws.map((w) => w.label).join(", ")}` : "";
 }

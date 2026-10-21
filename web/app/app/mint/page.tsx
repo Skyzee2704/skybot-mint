@@ -13,7 +13,7 @@ import { ConfirmBox } from "@/components/Confirm";
 import { formatDateTime, localTimeZone, zoneLabel, zonedWallTimeToDate } from "@/lib/time";
 import { useNow } from "@/lib/useNow";
 import { clampQty } from "@nft-mint-bot/server/qty";
-import { groupByStage, verdictText } from "@nft-mint-bot/server/stage-eligibility";
+import { groupByStage, summarizeGroup, verdictText } from "@nft-mint-bot/server/stage-eligibility";
 
 type Strategy = "seadrop_public" | "opensea_api" | "generic";
 const STRAT = STRATEGY_LABELS as Record<Strategy, string>;
@@ -434,27 +434,64 @@ export default function MintPage() {
           {verifyNote && <div className="notice">{verifyNote}</div>}
           {stageGroups.length > 0 && (
             <div className="stage-groups">
-              {stageGroups.map((g) => (
-                <div key={g.stage.name} className="stage-group">
-                  <div className="stage-group-head">
-                    <b>{g.stage.name}</b>
-                    <span className="muted small">{stageWhen(g.stage)}</span>
-                    <span className="spacer" />
-                    <span className={g.eligible ? "ok small" : "muted small"}>
-                      {g.eligible} of {g.total} eligible
-                    </span>
+              {stageGroups.map((g) => {
+                const sum = summarizeGroup(g);
+                return (
+                  <div key={g.stage.name} className="stage-group">
+                    <div className="stage-group-head">
+                      <b>{g.stage.name}</b>
+                      <span className="muted small">
+                        {[
+                          g.stage.priceWei != null ? (g.stage.priceWei === "0" ? "Free" : `${fmtEth(g.stage.priceWei)} ${sym}`) : null,
+                          g.stage.maxPerWallet ? `max ${g.stage.maxPerWallet}/wallet` : null,
+                          stageWhen(g.stage),
+                        ]
+                          .filter(Boolean)
+                          .join(" · ")}
+                      </span>
+                      <span className="spacer" />
+                      <span className={g.eligible ? "ok small" : "muted small"}>
+                        {g.eligible}/{g.total} eligible
+                      </span>
+                    </div>
+                    {sum.eligible.length > 0 && (
+                      <div className="wallet-chips">
+                        {sum.eligible.map((w) => (
+                          <span key={w.walletId} className="chip ok" title={w.address}>
+                            ✓ {w.label} <span className="mono muted">{short(w.address)}</span>
+                            {w.max ? <span className="muted"> · max {w.max}</span> : null}
+                            {w.note ? <span className="warn"> · {w.note}</span> : null}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    {sum.eligible.length === 0 && sum.unknown.length === 0 && (
+                      <div className="bad small">{g.total === 1 ? "Not eligible" : `None of your ${g.total} wallets are eligible`}</div>
+                    )}
+                    {(sum.notEligible.length > 0 && (sum.eligible.length > 0 || sum.unknown.length > 0)) || sum.unknown.length > 0 ? (
+                      <details className="small">
+                        <summary className="muted">
+                          {[
+                            sum.notEligible.length && (sum.eligible.length || sum.unknown.length)
+                              ? `${sum.notEligible.length} not eligible`
+                              : null,
+                            sum.unknown.length ? `${sum.unknown.length} ${verdictText(sum.unknown[0]!)}` : null,
+                          ]
+                            .filter(Boolean)
+                            .join(" · ")}
+                        </summary>
+                        <div className="wallet-chips">
+                          {[...sum.notEligible, ...sum.unknown].map((w) => (
+                            <span key={w.walletId} className={`chip ${STATE_CLASS[w.state]}`} title={w.address}>
+                              {STATE_ICON[w.state]} {w.label} <span className="mono muted">{short(w.address)}</span>
+                            </span>
+                          ))}
+                        </div>
+                      </details>
+                    ) : null}
                   </div>
-                  <ul>
-                    {g.wallets.map((w) => (
-                      <li key={w.walletId}>
-                        <span className={STATE_CLASS[w.state]}>{STATE_ICON[w.state]}</span> {w.label}{" "}
-                        <span className="mono muted">{short(w.address)}</span>{" "}
-                        <span className={STATE_CLASS[w.state]}>— {verdictText(w)}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
           <div className="row" style={{ marginBottom: 8 }}>
