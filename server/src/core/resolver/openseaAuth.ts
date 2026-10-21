@@ -50,26 +50,59 @@ async function ok(r: Response, what: string) {
   if (!r.ok) throw new Error(`OpenSea ${what} failed (${r.status}): ${(await r.text().catch(() => "")).slice(0, 160)}`);
 }
 
-export async function walletJwt(signer: Wallet, fetchImpl: typeof fetch = fetch): Promise<string> {
-  const addr = signer.address.toLowerCase();
-  const c = jwtCache.get(addr);
-  if (c && c.exp - Date.now() > 5 * 60_000) return c.token;
+/** A still-valid cached wallet JWT (in-memory, per server instance). */
+export function cachedJwt(address: string): string | null {
+  const c = jwtCache.get(address.toLowerCase());
+  return c && c.exp - Date.now() > 5 * 60_000 ? c.token : null;
+}
+
+/** Step 1: single-use nonce + the exact login text the wallet must sign (personal_sign). */
+export async function prepareSiwe(address: string, fetchImpl: typeof fetch = fetch) {
   const n = await fetchImpl(`${API}/api/v2/auth/siwe/nonce`, { method: "POST", headers: { accept: "application/json" } });
   await ok(n, "nonce");
   const { nonce } = (await n.json()) as any;
-  const msg = buildSiweMessage(signer.address, nonce);
-  const signature = await signer.signMessage(msg.text); // EIP-191 personal_sign of the login text — not a transaction
+  if (typeof nonce !== "string" || !nonce) throw new Error("OpenSea nonce missing");
+  return buildSiweMessage(address, nonce);
+}
+
+/** Only accept the exact OpenSea login layout (prevents using this endpoint as a generic signing oracle). */
+export function validateSiweFields(fields: Record<string, string>, expectedAddress: string, nowMs = Date.now()) {
+  const issued = Date.parse(fields.issuedAt ?? "");
+  const okShape =
+    fields.domain === "opensea.io" &&
+    fields.uri === "https://opensea.io" &&
+    fields.statement === SIWE_STATEMENT &&
+    fields.version === "1" &&
+    fields.chainId === "1" &&
+    fields.accountType === "Ethereum" &&
+    typeof fields.nonce === "string" &&
+    /^[A-Za-z0-9-]{8,128}$/.test(fields.nonce) &&
+    Number.isFinite(issued) &&
+    Math.abs(nowMs - issued) < 10 * 60_000;
+  if (!okShape) throw new Error("Invalid OpenSea sign-in message");
+  if (getAddress(fields.address) !== getAddress(expectedAddress)) throw new Error("Sign-in message is for a different wallet");
+}
+
+/** Steps 2-4: verify the signed login with OpenSea → scoped PAT (read:eligibility) → wallet JWT. PAT revoked after. */
+export async function jwtFromSignature(
+  fields: Record<string, string>,
+  signature: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<string> {
+  const addr = fields.address.toLowerCase();
+  const cached = cachedJwt(addr);
+  if (cached) return cached;
   const v = await fetchImpl(`${API}/api/v2/auth/siwe/verify`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ message: msg.fields, signature, chainArch: "EVM" }),
+    body: JSON.stringify({ message: fields, signature, chainArch: "EVM" }),
   });
   await ok(v, "SIWE verify");
   const cookie = sessionCookies(v.headers);
   const t = await fetchImpl(`${API}/api/v2/auth/tokens`, {
     method: "POST",
     headers: { "content-type": "application/json", cookie },
-    body: JSON.stringify({ label: `nft-mint-bot-${Date.now()}`, scopes: ["read:eligibility"], expiresInDays: 1 }),
+    body: JSON.stringify({ label: `skybot-${Date.now()}`, scopes: ["read:eligibility"], expiresInDays: 1 }),
   });
   await ok(t, "scoped token");
   const pat = (await t.json()) as { id: string; token: string };
@@ -89,6 +122,15 @@ export async function walletJwt(signer: Wallet, fetchImpl: typeof fetch = fetch)
   }
 }
 
+/** Server-held key path (tests / scripts). Product wallets sign in the browser via Privy instead. */
+export async function walletJwt(signer: Wallet, fetchImpl: typeof fetch = fetch): Promise<string> {
+  const cached = cachedJwt(signer.address);
+  if (cached) return cached;
+  const msg = await prepareSiwe(signer.address, fetchImpl);
+  const signature = await signer.signMessage(msg.text); // EIP-191 personal_sign of the login text — not a transaction
+  return jwtFromSignature(msg.fields, signature, fetchImpl);
+}
+
 export interface StageEligibility {
   stage_uuid: string;
   is_eligible: boolean;
@@ -97,8 +139,12 @@ export interface StageEligibility {
 }
 
 export async function dropEligibility(signer: Wallet, slug: string, fetchImpl: typeof fetch = fetch): Promise<StageEligibility[]> {
+  return eligibilityWithJwt(await walletJwt(signer, fetchImpl), slug, fetchImpl);
+}
+
+/** GET /api/v2/drops/{slug}/eligibility — per-stage verdict incl. upcoming stages. No balance needed. */
+export async function eligibilityWithJwt(jwt: string, slug: string, fetchImpl: typeof fetch = fetch): Promise<StageEligibility[]> {
   if (!env.openseaApiKey) throw new Error("OPENSEA_API_KEY not set");
-  const jwt = await walletJwt(signer, fetchImpl);
   const r = await fetchImpl(`${API}/api/v2/drops/${encodeURIComponent(slug)}/eligibility`, {
     headers: { "x-api-key": env.openseaApiKey, authorization: `Bearer ${jwt}`, accept: "application/json" },
   });

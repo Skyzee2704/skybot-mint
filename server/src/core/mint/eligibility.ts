@@ -9,8 +9,27 @@ import { AccessResult, MerkleInfo, SimResult, classifyRevert, getMerkleInfo, mer
 import { genericMintedBy } from "../resolver/generic.js";
 import { listWallets } from "../../users/service.js";
 import { getFees } from "./fees.js";
+import { cachedBalance } from "../../util/balanceCache.js";
 import { MintBuildError, buildMintTx } from "./build.js";
 import { MintRequest, Strategy } from "./types.js";
+import { cachedJwt, eligibilityWithJwt, jwtFromSignature, validateSiweFields } from "../resolver/openseaAuth.js";
+import type { OsStage } from "../resolver/opensea.js";
+
+export interface StageVerdict {
+  uuid: string | null;
+  label: string | null;
+  type: string | null;
+  start: string | null;
+  eligible: boolean | null;
+  maxPerWallet: number | null;
+  priceWei: string | null;
+}
+
+export interface SiweProof {
+  walletId: string;
+  fields: Record<string, string>;
+  signature: string;
+}
 
 export interface EligibilityRow {
   walletId: string;
@@ -38,6 +57,10 @@ export interface EligibilityRow {
   reasons: string[];
   /** Kept for older clients: legacy allowlist label. */
   allowlist: "eligible" | "not_eligible" | "not_active" | "unknown" | "n/a";
+  /** Per-stage verdicts from OpenSea's eligibility API (upcoming stages included). */
+  stages: StageVerdict[] | null;
+  /** OpenSea can answer for this wallet once it signs OpenSea's off-chain sign-in message. */
+  needsOpenSeaLogin: boolean;
 }
 
 const DEFAULT_GAS: Record<Strategy, bigint> = { seadrop_public: 180_000n, opensea_api: 220_000n, generic: 200_000n };
@@ -89,18 +112,23 @@ export function decide(input: {
 export interface EligibilityOptions {
   generic?: MintRequest["generic"];
   openseaWalletLogin?: boolean;
+  /** Browser-signed OpenSea sign-in messages (Privy embedded wallets), one per wallet. */
+  siwe?: SiweProof[];
 }
+
+const isPublicStage = (s: OsStage | null | undefined) => /public/i.test(s?.stage_type ?? "");
 
 export async function checkEligibility(
   t: ResolvedTarget,
   strategy: Strategy,
   userId: string,
   walletIds: string[] | null,
-  desiredQty = 1,
+  desiredQty: number | null = null,
   os = new OpenSeaClient(),
   opts: EligibilityOptions = {},
 ): Promise<{
   rows: EligibilityRow[];
+  targetStage: { label: string | null; type: string | null; start: string | null; active: boolean } | null;
   priceWei: string | null;
   maxFeePerGas: string;
   notes: string[];
@@ -127,12 +155,16 @@ export async function checkEligibility(
           : null
         : osStage(t).maxPerWallet;
   const supplyRemaining = t.supply.remaining !== null ? BigInt(t.supply.remaining) : null;
+  // Default quantity = the most each wallet may mint in this stage (or 1 when there is no limit).
+  const wantQty = desiredQty ?? (maxPerWallet && maxPerWallet > 0 ? maxPerWallet : 1);
   const useOs = strategy === "opensea_api" && os.available && Boolean(t.slug);
   if (strategy === "opensea_api" && !useOs) notes.push("OpenSea API key or slug missing — allowlist status unknown.");
   const drop = t.opensea?.drop;
   const activeOs = drop?.active_stage ?? null;
-  const activeIsPublic = activeOs ? /public/i.test(activeOs.stage_type ?? "") : false;
+  const activeIsPublic = activeOs ? isPublicStage(activeOs) : false;
   const nextOs = drop?.next_stage ?? null;
+  const targetOs = activeOs ?? nextOs;
+  const proofs = new Map((opts.siwe ?? []).map((p) => [p.walletId, p]));
 
   // SeaDrop merkle allowlist (rare on current OpenSea drops; they use server-signed stages).
   let merkle: MerkleInfo | null = null;
@@ -157,20 +189,29 @@ export async function checkEligibility(
   };
   if (useOs && !activeOs && nextOs)
     notes.push(
-      `Next stage "${nextOs.label ?? nextOs.stage_type}" is not active yet — OpenSea's mint API can only check allowlists during an active stage.${opts.openseaWalletLogin ? " Using OpenSea wallet login (SIWE) for eligibility." : ' Enable "OpenSea wallet login" in Settings to check upcoming stages.'}`,
+      `"${nextOs.label ?? nextOs.stage_type}" has not started yet${nextOs.start_time ? ` (starts ${nextOs.start_time})` : ""}. OpenSea only reveals upcoming-stage allowlists to the wallet itself, so each wallet signs OpenSea's sign-in message (off-chain, no gas, no balance needed).`,
     );
+  if (useOs && !activeOs && !nextOs) notes.push("This drop has no active or upcoming stage on OpenSea.");
 
   const rows = await mapLimit(list, useOs ? 3 : 6, async (w): Promise<EligibilityRow> => {
     const [balance, minted] = await Promise.all([
-      pool.read((p) => p.getBalance(w.address), "balance"),
+      cachedBalance(chain.key, w.address, () => pool.read((p) => p.getBalance(w.address), "balance")),
       t.kind === "seadrop"
         ? seadropMintedBy(pool, t.contract, w.address).catch(() => null)
         : t.generic
           ? genericMintedBy(pool, t.contract, t.generic, w.address)
           : Promise.resolve(null),
     ]);
-    const d = decide({ balance, priceWei: price, gasCostWei: gasCost, desiredQty, maxPerWallet, minted, supplyRemaining, stageEnded });
-    const balanceOk = !d.reasons.some((r) => r.startsWith("insufficient balance"));
+    const d = decide({
+      balance,
+      priceWei: price,
+      gasCostWei: gasCost,
+      desiredQty: wantQty,
+      maxPerWallet,
+      minted,
+      supplyRemaining,
+      stageEnded,
+    });
     const reasons = d.reasons.filter((r) => !r.startsWith("insufficient balance"));
     const qty = Math.max(1, d.suggestedQty);
     let access: AccessResult = {
@@ -181,8 +222,11 @@ export async function checkEligibility(
     let simulation: SimResult | null = null;
     let legacy: EligibilityRow["allowlist"] = strategy === "opensea_api" ? "unknown" : "n/a";
 
+    let stages: StageVerdict[] | null = null;
+    let needsOpenSeaLogin = false;
     if (strategy === "opensea_api") {
-      if (useOs && d.suggestedQty > 0) {
+      // Active stage: the official mint API answers directly (allowlist is checked before balance).
+      if (useOs && activeOs && d.suggestedQty > 0) {
         try {
           const tx = await buildMintTx(
             t,
@@ -214,19 +258,64 @@ export async function checkEligibility(
             access = { status: "no", source: "OpenSea mint API", detail: e.message.replace(/^OpenSea: /, "") };
             legacy = "not_eligible";
           } else if (e instanceof MintBuildError && e.code === "NOT_ACTIVE") {
-            access = { status: "unknown", source: "OpenSea mint API", detail: "no active stage (409) — checkable once the stage opens" };
+            access = { status: "unknown", source: "OpenSea mint API", detail: "stage not active (409)" };
             legacy = "not_active";
           } else access = { status: "unknown", source: "OpenSea mint API", detail: `check failed: ${String(e.message).slice(0, 120)}` };
         }
       }
-      // Upcoming stage: opt-in OpenSea wallet login (SIWE) → official eligibility endpoint.
-      if (access.status === "unknown" && opts.openseaWalletLogin && t.slug && os.available) {
-        access = {
-          status: "unknown",
-          source: "OpenSea eligibility API",
-          detail:
-            "Wallet login for upcoming stages requires Privy personal_sign — enable in a future update; use the mint API once the stage is active.",
-        };
+      // Upcoming stage (or mint API inconclusive): OpenSea eligibility API with the wallet's own sign-in.
+      if (useOs && t.slug && access.status === "unknown" && targetOs) {
+        const proof = proofs.get(w.id);
+        try {
+          let jwt = cachedJwt(w.address);
+          if (!jwt && proof) {
+            validateSiweFields(proof.fields, w.address);
+            jwt = await jwtFromSignature(proof.fields, proof.signature);
+          }
+          if (!jwt) needsOpenSeaLogin = true;
+          else {
+            const res = await eligibilityWithJwt(jwt, t.slug);
+            const all = drop?.stages?.length
+              ? drop.stages
+              : [activeOs, nextOs].filter(Boolean as any as (x: OsStage | null) => x is OsStage);
+            stages = all.map((s) => {
+              const v = res.find((r) => r.stage_uuid === s.uuid);
+              return {
+                uuid: s.uuid ?? null,
+                label: s.label ?? null,
+                type: s.stage_type ?? null,
+                start: s.start_time ?? null,
+                eligible: v ? Boolean(v.is_eligible) : null,
+                maxPerWallet: v?.max_total_mintable_by_wallet ? Number(v.max_total_mintable_by_wallet) : null,
+                priceWei: v?.price ?? s.price ?? null,
+              };
+            });
+            const target = stages.find((s) => s.uuid === targetOs.uuid);
+            const label = targetOs.label ?? targetOs.stage_type ?? "stage";
+            if (target?.eligible === true) {
+              access = {
+                status: isPublicStage(targetOs) ? "public" : "yes",
+                source: "OpenSea eligibility API",
+                detail: `eligible for "${label}"${activeOs ? "" : " (upcoming)"}`,
+              };
+              legacy = "eligible";
+              if (target.maxPerWallet && target.maxPerWallet > 0) d.suggestedQty = Math.min(d.suggestedQty, target.maxPerWallet);
+            } else if (target?.eligible === false) {
+              const later = stages.find((s) => s.eligible && s.uuid !== targetOs.uuid);
+              access = {
+                status: "no",
+                source: "OpenSea eligibility API",
+                detail: `not eligible for "${label}"${later ? `; eligible for "${later.label ?? later.type}"` : ""}`,
+              };
+              legacy = "not_eligible";
+            } else access = { status: "unknown", source: "OpenSea eligibility API", detail: `no verdict for "${label}"` };
+          }
+        } catch (e: any) {
+          needsOpenSeaLogin = !cachedJwt(w.address);
+          access = { status: "unknown", source: "OpenSea eligibility API", detail: `check failed: ${String(e.message).slice(0, 120)}` };
+        }
+        if (needsOpenSeaLogin && access.status === "unknown")
+          access = { status: "unknown", source: "OpenSea", detail: "verify with OpenSea sign-in to check this stage" };
       }
     } else if (d.suggestedQty > 0 || strategy === "seadrop_public") {
       try {
@@ -252,8 +341,12 @@ export async function checkEligibility(
     if (access.status === "no") reasons.push(`not allowlisted (${access.source})`);
     if (simulation?.ok === false && !/NotActive/.test(simulation.reason ?? "")) reasons.push(`simulation reverts: ${simulation.reason}`);
     // For a non-public OpenSea stage, "unknown" access is not good enough to auto-select.
-    const accessOk = !(strategy === "opensea_api" && access.status === "unknown" && !activeIsPublic);
+    const accessOk = !(strategy === "opensea_api" && access.status === "unknown" && !(targetOs && isPublicStage(targetOs)));
     const eligibleIgnoringBalance = reasons.length === 0 && d.suggestedQty > 0 && accessOk;
+    // Balance is a mint-readiness check only (never an eligibility blocker); cost for the final suggested qty.
+    const cost = price * BigInt(Math.max(1, d.suggestedQty)) + gasCost;
+    const balanceOk = balance >= cost;
+    const balanceNote = `insufficient balance (need ~${formatEther(cost)})`;
     return {
       walletId: w.id,
       label: w.label,
@@ -265,16 +358,21 @@ export async function checkEligibility(
       maxPerWallet,
       remainingForWallet: d.remaining,
       suggestedQty: d.suggestedQty,
-      estCostWei: d.cost.toString(),
-      estCost: formatEther(d.cost),
+      estCostWei: cost.toString(),
+      estCost: formatEther(cost),
       access,
       simulation,
       balanceOk,
       eligibleIgnoringBalance,
       eligible: eligibleIgnoringBalance && balanceOk,
-      reasons: balanceOk ? reasons : [...reasons, d.reasons.find((r) => r.startsWith("insufficient balance"))!],
+      reasons: balanceOk ? reasons : [...reasons, balanceNote],
       allowlist: legacy,
+      stages,
+      needsOpenSeaLogin,
     };
   });
-  return { rows, priceWei: priceKnown?.toString() ?? null, maxFeePerGas: fees.maxFeePerGas.toString(), notes, allowlistInfo };
+  const targetStage = targetOs
+    ? { label: targetOs.label ?? null, type: targetOs.stage_type ?? null, start: targetOs.start_time ?? null, active: Boolean(activeOs) }
+    : null;
+  return { rows, targetStage, priceWei: priceKnown?.toString() ?? null, maxFeePerGas: fees.maxFeePerGas.toString(), notes, allowlistInfo };
 }

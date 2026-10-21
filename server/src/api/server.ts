@@ -10,6 +10,7 @@ import { requireAuth, adminGate } from "../auth/middleware.js";
 import { getPool } from "../core/rpc/pool.js";
 import { getResolved, refresh, remember } from "../core/resolver/cache.js";
 import { checkEligibility } from "../core/mint/eligibility.js";
+import { cachedBalance } from "../util/balanceCache.js";
 import { simulateMint } from "../core/mint/simulate.js";
 import { consumePlan } from "../core/plans.js";
 import { cancelJob, enqueueMint } from "../jobs/scheduler.js";
@@ -17,7 +18,7 @@ import { listJobs, getJob, listMinted } from "../core/jobs/repo.js";
 import {
   publicUser,
   listWallets,
-  listGroups,
+  walletsAndGroups,
   generateWallets,
   syncPrivyWallet,
   updateWallet,
@@ -289,7 +290,10 @@ export async function buildServer(): Promise<FastifyInstance> {
     });
 
     // Wallets
-    a.get("/api/wallets", async (req) => ({ wallets: await listWallets(req.user!.id), groups: await listGroups(req.user!.id) }));
+    a.get("/api/wallets", async (req, reply) => {
+      reply.header("cache-control", "private, no-store");
+      return walletsAndGroups(req.user!.id);
+    });
     a.post("/api/wallets/sync", async (req) => {
       // Client reports Privy-created / imported wallets so our DB stays in sync.
       const b = z
@@ -356,7 +360,7 @@ export async function buildServer(): Promise<FastifyInstance> {
       const out = await Promise.all(
         list.map(async (w: { id: string; address: string }) => {
           try {
-            const bal = await pool.read((p) => p.getBalance(w.address), "balance");
+            const bal = await cachedBalance(c.key, w.address, () => pool.read((p) => p.getBalance(w.address), "balance"));
             return { walletId: w.id, balance: formatEther(bal), balanceWei: bal.toString() };
           } catch (e: any) {
             return { walletId: w.id, balance: null, error: redactString(e.message) };
@@ -380,8 +384,18 @@ export async function buildServer(): Promise<FastifyInstance> {
           input: z.string().optional(),
           strategy,
           walletIds: z.array(z.string()).optional(),
-          quantity: z.number().int().min(1).max(100).default(1),
+          quantity: z.number().int().min(1).max(1000).optional(),
           refresh: z.boolean().optional(),
+          siwe: z
+            .array(
+              z.object({
+                walletId: z.string().max(100),
+                fields: z.record(z.string(), z.string().max(400)),
+                signature: z.string().regex(/^0x[0-9a-fA-F]{130}$/),
+              }),
+            )
+            .max(200)
+            .optional(),
           generic: z
             .object({ signature: z.string(), priceWei: z.string().regex(/^\d+$/), tokenId: z.string().regex(/^\d+$/).optional() })
             .optional(),
@@ -389,10 +403,24 @@ export async function buildServer(): Promise<FastifyInstance> {
         .parse(req.body);
       const t = b.refresh ? await refresh(b.chain, b.contract, b.input) : await getResolved(b.chain, b.contract, b.input);
       const st = await getSettings(req.user!.id);
-      return checkEligibility(t, b.strategy, req.user!.id, b.walletIds ?? null, b.quantity, undefined, {
+      const r = await checkEligibility(t, b.strategy, req.user!.id, b.walletIds ?? null, b.quantity ?? null, undefined, {
         generic: b.generic,
         openseaWalletLogin: st.openseaWalletLogin,
+        siwe: b.siwe,
       });
+      return { ...r, openseaAutoVerify: Boolean(st.openseaWalletLogin) };
+    });
+    /** OpenSea sign-in messages for the user's own wallets; signed in the browser (Privy), never on the server. */
+    a.post("/api/opensea/siwe/prepare", async (req) => {
+      const b = z.object({ walletIds: z.array(z.string().max(100)).min(1).max(200) }).parse(req.body);
+      const { prepareSiwe } = await import("../core/resolver/openseaAuth.js");
+      const mine = (await listWallets(req.user!.id)).filter((w) => b.walletIds.includes(w.id));
+      const out = [];
+      for (const w of mine) {
+        const m = await prepareSiwe(w.address);
+        out.push({ walletId: w.id, address: w.address, message: m.text, fields: m.fields });
+      }
+      return { messages: out };
     });
     a.post("/api/simulate", async (req) => {
       const r = mintReq.parse(req.body) as MintRequest;
