@@ -5,6 +5,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- Unified login through Privy: email, Google and Telegram on both the website and the Telegram Mini App resolve to one SkyBOT account. Telegram login is now offered on the web.
+- The Mini App prefers Privy seamless Telegram login. The verified `initData` session remains as a fallback with a **Connect with Privy** action, so wallet import works for Telegram users.
+- Settings shows **Sign-In Methods** (link Telegram, email or Google through Privy) instead of link codes. The bot no longer advertises `/link` or `/unlink`.
+
+### Fixed
+
+- Parallel first-login requests no longer fail with `privy auth failed` (idempotent user creation).
+- Privy identity tokens are now actually sent to the server, so email and Telegram details are picked up.
+
 ## [1.0.0] - 2026-10-21
 
 ### Added

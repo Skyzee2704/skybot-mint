@@ -36,7 +36,7 @@ Please **do not open a public issue** for security problems. Use GitHub's **priv
 - [ ] Secrets set only in Vercel environment variables (`PRIVY_APP_SECRET`, `PRIVY_AUTH_PRIVATE_KEY`, `SESSION_SECRET`, `TELEGRAM_*`, `QSTASH_*`, `DATABASE_URL`)
 - [ ] `SESSION_SECRET` set (32+ random bytes) and shared by all instances
 - [ ] Privy allowed origins: production URL and `https://web.telegram.org`
-- [ ] Privy Telegram login enabled with the bot token. BotFather `/setdomain` points to the production host
+- [ ] Privy Telegram login enabled with OAuth credentials (Client ID and Secret from @BotFather) plus the bot token and name for Mini App seamless login. `https://auth.privy.io/api/v1/oauth/callback` is in the bot's Allowed URLs, and BotFather `/setdomain` points to the production host
 - [ ] Privy policies on the authorization key: target allowlist, chain IDs, max value, deny approvals and transfers
 - [ ] `TELEGRAM_WEBHOOK_SECRET` set and `npm run telegram:setup` run after each URL change
 - [ ] QStash signing keys set, and `PUBLIC_URL` exactly matches the deployed URL

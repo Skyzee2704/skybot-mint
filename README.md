@@ -147,7 +147,7 @@ SkyBOT Mint deploys as **one Vercel project** with Neon Postgres and Upstash QSt
 1. Push to GitHub and import into Vercel with **Root Directory = `web`**.
 2. Create a Neon database and an Upstash QStash project, plus Redis if you want shared rate limits.
 3. Set the environment variables, deploy, then run the Telegram webhook setup.
-4. Configure Privy (Telegram login, allowed origins) and BotFather (`/setdomain`).
+4. Configure Privy (email, Google and Telegram login, allowed origins) and BotFather (Telegram OAuth credentials, `/setdomain`).
 
 See **[DEPLOY.md](DEPLOY.md)** for the full step-by-step guide.
 
@@ -180,7 +180,8 @@ All variables are listed in [`.env.example`](.env.example). The main ones:
 - **No raw keys on our side.** Wallets live in Privy. Import and export happen client-side through Privy's UI, and the server-side import endpoint is disabled.
 - **Constrained server signing.** Transactions are signed only through Privy authorization keys. Dangerous selectors are denied, and Privy policies should restrict targets, chains, and value.
 - **Authentication on every private route**: a Privy JWT, or a short-lived httpOnly session cookie plus a CSRF header for Telegram-first users. Telegram initData is HMAC-verified with an `auth_date` max age.
-- **Per-user data scoping**, single-use link codes with short TTLs, rate limits, strict CORS, CSP and security headers, Zod input validation, and redacted logs.
+- **One account per person**: email, Google and Telegram are linked in Privy and resolve to a single SkyBOT account; accounts that own wallets are never merged automatically.
+- **Per-user data scoping**, rate limits, strict CORS, CSP and security headers, Zod input validation, and redacted logs.
 - **Signed callbacks**: QStash signatures are verified on job and cron routes, and the Telegram webhook requires a secret token.
 
 Read the full threat model and production checklist in **[SECURITY.md](SECURITY.md)**.
@@ -189,10 +190,7 @@ Read the full threat model and production checklist in **[SECURITY.md](SECURITY.
 
 | Command | Description |
 |---|---|
-| `/start` | Welcome message and **Open Dashboard** button (Mini App) |
-| `/start link_<code>` | Link this Telegram account using a code from web Settings |
-| `/link` | Get a one-time code to paste in web **Settings → Connect Telegram** |
-| `/unlink` | Disconnect Telegram from your SkyBOT account |
+| `/start` | Welcome message and **Open Dashboard** button (Mini App, signs you in with Telegram) |
 | `/mint <link\|address>` | Resolve a drop and open it in the dashboard |
 | `/wallets` | List your wallets |
 | `/jobs` | Show recent mint jobs |
