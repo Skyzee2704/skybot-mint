@@ -39,11 +39,20 @@ export default function JobsPage() {
     api("/api/jobs")
       .then((r) => setJobs(r.jobs))
       .catch((e) => setErr(e.message));
+  // Poll fast only while a job is active and the tab is visible; otherwise slow down (DB reads, no RPC).
+  const active = jobs.some((j) => ["scheduled", "waiting_unlock", "running"].includes(j.status));
   useEffect(() => {
     load();
-    const i = setInterval(load, 3000);
-    return () => clearInterval(i);
   }, []); // eslint-disable-line
+  useEffect(() => {
+    const i = setInterval(
+      () => {
+        if (document.visibilityState === "visible") load();
+      },
+      active ? 3000 : 30_000,
+    );
+    return () => clearInterval(i);
+  }, [active]); // eslint-disable-line
   return (
     <div className="card">
       <h2>Jobs</h2>

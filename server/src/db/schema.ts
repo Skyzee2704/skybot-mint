@@ -183,3 +183,30 @@ export const openseaTokens = sqliteTable("opensea_tokens", {
   tokenEnc: text("token_enc").notNull(),
   expiresAt: text("expires_at").notNull(),
 });
+
+/**
+ * Cached NFT holdings per wallet × chain (from an NFT indexer, never per-token RPC scans).
+ * The NFTs page reads only from here; scans run on first use, on manual Refresh (cooldown) or after a send.
+ */
+export const nftHoldings = sqliteTable(
+  "nft_holdings",
+  {
+    id: text("id").primaryKey(), // `${walletId}:${chain}`
+    userId: text("user_id").notNull(),
+    walletId: text("wallet_id").notNull(),
+    chain: text("chain").notNull(),
+    address: text("address").notNull(),
+    itemsJson: text("items_json").notNull().default("[]"),
+    source: text("source"),
+    error: text("error"),
+    truncated: integer("truncated").notNull().default(0),
+    scannedAt: text("scanned_at").notNull(),
+  },
+  (t) => [index("nft_holdings_user").on(t.userId)],
+);
+
+/** Last full manual holdings refresh per user (cooldown shared by every serverless instance). */
+export const nftScanState = sqliteTable("nft_scan_state", {
+  userId: text("user_id").primaryKey(),
+  lastRefreshAt: integer("last_refresh_at").notNull(),
+});

@@ -70,11 +70,12 @@ export default function WithdrawPage() {
   };
 
   const poll = async (walletId: string, hash: string) => {
-    for (let i = 0; i < 60; i++) {
-      await new Promise((r) => setTimeout(r, 3000));
+    // Backs off from 3 s to 10 s; final receipts are cached server-side.
+    for (let i = 0; i < 45; i++) {
+      await new Promise((r) => setTimeout(r, Math.min(10_000, 3000 + i * 1000)));
       try {
-        const s = await api(`/api/withdraw/status?chain=${encodeURIComponent(quote.chain)}&hash=${hash}`);
-        if (s.status !== "pending") {
+        const s = (await api("/api/tx/status", { body: { chain: quote.chain, hashes: [hash] } })).statuses[0];
+        if (s && s.status !== "pending") {
           setRun((r) => ({ ...r, [walletId]: { ...r[walletId], status: s.status } }));
           return;
         }

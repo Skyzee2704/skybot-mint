@@ -1,15 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { Contract, formatEther } from "ethers";
+import { Contract, Interface, formatEther } from "ethers";
 import { requireChain } from "../../config/chains.js";
 import { getPool } from "../rpc/pool.js";
 import { OpenSeaClient } from "../resolver/opensea.js";
 import { ResolvedTarget } from "../resolver/resolver.js";
-import { SEADROP_ABI, SEADROP_ADDRESS, seadropMintedBy } from "../resolver/seadrop.js";
+import { SEADROP_ABI, SEADROP_ADDRESS, SEADROP_TOKEN_ABI, seadropMintedBy } from "../resolver/seadrop.js";
 import { AccessResult, MerkleInfo, SimResult, classifyRevert, getMerkleInfo, merkleAccess, simulateIgnoringBalance } from "./access.js";
 import { genericMintedBy } from "../resolver/generic.js";
 import { listWallets } from "../../users/service.js";
-import { getFees } from "./fees.js";
-import { cachedBalance } from "../../util/balanceCache.js";
+import { getFeesCached } from "./fees.js";
+import { cachedBalances } from "../../util/balanceCache.js";
+import { aggregate, nativeBalancesBatch } from "../rpc/multicall.js";
 import { walletMaxQty } from "./qty.js";
 import { MintBuildError, buildMintTx } from "./build.js";
 import { MintRequest, Strategy } from "./types.js";
@@ -190,7 +191,7 @@ export async function checkEligibility(
   const chain = requireChain(t.chain.key);
   const pool = getPool(chain);
   const list = (await listWallets(userId)).filter((w) => !walletIds || walletIds.includes(w.id));
-  const fees = await getFees(pool);
+  const fees = await getFeesCached(pool);
   const genericPrice = strategy === "generic" && opts.generic?.priceWei ? BigInt(opts.generic.priceWei) : null;
   const priceKnown = genericPrice ?? stagePriceWei(t, strategy);
   const price = priceKnown ?? 0n;
@@ -244,11 +245,31 @@ export async function checkEligibility(
   if (useOs && !activeOs && !nextOs) noteItems.push({ kind: "no_stage" });
   const cachedVerdicts = useOs && t.slug && targetOs ? await loadVerdicts(userId, t.slug) : new Map<string, CachedVerdict>();
 
+  // Batched reads: all balances in one multicall (30 s cache) and all SeaDrop mint counts in one multicall.
+  const [balances, seadropMinted] = await Promise.all([
+    cachedBalances(
+      chain.key,
+      list.map((w) => w.address),
+      (missing) => nativeBalancesBatch(pool, missing),
+    ),
+    t.kind === "seadrop" && list.length > 1
+      ? seadropMintedBatch(
+          pool,
+          t.contract,
+          list.map((w) => w.address),
+        )
+      : Promise.resolve(null),
+  ]);
   const rows = await mapLimit(list, useOs ? 3 : 6, async (w): Promise<EligibilityRow> => {
+    const cachedBal = balances.get(w.address.toLowerCase());
     const [balance, minted] = await Promise.all([
-      cachedBalance(chain.key, w.address, () => pool.read((p) => p.getBalance(w.address), "balance")),
+      cachedBal !== undefined && !(cachedBal instanceof Error)
+        ? Promise.resolve(cachedBal)
+        : pool.read((p) => p.getBalance(w.address), "balance"),
       t.kind === "seadrop"
-        ? seadropMintedBy(pool, t.contract, w.address).catch(() => null)
+        ? seadropMinted?.has(w.address.toLowerCase())
+          ? Promise.resolve(seadropMinted.get(w.address.toLowerCase())!)
+          : seadropMintedBy(pool, t.contract, w.address).catch(() => null)
         : t.generic
           ? genericMintedBy(pool, t.contract, t.generic, w.address)
           : Promise.resolve(null),
@@ -453,4 +474,28 @@ export async function checkEligibility(
     notes,
     allowlistInfo,
   };
+}
+
+const seadropTokenIface = new Interface(SEADROP_TOKEN_ABI);
+/** getMintStats(wallet).minterNumMinted for many wallets in one multicall; wallets whose call failed are omitted. */
+export async function seadropMintedBatch(pool: ReturnType<typeof getPool>, nft: string, wallets: string[]): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  try {
+    const rows = await aggregate(
+      pool,
+      wallets.map((w) => ({ target: nft, data: seadropTokenIface.encodeFunctionData("getMintStats", [w]) })),
+      "getMintStats[]",
+    );
+    rows.forEach((r, i) => {
+      if (!r.success) return;
+      try {
+        out.set(wallets[i].toLowerCase(), Number(seadropTokenIface.decodeFunctionResult("getMintStats", r.returnData)[0]));
+      } catch {
+        /* undecodable -> per-wallet fallback */
+      }
+    });
+  } catch {
+    /* multicall unavailable -> per-wallet fallback */
+  }
+  return out;
 }

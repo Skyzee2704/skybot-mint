@@ -40,3 +40,25 @@ export async function getFees(pool: RpcPool, mode: GasMode = env.gasMode): Promi
   }, "fees");
   return computeFees(baseFee, tip, mode, BigInt(Math.round(env.maxGasPriceGwei * 1e9)));
 }
+
+/**
+ * Fee quote shared for ~12 s per chain (one block on most chains), deduping concurrent lookups. Used for
+ * estimates (eligibility, simulation); the executor and withdraw/NFT-send quotes call getFees / legacyGasPrice fresh.
+ */
+const FEE_TTL_MS = 12_000;
+const feeCache = new Map<string, { at: number; p: Promise<{ baseFee: bigint; tip: bigint }> }>();
+export async function getFeesCached(pool: RpcPool, mode: GasMode = env.gasMode): Promise<Fees> {
+  const key = pool.chain.key;
+  let hit = feeCache.get(key);
+  if (!hit || Date.now() - hit.at > FEE_TTL_MS) {
+    const p = pool.read(async (pr) => {
+      const [block, tipHex] = await Promise.all([pr.getBlock("latest"), pr.send("eth_maxPriorityFeePerGas", []).catch(() => null)]);
+      return { baseFee: block?.baseFeePerGas ?? 0n, tip: tipHex ? BigInt(tipHex) : 1_000_000_000n };
+    }, "fees");
+    hit = { at: Date.now(), p };
+    feeCache.set(key, hit);
+    p.catch(() => feeCache.delete(key));
+  }
+  const { baseFee, tip } = await hit.p;
+  return computeFees(baseFee, tip, mode, BigInt(Math.round(env.maxGasPriceGwei * 1e9)));
+}

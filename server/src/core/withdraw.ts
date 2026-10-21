@@ -168,9 +168,11 @@ export async function quoteWallet(
   gasPrice: bigint,
   userId: string,
   secret: Buffer,
+  /** Fresh "latest" balance already read in a batch (multicall) for this quote; read here when absent. */
+  prefetchedBalance?: bigint,
 ): Promise<WithdrawQuoteItem> {
   const [balance, nonce] = await Promise.all([
-    pool.read((p) => p.getBalance(w.address, "latest"), "balance"),
+    prefetchedBalance !== undefined ? Promise.resolve(prefetchedBalance) : pool.read((p) => p.getBalance(w.address, "latest"), "balance"),
     pool.read((p) => p.getTransactionCount(w.address, "pending"), "nonce"),
   ]);
   let gasLimit = EOA_TRANSFER_GAS;

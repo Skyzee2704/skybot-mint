@@ -8,10 +8,12 @@ import { CHAINS, requireChain, rpcsForChain } from "../config/chains.js";
 import { configStatus, env, privyConfigured, privyServerSigningReady, privySiweSignerReady } from "../config/env.js";
 import { requireAuth, adminGate } from "../auth/middleware.js";
 import { getPool } from "../core/rpc/pool.js";
-import { getResolved, refresh, remember } from "../core/resolver/cache.js";
+import { getResolved, refresh, resolveCached } from "../core/resolver/cache.js";
 import { checkEligibility } from "../core/mint/eligibility.js";
-import { cachedBalance } from "../util/balanceCache.js";
+import { cachedBalances } from "../util/balanceCache.js";
+import { nativeBalancesBatch } from "../core/rpc/multicall.js";
 import { registerWithdrawRoutes } from "./withdrawRoutes.js";
+import { registerNftRoutes } from "./nftRoutes.js";
 import { simulateMint } from "../core/mint/simulate.js";
 import { consumePlan } from "../core/plans.js";
 import { cancelJob, enqueueMint } from "../jobs/scheduler.js";
@@ -381,24 +383,25 @@ export async function buildServer(): Promise<FastifyInstance> {
       const c = requireChain(b.chain);
       const pool = getPool(c);
       const list = (await listWallets(req.user!.id)).filter((w: { id: string }) => !b.walletIds || b.walletIds.includes(w.id));
-      const out = await Promise.all(
-        list.map(async (w: { id: string; address: string }) => {
-          try {
-            const bal = await cachedBalance(c.key, w.address, () => pool.read((p) => p.getBalance(w.address), "balance"));
-            return { walletId: w.id, balance: formatEther(bal), balanceWei: bal.toString() };
-          } catch (e: any) {
-            return { walletId: w.id, balance: null, error: redactString(e.message) };
-          }
-        }),
+      // One multicall for every uncached wallet (30 s cache, concurrent requests share the in-flight call).
+      const bals = await cachedBalances(
+        c.key,
+        list.map((w) => w.address),
+        (missing) => nativeBalancesBatch(pool, missing),
       );
+      const out = list.map((w: { id: string; address: string }) => {
+        const bal = bals.get(w.address.toLowerCase());
+        if (bal === undefined || bal instanceof Error)
+          return { walletId: w.id, balance: null, error: redactString(String(bal?.message ?? "unavailable")) };
+        return { walletId: w.id, balance: formatEther(bal), balanceWei: bal.toString() };
+      });
       return { chain: c.key, nativeSymbol: c.nativeSymbol, balances: out };
     });
 
     // Resolve / eligibility / simulate / execute
     a.post("/api/resolve", async (req) => {
       const b = z.object({ input: z.string().min(1).max(500), chain: z.string().optional() }).parse(req.body);
-      const { resolveTarget } = await import("../core/resolver/resolver.js");
-      return remember(await resolveTarget({ input: b.input, chain: b.chain || undefined }));
+      return resolveCached(b.input, b.chain || undefined);
     });
     a.post("/api/eligibility", async (req) => {
       const b = z
@@ -471,6 +474,9 @@ export async function buildServer(): Promise<FastifyInstance> {
 
     // Withdraw (native token, browser-signed, server-validated)
     registerWithdrawRoutes(a);
+
+    // NFTs (cached holdings + browser-signed ERC-721 / ERC-1155 sends)
+    registerNftRoutes(a);
 
     // Admin
     a.register(async (ad) => {

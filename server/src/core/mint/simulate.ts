@@ -6,7 +6,8 @@ import { ResolvedTarget } from "../resolver/resolver.js";
 import { getWallet } from "../../users/service.js";
 import { assertDailyBudget, capsFor, dailySpent, fmtCap } from "../safety/safety.js";
 import { buildMintTx } from "./build.js";
-import { getFees } from "./fees.js";
+import { getFeesCached } from "./fees.js";
+import { nativeBalancesBatch } from "../rpc/multicall.js";
 import { MintRequest } from "./types.js";
 import { createPlan } from "../plans.js";
 import { simulateIgnoringBalance } from "./access.js";
@@ -85,7 +86,7 @@ export async function simulateMint(t: ResolvedTarget, req: MintRequest, userId: 
   const chain = requireChain(t.chain.key);
   const pool = getPool(chain);
   await pool.checkChainId();
-  const fees = await getFees(pool, req.gasMode);
+  const fees = await getFeesCached(pool, req.gasMode);
   const runAtMs = req.runAt ? new Date(req.runAt).getTime() : Date.now();
   const beforeStart = runAtMs > Date.now() + 2000;
 
@@ -94,10 +95,16 @@ export async function simulateMint(t: ResolvedTarget, req: MintRequest, userId: 
     (req.strategy === "opensea_api" && /public/i.test((t.opensea?.drop?.active_stage ?? t.opensea?.drop?.next_stage)?.stage_type ?? ""));
   const force = new Set(req.forceWalletIds ?? []);
 
+  const owned = await Promise.all(req.wallets.map((wq) => getWallet(userId, wq.walletId)));
+  // Fresh balances for every wallet in one multicall (falls back to per-wallet reads).
+  const balances = await nativeBalancesBatch(
+    pool,
+    owned.map((w) => w.address),
+  ).catch(() => new Map<string, bigint>());
   const rows: SimRow[] = await Promise.all(
-    req.wallets.map(async (wq): Promise<SimRow> => {
-      const w = await getWallet(userId, wq.walletId);
-      const balance = await pool.read((p) => p.getBalance(w.address), "balance").catch(() => 0n);
+    req.wallets.map(async (wq, i): Promise<SimRow> => {
+      const w = owned[i];
+      const balance = balances.get(w.address.toLowerCase()) ?? (await pool.read((p) => p.getBalance(w.address), "balance").catch(() => 0n));
       const base = { walletId: w.id, label: w.label, address: w.address, quantity: wq.quantity, balanceWei: balance.toString() };
       let tx;
       try {

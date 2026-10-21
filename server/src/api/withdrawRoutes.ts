@@ -12,6 +12,8 @@ import { derivedKey } from "../auth/session.js";
 import { checkRateLimit, getWallet, listWallets } from "../users/service.js";
 import { assembleAndVerify, legacyGasPrice, parseAmount, quoteWallet, validateDestination } from "../core/withdraw.js";
 import { log, redactString } from "../util/log.js";
+import { nativeBalancesBatch } from "../core/rpc/multicall.js";
+import { invalidateBalances } from "../util/balanceCache.js";
 
 const hex = z.string().regex(/^0x[0-9a-fA-F]*$/);
 const unsignedTx = z.object({
@@ -36,6 +38,8 @@ async function audit(userId: string, action: string, chain: string | null, targe
 }
 
 /** Withdraw (native token). All routes run behind requireAuth; every wallet is looked up scoped to req.user. */
+const finalReceipts = new Map<string, { status: "confirmed" | "failed"; blockNumber: number }>();
+
 export function registerWithdrawRoutes(a: FastifyInstance) {
   const secret = () => derivedKey("withdraw-quote");
 
@@ -61,9 +65,14 @@ export function registerWithdrawRoutes(a: FastifyInstance) {
       if (!w) throw Object.assign(new Error("Wallet not found"), { statusCode: 404 });
       return { w, amount: parseAmount(x.amount) };
     });
-    const [code, gasPrice, seen] = await Promise.all([
+    // Fresh (uncached) balances for every picked wallet in one multicall: "Max" must sweep the real balance.
+    const [code, gasPrice, balances, seen] = await Promise.all([
       pool.read((p) => p.getCode(to), "getCode"),
       legacyGasPrice(pool),
+      nativeBalancesBatch(
+        pool,
+        picked.map((x) => x.w.address),
+      ).catch(() => new Map<string, bigint>()),
       getDb()
         .select({ id: auditLog.id })
         .from(auditLog)
@@ -77,7 +86,18 @@ export function registerWithdrawRoutes(a: FastifyInstance) {
         if (w.address.toLowerCase() === to.toLowerCase())
           return { walletId: w.id, label: w.label, address: w.address, skip: "source and destination are the same wallet", tx: null };
         try {
-          return await quoteWallet(chain, pool, w, to, isContract, amount, gasPrice, req.user!.id, secret());
+          return await quoteWallet(
+            chain,
+            pool,
+            w,
+            to,
+            isContract,
+            amount,
+            gasPrice,
+            req.user!.id,
+            secret(),
+            balances.get(w.address.toLowerCase()),
+          );
         } catch (e: any) {
           return {
             walletId: w.id,
@@ -143,6 +163,7 @@ export function registerWithdrawRoutes(a: FastifyInstance) {
     const base = { from: w.address, valueWei: BigInt(b.tx.value).toString(), nonce: b.tx.nonce };
     try {
       const r = await getPool(chain).broadcast(raw);
+      invalidateBalances(chain.key, [w.address, b.tx.to]);
       await audit(req.user!.id, "withdraw.sent", chain.key, b.tx.to.toLowerCase(), { ...base, hash: r.hash });
       return { hash: r.hash, explorer: explorerTx(chain, r.hash) };
     } catch (e: any) {
@@ -150,6 +171,39 @@ export function registerWithdrawRoutes(a: FastifyInstance) {
       await audit(req.user!.id, "withdraw.failed", chain.key, b.tx.to.toLowerCase(), { ...base, error: msg });
       throw Object.assign(new Error(`Broadcast failed: ${msg}`), { statusCode: 502 });
     }
+  });
+
+  /**
+   * Batched receipt status for many transfers (Withdraw + NFT send). Final receipts are cached per instance, so a
+   * polling client only costs one receipt read per still-pending hash.
+   */
+  a.post("/api/tx/status", async (req) => {
+    const b = z
+      .object({
+        chain: z.string(),
+        hashes: z
+          .array(z.string().regex(/^0x[0-9a-fA-F]{64}$/))
+          .min(1)
+          .max(50),
+      })
+      .parse(req.body);
+    await checkRateLimit(req.user!.id, "tx:status", 120);
+    const chain = requireChain(b.chain);
+    const pool = getPool(chain);
+    const statuses = await Promise.all(
+      [...new Set(b.hashes.map((h) => h.toLowerCase()))].map(async (hash) => {
+        const k = `${chain.key}:${hash}`;
+        const hit = finalReceipts.get(k);
+        if (hit) return { hash, ...hit };
+        const rc = await pool.read((p) => p.getTransactionReceipt(hash), "receipt").catch(() => null);
+        if (!rc) return { hash, status: "pending" as const };
+        const v = { status: rc.status === 1 ? ("confirmed" as const) : ("failed" as const), blockNumber: rc.blockNumber };
+        finalReceipts.set(k, v);
+        if (finalReceipts.size > 5000) finalReceipts.clear();
+        return { hash, ...v };
+      }),
+    );
+    return { chain: chain.key, statuses };
   });
 
   a.get("/api/withdraw/status", async (req) => {

@@ -5,7 +5,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- **NFTs** page (dashboard and Mini App): every NFT held by your wallets on all supported chains, with image, collection, token ID, chain, standard and ERC-1155 quantity. Filter by wallet, chain or collection, group by wallet or collection, select one by one or all, and send to one address. ERC-721 and ERC-1155 `safeTransferFrom`, signed in the browser with Privy and verified by the server before broadcast. Ownership and gas are re-checked right before sending; wallets without gas are skipped with a clear reason.
+- Holdings come from an NFT indexer (Alchemy NFT API, OpenSea as fallback and for Ink), are cached in the database, and are only re-scanned for new wallets, on manual Refresh (60 s cooldown) or updated in place after a send.
+
 ### Changed
+
+- Fewer RPC calls: Multicall3 batching for native balances, SeaDrop mint counts and NFT ownership; 30 s balance cache shared by concurrent requests; 12 s fee cache for estimates; 60 s cache for repeated link resolution (`/check`, Resolve); batched transaction status with back-off; Jobs and Settings poll only while visible.
+- Wallet deletion is also blocked when the last holdings scan shows NFTs in the wallet.
 
 - Unified login through Privy: email, Google and Telegram on both the website and the Telegram Mini App resolve to one SkyBOT account. Telegram login is now offered on the web.
 - The Mini App prefers Privy seamless Telegram login. The verified `initData` session remains as a fallback with a **Connect with Privy** action, so wallet import works for Telegram users.

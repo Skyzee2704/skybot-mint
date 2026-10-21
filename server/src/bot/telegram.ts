@@ -10,8 +10,8 @@
  */
 import { Bot, InlineKeyboard } from "grammy";
 import { env } from "../config/env.js";
-import { resolveTarget } from "../core/resolver/resolver.js";
-import { remember } from "../core/resolver/cache.js";
+import type { resolveTarget } from "../core/resolver/resolver.js";
+import { resolveCached } from "../core/resolver/cache.js";
 import { checkRateLimit, consumeTelegramLink, userByTelegram, unlinkTelegram, type AppUser } from "../users/service.js";
 
 const JOB_STATUS: Record<string, string> = {
@@ -302,7 +302,7 @@ export function createBot(token: string, opts: ConstructorParameters<typeof Bot>
     }
     await ctx.replyWithChatAction("typing").catch(() => {});
     try {
-      const t = remember(await resolveTarget({ input: args.input, chain: args.chain }));
+      const t = await resolveCached(args.input, args.chain);
       const path = `/app/mint?input=${encodeURIComponent(args.input)}&chain=${t.chain.key}`;
       const kb = new InlineKeyboard();
       if (mini) kb.webApp("Open in SkyBOT", dashUrl(path));
@@ -348,7 +348,7 @@ export function createBot(token: string, opts: ConstructorParameters<typeof Bot>
     if (!arg) return ctx.reply("Usage: /mint &lt;opensea link | slug | 0xaddress&gt; [chain]", { parse_mode: "HTML" });
     const [input, chain] = arg.split(/\s+/);
     try {
-      const t = remember(await resolveTarget({ input, chain }));
+      const t = await resolveCached(input, chain);
       const path = `/app/mint?input=${encodeURIComponent(input)}&chain=${t.chain.key}`;
       const kb = new InlineKeyboard();
       if (mini) kb.webApp("Open Dashboard", dashUrl(path));
@@ -375,7 +375,7 @@ export function createBot(token: string, opts: ConstructorParameters<typeof Bot>
       });
     const [input, chain] = ctx.message.text.trim().split(/\s+/);
     try {
-      const t = remember(await resolveTarget({ input, chain }));
+      const t = await resolveCached(input, chain);
       const path = `/app/mint?input=${encodeURIComponent(input)}&chain=${t.chain.key}`;
       const kb = new InlineKeyboard();
       if (mini) kb.webApp("Open Dashboard", dashUrl(path));

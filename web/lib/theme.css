@@ -567,3 +567,66 @@ html.tg-mini-app main.app {
 .small {
   font-size: 12px;
 }
+
+/* NFTs page */
+.nft-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 10px;
+  margin-top: 8px;
+}
+.nft-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--line-soft);
+  border-radius: 12px;
+  background: var(--ink);
+  cursor: pointer;
+  min-width: 0;
+}
+.nft-card.on {
+  border-color: var(--orange);
+  box-shadow: 0 0 0 3px var(--orange-glow);
+}
+.nft-img {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  width: 100%;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--panel-2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.nft-img img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.nft-img input {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  width: 18px;
+  height: 18px;
+  accent-color: var(--orange);
+}
+.nft-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.nft-meta > b,
+.nft-meta > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tag.warn {
+  color: var(--warn);
+  border-color: var(--warn);
+}

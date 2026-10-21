@@ -1,20 +1,77 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /**
- * Short per-instance cache for native balances (default 15 s) so page reloads and the Mint/Wallets pages
- * don't hammer RPCs. Concurrent lookups for the same chain+address share one in-flight request.
+ * Per-instance cache for native balances (default 30 s) so page reloads and the Mint / Wallets / Withdraw pages
+ * don't hammer RPCs. Concurrent lookups for the same chain + address share one in-flight request, and a batch of
+ * misses is loaded with ONE multicall. Critical paths (withdraw quote, wallet removal, NFT send) pass `fresh`.
  */
-const TTL_MS = 15_000;
+export const BALANCE_TTL_MS = 30_000;
 const cache = new Map<string, { at: number; p: Promise<bigint> }>();
+const k = (chain: string, address: string) => `${chain}:${address.toLowerCase()}`;
 
-export function cachedBalance(chain: string, address: string, load: () => Promise<bigint>, ttlMs = TTL_MS): Promise<bigint> {
-  const k = `${chain}:${address.toLowerCase()}`;
-  const hit = cache.get(k);
+function prune(ttlMs: number) {
+  if (cache.size > 5000) for (const [key, v] of cache) if (Date.now() - v.at > ttlMs) cache.delete(key);
+}
+
+export function cachedBalance(chain: string, address: string, load: () => Promise<bigint>, ttlMs = BALANCE_TTL_MS): Promise<bigint> {
+  const key = k(chain, address);
+  const hit = cache.get(key);
   if (hit && Date.now() - hit.at < ttlMs) return hit.p;
   const p = load();
-  cache.set(k, { at: Date.now(), p });
-  p.catch(() => cache.delete(k));
-  if (cache.size > 5000) for (const [key, v] of cache) if (Date.now() - v.at > ttlMs) cache.delete(key);
+  cache.set(key, { at: Date.now(), p });
+  p.catch(() => cache.delete(key));
+  prune(ttlMs);
   return p;
+}
+
+/**
+ * Many balances on one chain: cache hits are reused, all misses are loaded together via `loadMany` (one multicall).
+ * `fresh: true` ignores the cache (but still stores the result for later non-critical reads).
+ */
+export async function cachedBalances(
+  chain: string,
+  addresses: string[],
+  loadMany: (missing: string[]) => Promise<Map<string, bigint>>,
+  opts: { ttlMs?: number; fresh?: boolean } = {},
+): Promise<Map<string, bigint | Error>> {
+  const ttlMs = opts.ttlMs ?? BALANCE_TTL_MS;
+  const now = Date.now();
+  const missing: string[] = [];
+  const pending = new Map<string, Promise<bigint>>();
+  for (const a of new Set(addresses.map((x) => x.toLowerCase()))) {
+    const hit = cache.get(k(chain, a));
+    if (!opts.fresh && hit && now - hit.at < ttlMs) pending.set(a, hit.p);
+    else missing.push(a);
+  }
+  if (missing.length) {
+    const batch = loadMany(missing);
+    for (const a of missing) {
+      const p = batch.then((m) => {
+        const v = m.get(a);
+        if (v === undefined) throw new Error("balance unavailable");
+        return v;
+      });
+      p.catch(() => cache.delete(k(chain, a)));
+      cache.set(k(chain, a), { at: now, p });
+      pending.set(a, p);
+    }
+    prune(ttlMs);
+  }
+  const out = new Map<string, bigint | Error>();
+  await Promise.all(
+    [...pending].map(async ([a, p]) => {
+      try {
+        out.set(a, await p);
+      } catch (e: any) {
+        out.set(a, e instanceof Error ? e : new Error(String(e)));
+      }
+    }),
+  );
+  return out;
+}
+
+/** Drop cached balances after a transfer so the next read is fresh. */
+export function invalidateBalances(chain: string, addresses: string[]) {
+  for (const a of addresses) cache.delete(k(chain, a));
 }
 
 export function clearBalanceCache() {

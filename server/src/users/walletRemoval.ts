@@ -16,6 +16,7 @@ import { getDb } from "../db/client.js";
 import { minted } from "../db/schema.js";
 import { getPrivy } from "../auth/privy.js";
 import { log, redactString } from "../util/log.js";
+import { cachedNftCount } from "../core/nft/holdings.js";
 import { getWallet, hardDeleteWallet, hideWallet, type AppUser } from "./service.js";
 
 export interface ChainBalance {
@@ -43,6 +44,8 @@ export interface RemovalCheck {
   funded: ChainBalance[];
   unchecked: ChainBalance[];
   mintedNfts: number;
+  /** Non-spam NFTs per the cached holdings scan. */
+  heldNfts?: number;
   primaryEmbedded: boolean;
   /** Empty everywhere we can check → may be deleted for real. */
   canDelete: boolean;
@@ -59,11 +62,16 @@ export function decideRemoval(input: {
   mintedNfts: number;
   privy: PrivyWalletInfo;
   privyAvailable: boolean;
+  /** Non-spam NFTs from the cached holdings scan (NFTs page). */
+  heldNfts?: { total: number; byChain: { chain: string; count: number }[] };
 }): Pick<RemovalCheck, "funded" | "unchecked" | "canDelete" | "deleteMode" | "notes" | "primaryEmbedded"> {
   const funded = input.balances.filter((b) => b.balanceWei !== null && BigInt(b.balanceWei) > 0n);
   const unchecked = input.balances.filter((b) => b.balanceWei === null);
-  const canDelete = funded.length === 0 && unchecked.length === 0 && input.mintedNfts === 0;
-  const notes: string[] = ["Tokens (ERC-20) and NFTs from other sources are not checked. Move them out first if you have any."];
+  const held = input.heldNfts?.total ?? 0;
+  const canDelete = funded.length === 0 && unchecked.length === 0 && input.mintedNfts === 0 && held === 0;
+  const notes: string[] = [
+    "Tokens (ERC-20) are not checked, and NFTs are checked from the last holdings scan on the NFTs page. Move them out first if you have any.",
+  ];
   let deleteMode: RemovalCheck["deleteMode"];
   if (input.privy.primaryEmbedded) {
     deleteMode = "hide_only";
@@ -74,6 +82,10 @@ export function decideRemoval(input: {
     notes.push("Privy wallet id unknown, so the wallet is removed from SkyBOT only and stays in your Privy account.");
   }
   if (unchecked.length) notes.push(`Couldn't read the balance on ${unchecked.map((u) => u.chainName).join(", ")}. Try again later.`);
+  if (held)
+    notes.push(
+      `The last holdings scan shows ${held} NFT(s) in this wallet (${input.heldNfts!.byChain.map((c) => `${c.count} on ${c.chain}`).join(", ")}). Send them out on the NFTs page before deleting.`,
+    );
   if (input.mintedNfts) notes.push(`This wallet minted ${input.mintedNfts} NFT(s) with SkyBOT. Transfer them out before deleting.`);
   return { funded, unchecked, canDelete, deleteMode, notes, primaryEmbedded: input.privy.primaryEmbedded };
 }
@@ -131,16 +143,17 @@ async function privyInfo(user: AppUser, w: { address: string; privyWalletId: str
 
 export async function checkWalletRemoval(user: AppUser, walletId: string): Promise<RemovalCheck & { privy: PrivyWalletInfo }> {
   const w = await getWallet(user.id, walletId, { includeRemoved: true });
-  const [balances, privy, nfts] = await Promise.all([
+  const [balances, privy, nfts, held] = await Promise.all([
     nativeBalances(w.address),
     privyInfo(user, w),
     getDb()
       .select()
       .from(minted)
       .where(and(eq(minted.userId, user.id), eq(minted.wallet, w.address))),
+    cachedNftCount(user.id, w.id).catch(() => ({ total: 0, byChain: [], scanned: false })),
   ]);
-  const d = decideRemoval({ balances, mintedNfts: nfts.length, privy, privyAvailable: privyConfigured() });
-  return { walletId: w.id, label: w.label, address: w.address, balances, mintedNfts: nfts.length, ...d, privy };
+  const d = decideRemoval({ balances, mintedNfts: nfts.length, privy, privyAvailable: privyConfigured(), heldNfts: held });
+  return { walletId: w.id, label: w.label, address: w.address, balances, mintedNfts: nfts.length, heldNfts: held.total, ...d, privy };
 }
 
 export type RemovalResult = {

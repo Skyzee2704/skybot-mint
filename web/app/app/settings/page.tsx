@@ -32,7 +32,9 @@ export default function SettingsPage() {
     });
   useEffect(() => {
     load().catch((e) => setErr(e.message));
-    const i = setInterval(() => load().catch(() => {}), 5000);
+    const i = setInterval(() => {
+      if (document.visibilityState === "visible") load().catch(() => {});
+    }, 15_000);
     return () => clearInterval(i);
   }, []); // eslint-disable-line
 
