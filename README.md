@@ -6,11 +6,11 @@
 
 **Multi-user NFT mint desk for OpenSea drops and any NFT contract — on the web and inside Telegram.**
 
-[![License: AGPL-3.0-only](https://img.shields.io/badge/license-AGPL--3.0--only-blue.svg)](LICENSE)
+[![License: AGPL-3.0-only](https://img.shields.io/github/license/skyzee2706/skybot-mint?color=blue)](LICENSE)
 [![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=next.js)](https://nextjs.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org)
-[![Deploy on Vercel](https://img.shields.io/badge/deploy-Vercel-000?logo=vercel)](DEPLOY.md)
-[![CI](https://img.shields.io/badge/CI-GitHub%20Actions-2088FF?logo=githubactions&logoColor=white)](.github/workflows/ci.yml)
+[![Deploy with Vercel](https://img.shields.io/badge/deploy-Vercel-000?logo=vercel)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fskyzee2706%2Fskybot-mint&root-directory=web)
+[![CI](https://github.com/skyzee2706/skybot-mint/actions/workflows/ci.yml/badge.svg)](https://github.com/skyzee2706/skybot-mint/actions/workflows/ci.yml)
 
 </div>
 
@@ -33,9 +33,21 @@ SkyBOT Mint lets a community mint NFT drops quickly and safely from many wallets
 
 ## Screenshots
 
-| Desktop | Mobile | Telegram Mini App |
+> Screenshots use demo data (random addresses, sample jobs).
+
+| Landing | Telegram Mini App: Mint | Telegram Mini App: Wallets |
 |---|---|---|
-| <img src="screenshots/skybot-desktop.png" width="360" /> | <img src="screenshots/skybot-mobile.png" width="180" /> | <img src="screenshots/skybot-app-mobile.png" width="180" /> |
+| <img src="screenshots/landing-mobile.png" width="220" alt="Landing page on mobile" /> | <img src="screenshots/miniapp-mint.png" width="220" alt="Mint page in the Telegram Mini App" /> | <img src="screenshots/miniapp-wallets.png" width="220" alt="Wallets in the Telegram Mini App" /> |
+
+<img src="screenshots/landing-desktop.png" alt="SkyBOT Mint landing page" />
+
+| Wallets | Jobs |
+|---|---|
+| <img src="screenshots/dashboard-wallets.png" alt="Wallets dashboard" /> | <img src="screenshots/dashboard-jobs.png" alt="Jobs dashboard" /> |
+
+| Mint | Settings |
+|---|---|
+| <img src="screenshots/dashboard-mint.png" alt="Mint dashboard" /> | <img src="screenshots/dashboard-settings.png" alt="Settings: Telegram linking, spend caps, chain health" /> |
 
 ## Architecture
 
@@ -102,7 +114,7 @@ To add a chain, add an entry to `server/src/config/chains.ts` and set `RPC_<KEY>
 Requirements: Node.js 20.9 or newer and npm 10 or newer.
 
 ```bash
-git clone https://github.com/<you>/skybot-mint.git
+git clone https://github.com/skyzee2706/skybot-mint.git
 cd skybot-mint
 npm ci
 cp .env.example .env        # fill in Privy, Telegram, and RPC values
@@ -222,7 +234,7 @@ Read the full threat model and production checklist in **[SECURITY.md](SECURITY.
 
 ## Contributing
 
-Contributions are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) and our [Code of Conduct](CODE_OF_CONDUCT.md). Report security issues privately as described in [SECURITY.md](SECURITY.md).
+Contributions are welcome — open an [issue](https://github.com/skyzee2706/skybot-mint/issues) or a [pull request](https://github.com/skyzee2706/skybot-mint/pulls). Please read [CONTRIBUTING.md](CONTRIBUTING.md) and our [Code of Conduct](CODE_OF_CONDUCT.md). Report security issues privately as described in [SECURITY.md](SECURITY.md).
 
 ## License
 

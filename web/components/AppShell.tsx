@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { usePrivy } from "@privy-io/react-auth";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { useTelegram } from "@/lib/telegram";
 
@@ -107,10 +107,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 export function useApi() {
   const { getAccessToken, user, authenticated } = usePrivy();
   const { initData } = useTelegram();
-  return async function call<T = any>(path: string, opts: { method?: string; body?: unknown } = {}) {
-    const token = authenticated ? await getAccessToken() : null;
-    const idToken = await (user as any)?.getIdentityToken?.().catch?.(() => null);
-    // Prefer Privy token; otherwise the httpOnly session cookie carries auth (initData header only as last resort).
-    return api<T>(path, { ...opts, token, idToken, telegramInitData: token ? null : initData });
-  };
+  // Stable identity across renders: pages use it in effect/useCallback deps (an unstable fn caused request loops).
+  return useCallback(
+    async function call<T = any>(path: string, opts: { method?: string; body?: unknown } = {}) {
+      const token = authenticated ? await getAccessToken() : null;
+      const idToken = await (user as any)?.getIdentityToken?.().catch?.(() => null);
+      // Prefer Privy token; otherwise the httpOnly session cookie carries auth (initData header only as last resort).
+      return api<T>(path, { ...opts, token, idToken, telegramInitData: token ? null : initData });
+    },
+    [authenticated, getAccessToken, user, initData],
+  );
 }

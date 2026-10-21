@@ -1,5 +1,6 @@
 "use client";
 // SPDX-License-Identifier: AGPL-3.0-only
+import { short } from "@/lib/api";
 import { useCallback, useEffect, useState } from "react";
 import { useCreateWallet, useImportWallet, useWallets, usePrivy } from "@privy-io/react-auth";
 import { useApi } from "@/components/AppShell";
@@ -87,7 +88,7 @@ export default function WalletsPage() {
             Load Balances
           </button>
         </div>
-        <table>
+        <table className="cards">
           <thead>
             <tr>
               <th>Label</th>
@@ -101,12 +102,16 @@ export default function WalletsPage() {
             {data.wallets.map((w) => (
               <tr key={w.id}>
                 <td>
-                  {w.label} {w.isMain && <span className="pill accent">main</span>} <span className="muted">{w.source}</span>
+                  {w.label} {w.isMain && <span className="pill accent">Main</span>}{" "}
+                  <span className="tag">{w.source === "privy" ? "Privy" : w.source}</span>
                 </td>
-                <td className="mono">{w.address}</td>
+                <td className="mono" title={w.address}>
+                  <span className="addr-full">{w.address}</span>
+                  <span className="addr-short">{short(w.address)}</span>
+                </td>
                 <td>{w.group ?? "—"}</td>
                 <td className="mono">{balances[w.id] ?? ""}</td>
-                <td className="row">
+                <td className="row actions">
                   {!w.isMain && (
                     <button className="ghost" onClick={() => run(() => api(`/api/wallets/${w.id}/main`, { body: {} }), "Main set")}>
                       Set Main

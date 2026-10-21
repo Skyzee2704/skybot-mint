@@ -1,6 +1,7 @@
 "use client";
 // SPDX-License-Identifier: AGPL-3.0-only
 import { Fragment, useEffect, useState } from "react";
+import { strategyLabel } from "@/lib/labels";
 import { useApi } from "@/components/AppShell";
 import { short } from "@/lib/api";
 
@@ -42,9 +43,11 @@ export default function JobsPage() {
                 <td className={j.status === "done" ? "ok" : j.status === "failed" ? "bad" : "warn"}>{j.status}</td>
                 <td>{j.chain}</td>
                 <td className="mono">{short(j.target)}</td>
-                <td>{j.strategy}</td>
+                <td>{strategyLabel(j.strategy)}</td>
                 <td>
-                  {(j.results || []).filter((r: any) => r.status === "confirmed").length}/{(j.results || []).length || "?"} confirmed
+                  {(j.results || []).length
+                    ? `${(j.results || []).filter((r: any) => r.status === "confirmed").length}/${(j.results || []).length} confirmed`
+                    : "—"}
                 </td>
                 <td>
                   {["scheduled", "waiting_unlock"].includes(j.status) && (

@@ -372,6 +372,7 @@ html.tg-mini-app main.app {
     display: block;
     overflow-x: auto;
   }
+
   .hero h1 {
     font-size: 2.1rem;
   }
@@ -413,4 +414,61 @@ html.tg-mini-app main.app {
   margin: 0 auto;
   padding: 48px 20px;
   line-height: 1.6;
+}
+
+.addr-short {
+  display: none;
+}
+@media (max-width: 720px) {
+  td .addr-full {
+    display: none;
+  }
+  td .addr-short {
+    display: inline;
+  }
+  /* Stacked "card" rows for wide tables on phones / Mini App */
+  table.cards,
+  table.cards tbody {
+    display: block;
+    overflow: visible;
+  }
+  table.cards thead {
+    display: none;
+  }
+  table.cards tr {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 6px 12px;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  table.cards td {
+    display: block;
+    padding: 0;
+    border: 0;
+  }
+  table.cards td.row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  table.cards td.actions,
+  table.cards td[colspan] {
+    grid-column: 1 / -1;
+  }
+  table.cards td.actions button {
+    padding: 6px 12px;
+    font-size: 14px;
+  }
+}
+.tag {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 0 6px;
+  border-radius: 6px;
+  font-size: 11px;
+  line-height: 18px;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  vertical-align: middle;
 }

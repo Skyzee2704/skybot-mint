@@ -1,6 +1,7 @@
 "use client";
 // SPDX-License-Identifier: AGPL-3.0-only
 import { useEffect, useMemo, useState } from "react";
+import { STRATEGY_LABELS } from "@/lib/labels";
 import Link from "next/link";
 import { fmtEth, short } from "@/lib/api";
 import { useApi } from "@/components/AppShell";
@@ -8,7 +9,7 @@ import { ChainSelect } from "@/components/ChainSelect";
 import { ConfirmBox } from "@/components/Confirm";
 
 type Strategy = "seadrop_public" | "opensea_api" | "generic";
-const STRAT: Record<Strategy, string> = { seadrop_public: "SeaDrop Public", opensea_api: "OpenSea Mint API", generic: "Generic Contract" };
+const STRAT = STRATEGY_LABELS as Record<Strategy, string>;
 
 export default function MintPage() {
   const api = useApi();
