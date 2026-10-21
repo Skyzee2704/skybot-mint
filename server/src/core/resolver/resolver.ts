@@ -6,6 +6,7 @@ import { parseInput, ParsedInput } from "./parseInput.js";
 import { OpenSeaClient, OsDrop, OpenSeaUnavailable } from "./opensea.js";
 import { readSeaDrop, SeaDropInfo, SEADROP_ADDRESS } from "./seadrop.js";
 import { analyzeGeneric, GenericInfo } from "./generic.js";
+import { sortStages } from "./stageOrder.js";
 
 export interface Stage {
   name: string;
@@ -326,7 +327,7 @@ export async function resolveTarget(opts: ResolveOptions): Promise<ResolvedTarge
     opensea: { apiKey: os.available, drop, error: osError, url: slug ? `https://opensea.io/collection/${slug}` : null },
     seadrop,
     generic,
-    stages,
+    stages: sortStages(stages),
     supply: { total, max, remaining },
     recommendedStrategy,
     warnings,

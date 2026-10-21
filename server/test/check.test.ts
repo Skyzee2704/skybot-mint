@@ -93,3 +93,24 @@ describe("/check formatting", () => {
     }
   });
 });
+
+describe("stage order", () => {
+  it("live first, then upcoming soonest first, then ended — in /check output too", async () => {
+    const { sortStages } = await import("../src/core/resolver/stageOrder.js");
+    const st = [
+      { name: "Public (on-chain)", status: "upcoming", start: "2026-10-23T14:00:00Z" },
+      { name: "Old", status: "ended", start: "2026-10-01T00:00:00Z" },
+      { name: "FCFS", status: "upcoming", start: "2026-10-22T16:00:00Z" },
+      { name: "GTD", status: "upcoming", start: "2026-10-22T15:00:00Z" },
+      { name: "Live", status: "active", start: "2026-10-20T00:00:00Z" },
+    ];
+    expect(sortStages(st).map((s) => s.name)).toEqual(["Live", "GTD", "FCFS", "Public (on-chain)", "Old"]);
+    const t2 = {
+      ...target,
+      stages: st.map((s) => ({ ...s, type: "public", priceWei: "0", end: null, maxPerWallet: null })),
+    };
+    const [msg] = formatCheck({ target: t2, rows: [], targetStage: null, timeZone: "UTC", now: Date.parse("2026-10-21T14:40:00Z") });
+    const pos = ["<b>Live</b>", "<b>GTD</b>", "<b>FCFS</b>", "<b>Public (on-chain)</b>", "<b>Old</b>"].map((x) => msg.indexOf(x));
+    expect(pos.every((p, i) => p > 0 && (i === 0 || p > pos[i - 1]!))).toBe(true);
+  });
+});

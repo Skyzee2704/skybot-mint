@@ -17,6 +17,7 @@ import { cachedJwt, eligibilityWithJwt, jwtFromSignature, validateSiweFields } f
 import type { OsStage } from "../resolver/opensea.js";
 import { and, eq } from "drizzle-orm";
 import { loadJwt, serverSignIn, storeJwt } from "../resolver/openseaSession.js";
+import { sortStages } from "../resolver/stageOrder.js";
 import { getDb } from "../../db/client.js";
 import { openseaVerdicts } from "../../db/schema.js";
 
@@ -344,6 +345,7 @@ export async function checkEligibility(
                 priceWei: v?.price ?? s.price ?? null,
               };
             });
+            stages = sortStages(stages);
             const target = stages.find((s) => s.uuid === targetOs.uuid);
             const label = targetOs.label ?? targetOs.stage_type ?? "stage";
             if (target?.eligible === true) {

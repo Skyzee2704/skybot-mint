@@ -7,6 +7,7 @@ import { formatEther } from "ethers";
 import { formatDateTime, isValidTimeZone } from "../util/time.js";
 import type { ResolvedTarget } from "../core/resolver/resolver.js";
 import type { EligibilityRow } from "../core/mint/eligibility.js";
+import { sortStages } from "../core/resolver/stageOrder.js";
 
 export const esc = (s: unknown) =>
   String(s ?? "")
@@ -42,6 +43,11 @@ export function parseCheckArgs(text: string): { input: string; chain?: string } 
 }
 
 const shortAddr = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
+
+/** Per-wallet verdicts carry only start times: treat past starts as live so they sort first. */
+function stageStatus(s: { start?: string | null }, now: number) {
+  return s.start && Date.parse(s.start) > now ? "upcoming" : s.start ? "active" : "unknown";
+}
 
 function stageLine(s: ResolvedTarget["stages"][number], sym: string, tz: string | null, now: number) {
   const price = s.priceWei !== null ? (s.priceWei === "0" ? "Free" : `${formatEther(s.priceWei)} ${sym}`) : "price unknown";
@@ -102,14 +108,16 @@ export function formatCheck(v: CheckView): string[] {
   if (t.supply.max || t.supply.total) lines.push(`Supply: ${t.supply.total ?? "?"} / ${t.supply.max ?? "?"}`);
   if (t.stages.length) {
     lines.push("", "<b>Stages</b>");
-    for (const s of t.stages) lines.push(stageLine(s, sym, tz, now));
+    for (const s of sortStages(t.stages)) lines.push(stageLine(s, sym, tz, now));
   }
   if (v.rows.length) {
     lines.push("", `<b>Wallets</b> (${esc(stageName)})`);
     for (const { r, v: x } of verdicts) {
       const per =
         r.stages && r.stages.length > 1
-          ? `\n   ${r.stages.map((s) => `${esc(s.label ?? s.type ?? "stage")}: ${s.eligible ? "yes" : s.eligible === false ? "no" : "?"}`).join(" · ")}`
+          ? `\n   ${sortStages(r.stages.map((s) => ({ ...s, status: stageStatus(s, now) })))
+              .map((s) => `${esc(s.label ?? s.type ?? "stage")}: ${s.eligible ? "yes" : s.eligible === false ? "no" : "?"}`)
+              .join(" · ")}`
           : "";
       lines.push(
         `${ICON[x.label]} <b>${esc(r.label)}</b> <code>${shortAddr(r.address)}</code> · ${x.label}${x.why ? ` — ${esc(x.why)}` : ""}${per}`,
