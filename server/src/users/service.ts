@@ -21,6 +21,31 @@ export type PrivyProfile = {
   telegram?: { id: string; username?: string | null } | null;
 };
 
+/**
+ * Admin is an allow-list, never a stored default: a user is admin ONLY when their verified Telegram id is in
+ * TELEGRAM_USER_ID / ADMIN_TELEGRAM_IDS or their verified email is in ADMIN_EMAILS. The `role` column is kept
+ * in sync for display, but every access decision goes through this function.
+ */
+export function isAdminIdentity(u: { email?: string | null; telegramUserId?: string | null }): boolean {
+  const email = u.email?.trim().toLowerCase();
+  if (email && env.adminEmails.includes(email)) return true;
+  const tg = u.telegramUserId?.trim();
+  return Boolean(tg && env.adminTelegramIds.includes(tg));
+}
+
+export function roleFor(u: { email?: string | null; telegramUserId?: string | null }): "admin" | "user" {
+  return isAdminIdentity(u) ? "admin" : "user";
+}
+
+/** Re-derive the stored role from the allow-list (demotes stale admins, promotes newly listed ones). */
+export async function syncRole<T extends AppUser>(u: T): Promise<T> {
+  const role = roleFor(u);
+  if (u.role === role) return u;
+  await getDb().update(users).set({ role }).where(eq(users.id, u.id));
+  log.info("Role re-derived from admin allow-list", { userId: u.id, role });
+  return { ...u, role };
+}
+
 const httpError = (message: string, statusCode: number, code?: string) => Object.assign(new Error(message), { statusCode, code });
 
 async function userByPrivyId(privyUserId: string): Promise<AppUser | null> {
@@ -114,10 +139,8 @@ export async function resolvePrivyUser(privyUserId: string, profile: PrivyProfil
     }
   }
 
-  const count = (await db.select({ c: sql<number>`count(*)` }).from(users))[0]?.c ?? 0;
   const email = profile.email?.toLowerCase() ?? null;
-  const isAdmin =
-    Number(count) === 0 || (email !== null && env.adminEmails.includes(email)) || (tg?.id ? env.adminTelegramIds.includes(tg.id) : false);
+  const isAdmin = isAdminIdentity({ email, telegramUserId: tg?.id ?? null });
   const id = randomUUID();
   const t = now();
   await db
@@ -177,7 +200,7 @@ export function publicUser(u: AppUser) {
     id: u.id,
     email: u.email,
     name: u.name,
-    role: u.role,
+    role: roleFor(u),
     telegramLinked: Boolean(u.telegramUserId),
     telegramUsername: u.telegramUsername,
     privyBacked: !u.privyUserId.startsWith("tg:"),
@@ -544,8 +567,7 @@ export async function upsertTelegramFirstUser(tg: {
       .where(eq(users.id, byPrivy.id));
     return { user: await requireUser(byPrivy.id), created: false };
   }
-  const count = (await db.select({ c: sql<number>`count(*)` }).from(users))[0]?.c ?? 0;
-  const isAdmin = Number(count) === 0 || env.adminTelegramIds.includes(tgId);
+  const isAdmin = isAdminIdentity({ telegramUserId: tgId });
   const id = randomUUID();
   const t = now();
   const name = [tg.first_name, tg.last_name].filter(Boolean).join(" ") || tg.username || null;

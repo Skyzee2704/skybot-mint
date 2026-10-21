@@ -7,6 +7,8 @@ import {
   checkRateLimit,
   userByTelegram,
   profileFromPrivyUser,
+  isAdminIdentity,
+  syncRole,
   type AppUser,
   type PrivyProfile,
 } from "../users/service.js";
@@ -72,7 +74,7 @@ export async function requireAuth(req: FastifyRequest, reply: FastifyReply) {
       const user = await resolvePrivyUser(claims.privyUserId, profile);
       if (user.disabled) return reply.code(403).send({ error: "Account disabled" });
       await checkRateLimit(user.id, req.routeOptions.url ?? req.url.split("?")[0]);
-      req.user = user;
+      req.user = await syncRole(user);
       req.privyAccessToken = token;
       req.authVia = "privy";
       return;
@@ -93,7 +95,7 @@ export async function requireAuth(req: FastifyRequest, reply: FastifyReply) {
     try {
       const user = await requireUser(sid);
       await checkRateLimit(user.id, req.routeOptions.url ?? req.url.split("?")[0]);
-      req.user = user;
+      req.user = await syncRole(user);
       req.authVia = "telegram-session";
       return;
     } catch (e: any) {
@@ -117,7 +119,7 @@ export async function requireAuth(req: FastifyRequest, reply: FastifyReply) {
       }
       if (user.disabled) return reply.code(403).send({ error: "Account disabled" });
       await checkRateLimit(user.id, req.routeOptions.url ?? req.url.split("?")[0]);
-      req.user = user;
+      req.user = await syncRole(user);
       req.authVia = "telegram-init";
       return;
     } catch (e: any) {
@@ -135,8 +137,13 @@ export async function requireAuth(req: FastifyRequest, reply: FastifyReply) {
   return reply.code(401).send({ error: "Missing Authorization: Bearer <privy-access-token> (or X-Telegram-Init-Data in Mini App)" });
 }
 
+/** Admin gate: allow-list check on the authenticated identity (never the stored role alone). */
+export async function adminGate(req: FastifyRequest, reply: FastifyReply) {
+  if (!req.user || !isAdminIdentity(req.user)) return reply.code(403).send({ error: "Admin only" });
+}
+
 export async function requireAdmin(req: FastifyRequest, reply: FastifyReply) {
   await requireAuth(req, reply);
   if (reply.sent) return;
-  if (req.user?.role !== "admin") return reply.code(403).send({ error: "Admin only" });
+  return adminGate(req, reply);
 }

@@ -6,7 +6,7 @@ import { z } from "zod";
 import { formatEther } from "ethers";
 import { CHAINS, requireChain, rpcsForChain } from "../config/chains.js";
 import { configStatus, env, privyConfigured, privyServerSigningReady } from "../config/env.js";
-import { requireAuth } from "../auth/middleware.js";
+import { requireAuth, adminGate } from "../auth/middleware.js";
 import { getPool } from "../core/rpc/pool.js";
 import { getResolved, refresh, remember } from "../core/resolver/cache.js";
 import { checkEligibility } from "../core/mint/eligibility.js";
@@ -418,9 +418,7 @@ export async function buildServer(): Promise<FastifyInstance> {
 
     // Admin
     a.register(async (ad) => {
-      ad.addHook("onRequest", async (req, reply) => {
-        if (req.user?.role !== "admin") return reply.code(403).send({ error: "Admin only" });
-      });
+      ad.addHook("onRequest", adminGate);
       ad.get("/api/admin/users", async () => ({ users: await listUsersAdmin() }));
       /** Post-deploy: setWebhook + commands + Mini App menu button. Admin only. */
       ad.post("/api/admin/telegram/setup", async () => {

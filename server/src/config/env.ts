@@ -32,7 +32,7 @@ export const env = {
   get telegramBotToken() {
     return str("TELEGRAM_BOT_TOKEN");
   },
-  /** Admin Telegram user id (notifications + admin role mapping). Not an access restriction. */
+  /** Admin Telegram user id (notifications + admin allow-list). */
   get telegramUserId() {
     return str("TELEGRAM_USER_ID");
   },
@@ -56,7 +56,7 @@ export const env = {
   get privyAuthKeyQuorumId() {
     return str("PRIVY_AUTH_KEY_QUORUM_ID");
   },
-  /** Comma-separated emails that become admins on first login. First user is also admin. */
+  /** Comma-separated emails that are admins (allow-list, checked on every request). No other way to become admin. */
   get adminEmails() {
     return (str("ADMIN_EMAILS") ?? "")
       .split(",")
