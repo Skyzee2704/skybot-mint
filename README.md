@@ -5,7 +5,7 @@ Self-hosted dashboard + API (+ optional Telegram bot) for minting NFTs from **Op
 - **server/** — TypeScript, Fastify, ethers v6. Resolver, encrypted keystore, eligibility, simulation, in-process scheduler/worker, Telegram bot (grammY).
 - **web/** — Next.js 16 dashboard (Mint, Wallets, Jobs, Settings). It proxies `/api/*` to the server.
 
-> Real money. Every spend path goes **preview → simulation → typed confirmation phrase** (`MINT n`, `FUND n`, `SWEEP n TO 0x…`). Start with tiny amounts and keep the safety caps low.
+> Real money. Every spend path goes **preview → simulation → typed confirmation phrase** (`MINT n`, `FUND n`, `SWEEP n TO 0x…`). Start with tiny amounts. Spend caps are optional (Settings, default off).
 
 ## Quick start
 
@@ -26,6 +26,47 @@ For development, `npm run dev:server` and `npm run dev:web` give you hot reload.
 Read-only network check: `ENV_FILES=/workspace/secrets/rpc.env npm run smoke`. It checks chain IDs on all chains, SeaDrop deployment, and resolves a SeaDrop drop and a generic contract. It never signs anything.
 
 Open http://localhost:3000. On first launch you create the **master password**. It encrypts every key and **cannot be recovered**.
+
+## Deployment on this box (pm2)
+
+Both processes run under [pm2](https://pm2.keymetrics.io/) and keep running after the shell exits. Data lives outside the repo in `/workspace/nft-mint-bot-data` (mode 700, `db.json` 600). Secrets are loaded from `ENV_FILES=/workspace/secrets/rpc.env` and the process environment.
+
+```bash
+cd /workspace/nft-mint-bot
+npm run build                                          # after code changes
+bash -lc 'pm2 start ecosystem.config.cjs && pm2 save'  # first start; login shell so OPENSEA/ETHERSCAN keys are in env
+pm2 ls                                                  # status
+pm2 logs nft-mint-api --lines 100                       # API + worker + Telegram logs (secrets redacted)
+pm2 logs nft-mint-web
+bash -lc 'pm2 restart ecosystem.config.cjs --update-env' # restart after a rebuild or env change
+pm2 stop all  /  pm2 delete all                         # stop / remove
+pm2 resurrect                                           # bring the saved list back after a box restart
+```
+
+- Dashboard: http://127.0.0.1:3000 (bound to localhost; the API is on 127.0.0.1:4000 and reached through the dashboard's `/api` proxy).
+- There is no systemd on the box, so `pm2 startup` is unavailable. After the box itself restarts, run `pm2 resurrect`, or the `pm2 start` line above.
+- To check the Telegram token and send a test message to `TELEGRAM_USER_ID`, run `cd server && ENV_FILES=/workspace/secrets/rpc.env npm run telegram:test`. Telegram only lets a bot message a user who has pressed **Start** in the bot chat first.
+
+## Allowlist / eligibility checks (no balance needed)
+
+Each wallet row shows three separate results:
+- **Allowlisted**: yes / no / unknown / public, plus where the answer came from.
+- **Contract simulation** with a fake balance.
+- **Balance**: enough or not.
+
+| Situation | How it is checked | Result |
+|---|---|---|
+| OpenSea drop, **active** allowlist/signed stage | Official `POST /api/v2/drops/{slug}/mint`. OpenSea checks the stage allowlist **before** balance (tested on a live signed presale: listed but unfunded wallets get `422 Insufficient balance`, unlisted wallets get `422 …not on this stage's allowlist`). | yes / no without funds |
+| OpenSea drop, tx returned | The returned tx is run through `eth_call` with a `stateOverride` balance, so the signature, limits and timing are checked on-chain. Nothing is signed. | contract sim ok / revert reason |
+| SeaDrop public stage, generic contracts | `eth_call` + `stateOverride` (fake balance) of the real mint tx, with SeaDrop custom errors decoded | ok / revert reason |
+| SeaDrop **merkle** allowlist | `AllowListUpdated` → `allowListURI` (Etherscan v2 logs) → IPFS. If the file is plaintext, membership is computed locally and the merkle root is verified. | yes / no, or "encrypted" |
+| **Upcoming** OpenSea stage (409 until it opens) | Optional **OpenSea wallet login** (Settings, off by default). Each wallet signs an off-chain SIWE message, then the official `GET /api/v2/drops/{slug}/eligibility` is called. The PAT is revoked right away and the JWT is kept in memory only. | yes / no |
+
+Limits:
+- OpenSea-hosted allowlist files are PGP-encrypted to OpenSea, and current OpenSea drops use server-signed stages instead of merkle roots, so local merkle checks rarely apply.
+- Signed stages can only be checked through OpenSea: the mint API during the stage, or the wallet login before it.
+- The wallet login is a real OpenSea sign-in for that wallet and accepts OpenSea's ToS. It was implemented against the official docs and SDK flow but not exercised live, because no user wallets exist yet.
+- `stateOverride` works on all configured Alchemy URLs and on most public RPCs; endpoints that ignore it are skipped automatically.
 
 ## Using it
 
@@ -76,7 +117,9 @@ SeaDrop presence was verified on every chain with read-only `eth_getCode`.
   - chain-ID check;
   - target must be the resolved contract, SeaDrop, or the OpenSea-returned address;
   - approve, setApprovalForAll, transfer and transferFrom-style selectors are blocked;
-  - `MAX_PRICE_PER_NFT`, `MAX_DAILY_SPEND` (ledger per chain per UTC day) and `MAX_GAS_PRICE_GWEI`.
+  - an OpenSea-built tx may not ask for more than the published stage price × quantity;
+  - `MAX_GAS_PRICE_GWEI` fee ceiling;
+  - **optional** caps (Settings, default **off = unlimited**): max price per NFT and max daily spend per chain (ledger per UTC day). `MAX_PRICE_PER_NFT` / `MAX_DAILY_SPEND` env values are only the defaults shown when you enable them.
 - Only the **official** OpenSea API v2 is used (no internal GraphQL). There is no browser key injection and no tunnels.
 - The scheduler runs inside the API process because the KEK only lives there. If you restart, unlock again. Jobs wait in `waiting_unlock` and fail after a 5-minute grace period.
 

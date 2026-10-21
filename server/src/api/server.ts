@@ -16,6 +16,7 @@ import { getStore } from "../core/store.js";
 import { executeFund, executeSweep, previewFund, previewSweep } from "../core/ops/ops.js";
 import { MintRequest } from "../core/mint/types.js";
 import { redactString, log } from "../util/log.js";
+import { dailySpent, defaultCapValues } from "../core/safety/safety.js";
 
 const addr = z.string().regex(/^0x[0-9a-fA-F]{40}$/);
 const strategy = z.enum(["seadrop_public", "opensea_api", "generic"]);
@@ -28,6 +29,15 @@ const mintReq = z.object({
   runAt: z.string().datetime().nullable().optional(),
   offsetMs: z.number().int().min(-5000).max(60000).optional(),
 });
+
+function settingsView() {
+  const st = getStore().db.settings;
+  return {
+    priceCapEnabled: st.priceCapEnabled, dailyCapEnabled: st.dailyCapEnabled, openseaWalletLogin: st.openseaWalletLogin,
+    chains: CHAINS.map((c) => { const def = defaultCapValues(c); const v = st.caps[c.key] ?? {}; return { key: c.key, name: c.name, nativeSymbol: c.nativeSymbol, maxPricePerNft: v.maxPricePerNft ?? def.maxPricePerNft, maxDailySpend: v.maxDailySpend ?? def.maxDailySpend, dailySpent: formatEther(dailySpent(c)) }; }),
+    alwaysOn: ["chain-ID check before every send", "mint target must be SeaDrop / resolved contract", "approve / setApprovalForAll / transfer-style calls blocked", "OpenSea tx value must not exceed published stage price x qty", "MAX_GAS_PRICE_GWEI fee ceiling"],
+  };
+}
 
 function auth(req: FastifyRequest, reply: FastifyReply, done: () => void) {
   const h = req.headers.authorization ?? "";
@@ -70,6 +80,23 @@ export async function buildServer(): Promise<FastifyInstance> {
       try { await pool.checkChainId(); block = await pool.read((p) => p.getBlockNumber(), "blockNumber"); ok = true; } catch (e: any) { error = redactString(e.message); }
       return { key: c.key, chainId: c.chainId, ok, block, error, endpoints: pool.status().map((s) => ({ ...s, lastError: s.lastError ? redactString(s.lastError) : null })) };
     })));
+
+    // Settings (caps default OFF = unlimited; chain-ID check and approve/transfer block always on)
+    a.get("/api/settings", async () => settingsView());
+    a.put("/api/settings", async (req) => {
+      const num = z.string().regex(/^\d+(\.\d+)?$/);
+      const b = z.object({ priceCapEnabled: z.boolean().optional(), dailyCapEnabled: z.boolean().optional(), openseaWalletLogin: z.boolean().optional(),
+        caps: z.record(z.string(), z.object({ maxPricePerNft: num.optional(), maxDailySpend: num.optional() })).optional() }).parse(req.body);
+      for (const k of Object.keys(b.caps ?? {})) requireChain(k);
+      getStore().update((d) => {
+        if (b.priceCapEnabled !== undefined) d.settings.priceCapEnabled = b.priceCapEnabled;
+        if (b.dailyCapEnabled !== undefined) d.settings.dailyCapEnabled = b.dailyCapEnabled;
+        if (b.openseaWalletLogin !== undefined) d.settings.openseaWalletLogin = b.openseaWalletLogin;
+        for (const [k, v] of Object.entries(b.caps ?? {})) d.settings.caps[k] = { ...d.settings.caps[k], ...v };
+      });
+      log.info("Settings updated", { priceCapEnabled: getStore().db.settings.priceCapEnabled, dailyCapEnabled: getStore().db.settings.dailyCapEnabled, openseaWalletLogin: getStore().db.settings.openseaWalletLogin });
+      return settingsView();
+    });
 
     // Wallets
     a.get("/api/wallets", async () => ({ wallets: wallets.list(), groups: wallets.groups(), mainWalletId: getStore().db.mainWalletId }));
@@ -116,9 +143,10 @@ export async function buildServer(): Promise<FastifyInstance> {
       return remember(await resolveTarget({ input: b.input, chain: b.chain || undefined }));
     });
     a.post("/api/eligibility", async (req) => {
-      const b = z.object({ chain: z.string(), contract: addr, input: z.string().optional(), strategy, walletIds: z.array(z.string()).optional(), quantity: z.number().int().min(1).max(100).default(1), refresh: z.boolean().optional() }).parse(req.body);
+      const b = z.object({ chain: z.string(), contract: addr, input: z.string().optional(), strategy, walletIds: z.array(z.string()).optional(), quantity: z.number().int().min(1).max(100).default(1), refresh: z.boolean().optional(),
+        generic: z.object({ signature: z.string(), priceWei: z.string().regex(/^\d+$/), tokenId: z.string().regex(/^\d+$/).optional() }).optional() }).parse(req.body);
       const t = b.refresh ? await refresh(b.chain, b.contract, b.input) : await getResolved(b.chain, b.contract, b.input);
-      return checkEligibility(t, b.strategy, b.walletIds ?? null, b.quantity);
+      return checkEligibility(t, b.strategy, b.walletIds ?? null, b.quantity, undefined, { generic: b.generic, openseaWalletLogin: getStore().db.settings.openseaWalletLogin });
     });
     a.post("/api/simulate", async (req) => {
       const r = mintReq.parse(req.body) as MintRequest;

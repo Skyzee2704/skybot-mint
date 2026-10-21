@@ -10,6 +10,7 @@ const HEX64 = /\b(0x)?[0-9a-fA-F]{64}\b/g;
 export function redactString(v: string): string {
   return v
     .replace(/(https?:\/\/[^\s/"'?]+)[^\s"']*/gi, (_m, host) => `${host}/***`)
+    .replace(/\b\d{6,12}:[A-Za-z0-9_-]{30,}\b/g, "[REDACTED_BOT_TOKEN]")
     .replace(HEX64, "[REDACTED_HEX64]");
 }
 

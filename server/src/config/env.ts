@@ -45,7 +45,7 @@ export function configStatus() {
     etherscan: Boolean(env.etherscanApiKey),
     telegram: Boolean(env.telegramBotToken && env.telegramUserId),
     vaultAddress: env.vaultAddress ?? null,
-    safety: { maxPricePerNft: env.maxPricePerNft, maxDailySpend: env.maxDailySpend, maxGasPriceGwei: env.maxGasPriceGwei },
+    safety: { maxGasPriceGwei: env.maxGasPriceGwei, caps: "see Settings (default off)" },
     gasMode: env.gasMode,
   };
 }

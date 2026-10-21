@@ -3,7 +3,7 @@ import { requireChain } from "../../config/chains.js";
 import { getPool } from "../rpc/pool.js";
 import { ResolvedTarget } from "../resolver/resolver.js";
 import { wallets as walletSvc } from "../wallets/service.js";
-import { assertDailyBudget, capsFor, dailySpent } from "../safety/safety.js";
+import { assertDailyBudget, capsFor, dailySpent, fmtCap } from "../safety/safety.js";
 import { buildMintTx } from "./build.js";
 import { getFees } from "./fees.js";
 import { MintRequest } from "./types.js";
@@ -70,7 +70,7 @@ export async function simulateMint(t: ResolvedTarget, req: MintRequest) {
     chain: chain.key, nativeSymbol: chain.nativeSymbol, wallets: rows.length, totalNfts,
     totalValue: formatEther(totalValue), totalMaxGas: formatEther(totalGas), totalMax: formatEther(totalValue + totalGas),
     maxFeePerGasGwei: Number(fees.maxFeePerGas) / 1e9, priorityFeeGwei: Number(fees.maxPriorityFeePerGas) / 1e9, feesCapped: fees.capped,
-    dailySpent: formatEther(dailySpent(chain)), dailyCap: formatEther(caps.maxDailySpendWei), maxPricePerNft: formatEther(caps.maxPricePerNftWei),
+    dailySpent: formatEther(dailySpent(chain)), dailyCap: fmtCap(caps.maxDailySpendWei), maxPricePerNft: fmtCap(caps.maxPricePerNftWei),
     runAt: req.runAt ?? null, scheduled: beforeStart,
   };
   const okRows = rows.filter((r) => r.ok || r.expectedRevertBeforeStart);

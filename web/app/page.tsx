@@ -52,8 +52,8 @@ export default function MintPage() {
   const checkElig = async () => {
     setErr(null); setSim(null); setBusy("Checking wallets…");
     try {
-      const r = await api("/api/eligibility", { body: { chain: t.chain.key, contract: t.contract, input: t.input, strategy, quantity: qty } });
-      setElig(r); setSel(Object.fromEntries(r.rows.filter((x: any) => x.eligible).map((x: any) => [x.walletId, x.suggestedQty || qty])));
+      const r = await api("/api/eligibility", { body: { chain: t.chain.key, contract: t.contract, input: t.input, strategy, quantity: qty, generic: genericPayload() } });
+      setElig(r); setSel(Object.fromEntries(r.rows.filter((x: any) => x.eligibleIgnoringBalance).map((x: any) => [x.walletId, x.suggestedQty || qty])));
     } catch (e: any) { setErr(e.message); } finally { setBusy(null); }
   };
 
@@ -111,26 +111,33 @@ export default function MintPage() {
         <div className="card"><h2>2 · Wallet eligibility</h2>
           <p className="muted">Price {elig.priceWei ? `${fmtEth(elig.priceWei)} ${sym}` : "unknown"} · gas est. max fee {Number(BigInt(elig.maxFeePerGas)) / 1e9} gwei</p>
           {elig.notes.map((n: string) => <div key={n} className="notice">{n}</div>)}
+          {elig.allowlistInfo && <p className="muted">
+            {elig.allowlistInfo.activeStage ? <>Active stage: <b>{elig.allowlistInfo.activeStage.label}</b> ({elig.allowlistInfo.activeStage.type}{elig.allowlistInfo.activeStage.allowlistWalletCount ? `, ${elig.allowlistInfo.activeStage.allowlistWalletCount} allowlisted wallets` : ""}). </> : null}
+            {elig.allowlistInfo.nextStage ? <>Next: {elig.allowlistInfo.nextStage.label} ({elig.allowlistInfo.nextStage.type}) at {new Date(elig.allowlistInfo.nextStage.start).toLocaleString()}. </> : null}
+            {elig.allowlistInfo.merkle ? <>Merkle allowlist: {elig.allowlistInfo.merkle.state}{elig.allowlistInfo.merkle.detail ? ` — ${elig.allowlistInfo.merkle.detail}` : ""}. </> : null}
+          </p>}
           <div className="row" style={{ marginBottom: 8 }}>
             <select value={groupFilter} onChange={(e) => setGroupFilter(e.target.value)}><option value="__all">All groups</option>{groups.map((g) => <option key={g} value={g}>{g === "__none" ? "(no group)" : g}</option>)}</select>
             <button className="secondary" onClick={() => setSel((s) => ({ ...s, ...Object.fromEntries(rows.filter((r: any) => r.eligible).map((r: any) => [r.walletId, s[r.walletId] || r.suggestedQty || qty])) }))}>Select eligible</button>
+            <button className="secondary" onClick={() => setSel((s) => ({ ...s, ...Object.fromEntries(rows.filter((r: any) => r.access?.status === "yes").map((r: any) => [r.walletId, s[r.walletId] || r.suggestedQty || qty])) }))}>Select allowlisted</button>
             <button className="secondary" onClick={() => setSel({})}>Clear</button>
             <span className="muted">{Object.keys(sel).length} wallets · {Object.values(sel).reduce((a, b) => a + b, 0)} NFTs</span>
           </div>
           <table>
-            <thead><tr><th></th><th>Wallet</th><th>Balance</th><th>Minted / limit</th><th>Allowlist</th><th>Qty</th><th>Est. cost</th><th>Notes</th></tr></thead>
+            <thead><tr><th></th><th>Wallet</th><th>Allowlisted</th><th>Contract sim (fake balance)</th><th>Balance</th><th>Minted / limit</th><th>Qty</th><th>Est. cost</th><th>Blockers</th></tr></thead>
             <tbody>{rows.map((r: any) => (
               <tr key={r.walletId}>
                 <td><input type="checkbox" checked={r.walletId in sel} onChange={(e) => setSel((s) => { const n = { ...s }; if (e.target.checked) n[r.walletId] = r.suggestedQty || qty; else delete n[r.walletId]; return n; })} /></td>
                 <td>{r.label} <span className="mono muted">{short(r.address)}</span></td>
-                <td className="mono">{Number(r.balance).toFixed(5)}</td>
+                <td><AccessCell a={r.access} /></td>
+                <td>{r.simulation ? (r.simulation.ok === true ? <span className="ok">ok</span> : r.simulation.ok === false ? <span className={/NotActive/.test(r.simulation.reason) ? "warn" : "bad"}>{r.simulation.reason}</span> : <span className="muted">{r.simulation.reason}</span>) : <span className="muted">—</span>}</td>
+                <td className="mono"><span className={r.balanceOk ? "ok" : "bad"}>{Number(r.balance).toFixed(5)}</span><div className="muted">{r.balanceOk ? "enough" : `need ~${Number(r.estCost).toFixed(5)}`}</div></td>
                 <td>{r.mintedSoFar ?? "?"} / {r.maxPerWallet ?? "∞"}</td>
-                <td><span className={r.allowlist === "eligible" ? "ok" : r.allowlist === "not_eligible" ? "bad" : "muted"}>{r.allowlist}</span></td>
                 <td><input type="number" min={0} max={100} style={{ width: 64 }} value={sel[r.walletId] ?? 0} onChange={(e) => setSel((s) => ({ ...s, [r.walletId]: Number(e.target.value) }))} /></td>
                 <td className="mono">{Number(r.estCost).toFixed(5)}</td>
-                <td className={r.eligible ? "muted" : "bad"}>{r.reasons.join("; ")}</td>
+                <td className={r.eligible ? "muted" : "bad"}>{r.reasons.join("; ") || "—"}</td>
               </tr>))}
-              {!rows.length && <tr><td colSpan={8} className="muted">No wallets. Add some on the <Link href="/wallets">Wallets</Link> page.</td></tr>}
+              {!rows.length && <tr><td colSpan={9} className="muted">No wallets. Add some on the <Link href="/wallets">Wallets</Link> page.</td></tr>}
             </tbody>
           </table>
           <h2 style={{ marginTop: 16 }}>3 · Timing & gas</h2>
@@ -169,6 +176,13 @@ export default function MintPage() {
       )}
     </>
   );
+}
+
+function AccessCell({ a }: { a: any }) {
+  if (!a) return <span className="muted">—</span>;
+  const label: Record<string, string> = { yes: "yes", no: "no", unknown: "unknown", public: "public (open)", "n/a": "n/a" };
+  const cls = a.status === "yes" || a.status === "public" ? "ok" : a.status === "no" ? "bad" : "muted";
+  return <div><b className={cls}>{label[a.status] ?? a.status}</b><div className="muted" style={{ fontSize: 12 }}>{a.source}{a.detail ? ` — ${a.detail}` : ""}</div></div>;
 }
 
 function KV({ k, v }: { k: string; v: React.ReactNode }) { return <div className="kv"><b>{k}</b>{v}</div>; }

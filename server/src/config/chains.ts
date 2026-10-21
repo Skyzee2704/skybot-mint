@@ -33,7 +33,7 @@ export const CHAINS: ChainConfig[] = [
   },
   {
     key: "base", chainId: 8453, name: "Base", nativeSymbol: "ETH", explorer: "https://basescan.org", openseaChain: "base",
-    publicRpcs: ["https://mainnet.base.org", "https://base-rpc.publicnode.com", "https://base.drpc.org", "https://1rpc.io/base", "https://base.meowrpc.com"],
+    publicRpcs: ["https://mainnet.base.org", "https://base-rpc.publicnode.com", "https://base.drpc.org", "https://1rpc.io/base"],
     sendOnlyRpcs: ["https://mainnet-sequencer.base.org"],
     etherscanV2: true, blockscoutApi: "https://base.blockscout.com/api", seadrop: true,
   },

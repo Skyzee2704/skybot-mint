@@ -4,6 +4,7 @@ import { OpenSeaClient, OpenSeaHttpError } from "../resolver/opensea.js";
 import { ResolvedTarget } from "../resolver/resolver.js";
 import { SEADROP_ADDRESS, encodeMintPublic } from "../resolver/seadrop.js";
 import { isDangerousFunctionName, assertSafeMintTx } from "../safety/safety.js";
+import { osStage } from "./stage.js";
 import { BuiltTx, MintRequest } from "./types.js";
 
 /** Map official mint-API errors. 422 is also returned for an unfunded minter, which says nothing about allowlist status. */
@@ -78,6 +79,7 @@ export async function buildMintTx(t: ResolvedTarget, req: MintRequest, wallet: s
     }
     default: throw new MintBuildError(`Unknown strategy ${(req as any).strategy}`);
   }
-  assertSafeMintTx({ ...tx, chainId: chain.chainId }, { chain, allowedTargets: allowedTargets(t, req), quantity });
+  const osPrice = req.strategy === "opensea_api" ? osStage(t).priceWei : null;
+  assertSafeMintTx({ ...tx, chainId: chain.chainId }, { chain, allowedTargets: allowedTargets(t, req), quantity, expectedMaxValueWei: osPrice !== null ? BigInt(osPrice) * BigInt(quantity) : null });
   return tx;
 }

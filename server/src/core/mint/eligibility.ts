@@ -1,22 +1,35 @@
-import { formatEther } from "ethers";
+import { Contract, formatEther } from "ethers";
 import { requireChain } from "../../config/chains.js";
 import { getPool } from "../rpc/pool.js";
 import { OpenSeaClient } from "../resolver/opensea.js";
 import { ResolvedTarget } from "../resolver/resolver.js";
-import { seadropMintedBy } from "../resolver/seadrop.js";
+import { SEADROP_ABI, SEADROP_ADDRESS, seadropMintedBy } from "../resolver/seadrop.js";
+import { dropEligibility } from "../resolver/openseaAuth.js";
+import { AccessResult, MerkleInfo, SimResult, classifyRevert, getMerkleInfo, merkleAccess, simulateIgnoringBalance } from "./access.js";
 import { genericMintedBy } from "../resolver/generic.js";
 import { wallets as walletSvc } from "../wallets/service.js";
 import { getFees } from "./fees.js";
 import { MintBuildError, buildMintTx } from "./build.js";
-import { Strategy } from "./types.js";
+import { MintRequest, Strategy } from "./types.js";
 
 export interface EligibilityRow {
   walletId: string; label: string; address: string; group: string | null;
   balanceWei: string; balance: string;
   mintedSoFar: number | null; maxPerWallet: number | null; remainingForWallet: number | null;
   suggestedQty: number; estCostWei: string; estCost: string;
+  /** Allowlist / access verdict — independent of balance. */
+  access: AccessResult;
+  /** Contract-level simulation with a fake balance (stateOverride). null = not run. */
+  simulation: SimResult | null;
+  /** Balance verdict (price x qty + gas). */
+  balanceOk: boolean;
+  /** Can mint once funded (access not "no", simulation not failed, no limit/supply/stage blockers). */
+  eligibleIgnoringBalance: boolean;
+  eligible: boolean;
+  /** Non-balance blockers (limits, supply, stage, access). */
+  reasons: string[];
+  /** Kept for older clients: legacy allowlist label. */
   allowlist: "eligible" | "not_eligible" | "not_active" | "unknown" | "n/a";
-  eligible: boolean; reasons: string[];
 }
 
 const DEFAULT_GAS: Record<Strategy, bigint> = { seadrop_public: 180_000n, opensea_api: 220_000n, generic: 200_000n };
@@ -27,20 +40,8 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (t: T) => Promise<R
   return out;
 }
 
-export function stagePriceWei(t: ResolvedTarget, strategy: Strategy): bigint | null {
-  if (strategy === "seadrop_public") return t.seadrop?.publicDrop ? BigInt(t.seadrop.publicDrop.mintPriceWei) : null;
-  if (strategy === "generic") return t.generic?.values.priceWei ? BigInt(t.generic.values.priceWei) : null;
-  const s = osStage(t);
-  return s.priceWei !== null ? BigInt(s.priceWei) : null;
-}
-
-/** Stage the OpenSea mint API will mint into: the drop's active stage, else its next stage, else resolved stages. */
-export function osStage(t: ResolvedTarget): { priceWei: string | null; maxPerWallet: number | null } {
-  const d = t.opensea?.drop; const raw = d?.active_stage ?? d?.next_stage;
-  if (raw) return { priceWei: raw.price ?? null, maxPerWallet: raw.max_per_wallet ? Number(raw.max_per_wallet) : null };
-  const s = t.stages.find((x) => x.status === "active") ?? t.stages.find((x) => x.status === "upcoming");
-  return { priceWei: s?.priceWei ?? null, maxPerWallet: s?.maxPerWallet ?? null };
-}
+export { osStage, stagePriceWei } from "./stage.js";
+import { stagePriceWei, osStage } from "./stage.js";
 
 /** Pure decision logic (unit-tested). */
 export function decide(input: {
@@ -62,15 +63,19 @@ export function decide(input: {
   return { suggestedQty: Math.max(0, qty), remaining, cost, reasons };
 }
 
-export async function checkEligibility(t: ResolvedTarget, strategy: Strategy, walletIds: string[] | null, desiredQty = 1, os = new OpenSeaClient()): Promise<{ rows: EligibilityRow[]; priceWei: string | null; maxFeePerGas: string; notes: string[] }> {
+export interface EligibilityOptions { generic?: MintRequest["generic"]; openseaWalletLogin?: boolean }
+
+export async function checkEligibility(t: ResolvedTarget, strategy: Strategy, walletIds: string[] | null, desiredQty = 1, os = new OpenSeaClient(), opts: EligibilityOptions = {}): Promise<{ rows: EligibilityRow[]; priceWei: string | null; maxFeePerGas: string; notes: string[]; allowlistInfo: Record<string, unknown> }> {
   const chain = requireChain(t.chain.key);
   const pool = getPool(chain);
   const list = walletSvc.list().filter((w) => !walletIds || walletIds.includes(w.id));
   const fees = await getFees(pool);
-  const price = stagePriceWei(t, strategy) ?? 0n;
+  const genericPrice = strategy === "generic" && opts.generic?.priceWei ? BigInt(opts.generic.priceWei) : null;
+  const priceKnown = genericPrice ?? stagePriceWei(t, strategy);
+  const price = priceKnown ?? 0n;
   const gasCost = DEFAULT_GAS[strategy] * fees.maxFeePerGas;
   const notes: string[] = [];
-  if (stagePriceWei(t, strategy) === null) notes.push("Stage price unknown — cost excludes mint price.");
+  if (priceKnown === null) notes.push("Stage price unknown — cost excludes mint price.");
   const pubStage = t.stages.find((s) => s.type === "public" && s.source === "onchain");
   const stageEnded = strategy === "seadrop_public" ? pubStage?.status === "ended" : false;
   const maxPerWallet = strategy === "seadrop_public" ? t.seadrop?.publicDrop?.maxPerWallet ?? null
@@ -79,34 +84,95 @@ export async function checkEligibility(t: ResolvedTarget, strategy: Strategy, wa
   const supplyRemaining = t.supply.remaining !== null ? BigInt(t.supply.remaining) : null;
   const useOs = strategy === "opensea_api" && os.available && Boolean(t.slug);
   if (strategy === "opensea_api" && !useOs) notes.push("OpenSea API key or slug missing — allowlist status unknown.");
+  const drop = t.opensea?.drop;
+  const activeOs = drop?.active_stage ?? null;
+  const activeIsPublic = activeOs ? /public/i.test(activeOs.stage_type ?? "") : false;
+  const nextOs = drop?.next_stage ?? null;
 
-  const rows = await mapLimit(list, useOs ? 3 : 8, async (w): Promise<EligibilityRow> => {
+  // SeaDrop merkle allowlist (rare on current OpenSea drops; they use server-signed stages).
+  let merkle: MerkleInfo | null = null;
+  if (t.kind === "seadrop" && t.seadrop?.hasAllowList) {
+    const root = await pool.read((p) => new Contract(SEADROP_ADDRESS, SEADROP_ABI, p).getAllowListMerkleRoot(t.contract) as Promise<string>, "merkleRoot").catch(() => null);
+    if (root) merkle = await getMerkleInfo(chain, t.contract, root).catch(() => null);
+  }
+  const allowlistInfo: Record<string, unknown> = {
+    activeStage: activeOs ? { label: activeOs.label, type: activeOs.stage_type, allowlistWalletCount: (activeOs as any).allowlist_wallet_count ?? null } : null,
+    nextStage: nextOs ? { label: nextOs.label, type: nextOs.stage_type, start: nextOs.start_time } : null,
+    signedStages: Boolean(t.seadrop?.hasSignedMints), merkle: merkle ? { state: merkle.state, uri: merkle.uri, detail: merkle.detail } : t.seadrop?.hasAllowList ? { state: "unknown" } : null,
+    openseaWalletLogin: Boolean(opts.openseaWalletLogin),
+  };
+  if (useOs && !activeOs && nextOs) notes.push(`Next stage "${nextOs.label ?? nextOs.stage_type}" is not active yet — OpenSea's mint API can only check allowlists during an active stage.${opts.openseaWalletLogin ? " Using OpenSea wallet login (SIWE) for eligibility." : " Enable \"OpenSea wallet login\" in Settings to check upcoming stages."}`);
+
+  const rows = await mapLimit(list, useOs ? 3 : 6, async (w): Promise<EligibilityRow> => {
     const [balance, minted] = await Promise.all([
       pool.read((p) => p.getBalance(w.address), "balance"),
       t.kind === "seadrop" ? seadropMintedBy(pool, t.contract, w.address).catch(() => null)
         : t.generic ? genericMintedBy(pool, t.contract, t.generic, w.address) : Promise.resolve(null),
     ]);
     const d = decide({ balance, priceWei: price, gasCostWei: gasCost, desiredQty, maxPerWallet, minted, supplyRemaining, stageEnded });
-    let allowlist: EligibilityRow["allowlist"] = strategy === "opensea_api" ? "unknown" : "n/a";
-    if (useOs && d.suggestedQty > 0) {
-      try { await buildMintTx(t, { chain: chain.key, contract: t.contract, strategy, slug: t.slug, wallets: [] }, w.address, d.suggestedQty, os); allowlist = "eligible"; }
-      catch (e: any) {
-        if (e instanceof MintBuildError && e.code === "NOT_ELIGIBLE") { allowlist = "not_eligible"; d.reasons.push(e.message); }
-        else if (e instanceof MintBuildError && e.code === "NOT_ACTIVE") { allowlist = "not_active"; }
-        else if (e instanceof MintBuildError && e.code === "INSUFFICIENT_FUNDS") {
-          // OpenSea checks balance before allowlist; only add a reason if our own balance check didn't already.
-          if (!d.reasons.some((r) => r.startsWith("insufficient balance"))) d.reasons.push("OpenSea: insufficient balance to mint");
+    const balanceOk = !d.reasons.some((r) => r.startsWith("insufficient balance"));
+    const reasons = d.reasons.filter((r) => !r.startsWith("insufficient balance"));
+    const qty = Math.max(1, d.suggestedQty);
+    let access: AccessResult = { status: strategy === "generic" ? "n/a" : strategy === "seadrop_public" ? "public" : "unknown", source: strategy === "generic" ? "generic contract (no allowlist support)" : strategy === "seadrop_public" ? "SeaDrop public stage" : "—" };
+    let simulation: SimResult | null = null;
+    let legacy: EligibilityRow["allowlist"] = strategy === "opensea_api" ? "unknown" : "n/a";
+
+    if (strategy === "opensea_api") {
+      if (useOs && d.suggestedQty > 0) {
+        try {
+          const tx = await buildMintTx(t, { chain: chain.key, contract: t.contract, strategy, slug: t.slug, wallets: [] }, w.address, qty, os);
+          access = { status: activeIsPublic ? "public" : "yes", source: "OpenSea mint API", detail: activeIsPublic ? "public stage" : `allowed in "${activeOs?.label ?? "active stage"}"` };
+          legacy = "eligible";
+          simulation = await simulateIgnoringBalance(pool, { from: w.address, to: tx.to, data: tx.data, value: tx.value });
+        } catch (e: any) {
+          if (e instanceof MintBuildError && e.code === "INSUFFICIENT_FUNDS") {
+            // Verified: OpenSea checks the stage allowlist BEFORE balance — non-listed wallets get "not on allowlist".
+            access = activeIsPublic ? { status: "public", source: "OpenSea mint API", detail: "public stage" }
+              : { status: "yes", source: "OpenSea mint API (passed allowlist, failed only on balance)", detail: `allowed in "${activeOs?.label ?? "active stage"}"` };
+            legacy = activeIsPublic ? "unknown" : "eligible";
+          } else if (e instanceof MintBuildError && e.code === "NOT_ELIGIBLE") {
+            access = { status: "no", source: "OpenSea mint API", detail: e.message.replace(/^OpenSea: /, "") };
+            legacy = "not_eligible";
+          } else if (e instanceof MintBuildError && e.code === "NOT_ACTIVE") {
+            access = { status: "unknown", source: "OpenSea mint API", detail: "no active stage (409) — checkable once the stage opens" };
+            legacy = "not_active";
+          } else access = { status: "unknown", source: "OpenSea mint API", detail: `check failed: ${String(e.message).slice(0, 120)}` };
         }
-        else d.reasons.push(`OpenSea check failed: ${String(e.message).slice(0, 120)}`);
       }
+      // Upcoming stage: opt-in OpenSea wallet login (SIWE) → official eligibility endpoint.
+      if (access.status === "unknown" && opts.openseaWalletLogin && t.slug && os.available) {
+        try {
+          const st = await dropEligibility(walletSvc.signer(w.id), t.slug);
+          const want = (activeOs ?? nextOs)?.uuid;
+          const s = st.find((x) => x.stage_uuid === want) ?? st.find((x) => x.is_eligible) ?? st[0];
+          if (s) access = { status: s.is_eligible ? "yes" : "no", source: "OpenSea eligibility API (wallet login)", detail: `stage ${s.stage_uuid}${s.max_total_mintable_by_wallet ? `, max ${s.max_total_mintable_by_wallet}/wallet` : ""}` };
+        } catch (e: any) { access = { ...access, detail: `${access.detail ?? ""}; wallet login failed: ${String(e.message).slice(0, 100)}` }; }
+      }
+    } else if (d.suggestedQty > 0 || strategy === "seadrop_public") {
+      try {
+        const tx = await buildMintTx(t, { chain: chain.key, contract: t.contract, strategy, slug: t.slug, wallets: [], generic: opts.generic }, w.address, qty, os);
+        simulation = await simulateIgnoringBalance(pool, { from: w.address, to: tx.to, data: tx.data, value: tx.value });
+      } catch (e: any) { simulation = { ok: null, reason: String(e.message).slice(0, 160), source: "build" }; }
     }
-    const eligible = d.reasons.length === 0 && d.suggestedQty > 0;
+    // Merkle allowlist (on-chain data) fills in when nothing better is known.
+    const m = merkleAccess(merkle, w.address);
+    if (m && (access.status === "unknown" || (access.status === "public" && strategy !== "seadrop_public"))) access = m;
+    if (simulation?.ok === false && access.status === "unknown") access = { ...access, status: classifyRevert(simulation.reason), detail: simulation.reason ?? access.detail };
+
+    if (access.status === "no") reasons.push(`not allowlisted (${access.source})`);
+    if (simulation?.ok === false && !/NotActive/.test(simulation.reason ?? "")) reasons.push(`simulation reverts: ${simulation.reason}`);
+    // For a non-public OpenSea stage, "unknown" access is not good enough to auto-select.
+    const accessOk = !(strategy === "opensea_api" && access.status === "unknown" && !activeIsPublic);
+    const eligibleIgnoringBalance = reasons.length === 0 && d.suggestedQty > 0 && accessOk;
     return {
       walletId: w.id, label: w.label, address: w.address, group: w.group,
       balanceWei: balance.toString(), balance: formatEther(balance),
       mintedSoFar: minted, maxPerWallet, remainingForWallet: d.remaining, suggestedQty: d.suggestedQty,
-      estCostWei: d.cost.toString(), estCost: formatEther(d.cost), allowlist, eligible, reasons: d.reasons,
+      estCostWei: d.cost.toString(), estCost: formatEther(d.cost),
+      access, simulation, balanceOk, eligibleIgnoringBalance, eligible: eligibleIgnoringBalance && balanceOk,
+      reasons: balanceOk ? reasons : [...reasons, d.reasons.find((r) => r.startsWith("insufficient balance"))!],
+      allowlist: legacy,
     };
   });
-  return { rows, priceWei: stagePriceWei(t, strategy)?.toString() ?? null, maxFeePerGas: fees.maxFeePerGas.toString(), notes };
+  return { rows, priceWei: priceKnown?.toString() ?? null, maxFeePerGas: fees.maxFeePerGas.toString(), notes, allowlistInfo };
 }

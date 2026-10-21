@@ -36,7 +36,19 @@ export interface JobRecord {
 export interface SpendEntry { day: string; chain: string; wei: string; at: string; ref: string }
 export interface MintedRecord { chain: string; contract: string; wallet: string; tokenIds: string[]; txHash: string; at: string }
 
+/** User-editable runtime settings (dashboard → Settings). Caps are OFF (unlimited) unless enabled. */
+export interface SettingsShape {
+  priceCapEnabled: boolean;
+  dailyCapEnabled: boolean;
+  /** Per-chain cap values in native units; missing = chain/env default. */
+  caps: Record<string, { maxPricePerNft?: string; maxDailySpend?: string }>;
+  /** Opt-in: sign an off-chain SIWE login per wallet to use OpenSea's eligibility endpoint (upcoming stages). */
+  openseaWalletLogin: boolean;
+}
+export const DEFAULT_SETTINGS: SettingsShape = { priceCapEnabled: false, dailyCapEnabled: false, caps: {}, openseaWalletLogin: false };
+
 export interface DbShape {
+  settings: SettingsShape;
   keystore: KeystoreMeta | null;
   wallets: WalletRecord[];
   groups: string[];
@@ -46,7 +58,7 @@ export interface DbShape {
   minted: MintedRecord[];
 }
 
-const EMPTY: DbShape = { keystore: null, wallets: [], groups: [], mainWalletId: null, jobs: [], spend: [], minted: [] };
+const EMPTY: DbShape = { settings: structuredClone(DEFAULT_SETTINGS), keystore: null, wallets: [], groups: [], mainWalletId: null, jobs: [], spend: [], minted: [] };
 
 export class Store {
   private data: DbShape;
@@ -56,7 +68,8 @@ export class Store {
   static load(file: string): DbShape {
     try {
       const raw = fs.readFileSync(file, "utf8");
-      return { ...structuredClone(EMPTY), ...JSON.parse(raw) };
+      const parsed = JSON.parse(raw);
+      return { ...structuredClone(EMPTY), ...parsed, settings: { ...structuredClone(DEFAULT_SETTINGS), ...(parsed.settings ?? {}) } };
     } catch (e: any) {
       if (e.code === "ENOENT") return structuredClone(EMPTY);
       throw e;

@@ -25,13 +25,23 @@ const DANGEROUS_NAMES = /^(approve|setApprovalForAll|transfer|transferFrom|safeT
 
 export class SafetyError extends Error { statusCode = 422; constructor(m: string) { super(m); this.name = "SafetyError"; } }
 
-export function capsFor(chain: ChainConfig) {
+/** Default cap values (used when a cap is enabled without a per-chain value). */
+export function defaultCapValues(chain: ChainConfig) {
+  return { maxPricePerNft: chain.safety?.maxPricePerNft ?? env.maxPricePerNft, maxDailySpend: chain.safety?.maxDailySpend ?? env.maxDailySpend };
+}
+
+/** Effective caps. `null` = unlimited (cap disabled in Settings — the default). */
+export function capsFor(chain: ChainConfig, store: Store = getStore()) {
+  const st = store.db.settings;
+  const def = defaultCapValues(chain);
+  const v = st.caps[chain.key] ?? {};
   return {
-    maxPricePerNftWei: parseEther(chain.safety?.maxPricePerNft ?? env.maxPricePerNft),
-    maxDailySpendWei: parseEther(chain.safety?.maxDailySpend ?? env.maxDailySpend),
+    maxPricePerNftWei: st.priceCapEnabled ? parseEther(v.maxPricePerNft ?? def.maxPricePerNft) : null,
+    maxDailySpendWei: st.dailyCapEnabled ? parseEther(v.maxDailySpend ?? def.maxDailySpend) : null,
     maxGasPriceWei: BigInt(Math.round(env.maxGasPriceGwei * 1e9)),
   };
 }
+export const fmtCap = (w: bigint | null) => (w === null ? "unlimited" : formatEther(w));
 
 export function isDangerousFunctionName(name: string) { return DANGEROUS_NAMES.test(name); }
 
@@ -43,16 +53,19 @@ export interface TxCheck { to: string; data: string; value: bigint; chainId: num
  *  - selector must not be an approve/transfer-style call
  *  - value per NFT must be <= max price cap
  */
-export function assertSafeMintTx(tx: TxCheck, ctx: { chain: ChainConfig; allowedTargets: string[]; quantity: number }) {
+export function assertSafeMintTx(tx: TxCheck, ctx: { chain: ChainConfig; allowedTargets: string[]; quantity: number; expectedMaxValueWei?: bigint | null; store?: Store }) {
   if (tx.chainId !== ctx.chain.chainId) throw new SafetyError(`Chain ID mismatch: tx ${tx.chainId} vs selected ${ctx.chain.chainId}`);
   const to = tx.to.toLowerCase();
   if (!ctx.allowedTargets.map((a) => a.toLowerCase()).includes(to)) throw new SafetyError(`Blocked: tx target ${tx.to} is not the expected mint contract`);
   const sel = (tx.data || "0x").slice(0, 10).toLowerCase();
   if (DANGEROUS_SELECTORS[sel]) throw new SafetyError(`Blocked: ${DANGEROUS_SELECTORS[sel]} is never part of a mint`);
   if (!Number.isInteger(ctx.quantity) || ctx.quantity < 1) throw new SafetyError("Quantity must be >= 1");
-  const { maxPricePerNftWei } = capsFor(ctx.chain);
+  // Not a cap: OpenSea-built txs must not ask for more than the published stage price x qty.
+  if (ctx.expectedMaxValueWei !== undefined && ctx.expectedMaxValueWei !== null && tx.value > ctx.expectedMaxValueWei)
+    throw new SafetyError(`Blocked: tx value ${formatEther(tx.value)} is above the stage price x quantity (${formatEther(ctx.expectedMaxValueWei)} ${ctx.chain.nativeSymbol})`);
+  const { maxPricePerNftWei } = capsFor(ctx.chain, ctx.store);
   const perNft = tx.value / BigInt(ctx.quantity);
-  if (perNft > maxPricePerNftWei) throw new SafetyError(`Blocked: price ${formatEther(perNft)} ${ctx.chain.nativeSymbol}/NFT exceeds cap ${formatEther(maxPricePerNftWei)} (MAX_PRICE_PER_NFT)`);
+  if (maxPricePerNftWei !== null && perNft > maxPricePerNftWei) throw new SafetyError(`Blocked: price ${formatEther(perNft)} ${ctx.chain.nativeSymbol}/NFT exceeds cap ${formatEther(maxPricePerNftWei)} (MAX_PRICE_PER_NFT)`);
 }
 
 export const utcDay = (d = new Date()) => d.toISOString().slice(0, 10);
@@ -62,7 +75,8 @@ export function dailySpent(chain: ChainConfig, store: Store = getStore(), day = 
 }
 
 export function assertDailyBudget(chain: ChainConfig, additionalWei: bigint, store: Store = getStore()) {
-  const { maxDailySpendWei } = capsFor(chain);
+  const { maxDailySpendWei } = capsFor(chain, store);
+  if (maxDailySpendWei === null) return;
   const spent = dailySpent(chain, store);
   if (spent + additionalWei > maxDailySpendWei) {
     throw new SafetyError(`Blocked: daily spend cap on ${chain.name} would be exceeded (spent ${formatEther(spent)} + this ${formatEther(additionalWei)} > cap ${formatEther(maxDailySpendWei)} ${chain.nativeSymbol}; MAX_DAILY_SPEND)`);
