@@ -188,7 +188,8 @@ export async function removeWalletForUser(user: AppUser, walletId: string, mode:
   let archived = false;
   if (chk.deleteMode === "archive_and_delete" && chk.privy.id) {
     try {
-      await getPrivy().wallets().archive(chk.privy.id);
+      // Privy rejects the archive call without a JSON body (415 "Expected application/json request body").
+      await (getPrivy().wallets() as any).archive(chk.privy.id, { body: {} });
       archived = true;
     } catch (e: any) {
       const status = e?.status ?? e?.statusCode;

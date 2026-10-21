@@ -1,5 +1,6 @@
 "use client";
 // SPDX-License-Identifier: AGPL-3.0-only
+import { withSignTimeout } from "@/lib/signing";
 import { useEffect, useMemo, useState } from "react";
 import { STRATEGY_LABELS } from "@/lib/labels";
 import Link from "next/link";
@@ -122,7 +123,10 @@ export default function MintPage() {
     for (const m of messages) {
       try {
         assertOpenSeaSiwe(m.message, m.address);
-        const { signature } = await signMessage({ message: m.message }, { address: m.address, uiOptions: { showWalletUIs: false } });
+        const { signature } = await withSignTimeout(
+          signMessage({ message: m.message }, { address: m.address, uiOptions: { showWalletUIs: false } }),
+          { what: "OpenSea sign-in" },
+        );
         proofs.push({ walletId: m.walletId, fields: m.fields, signature });
       } catch {
         failed++;

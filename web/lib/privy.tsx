@@ -4,6 +4,7 @@ import { PrivyProvider } from "@privy-io/react-auth";
 import { useEffect, useState } from "react";
 import { api } from "./api";
 import { useTelegram } from "./telegram";
+import { DEFAULT_PRIVY_CHAIN, PRIVY_CHAINS } from "./privyChains";
 
 const PUBLIC_APP_ID = process.env.NEXT_PUBLIC_PRIVY_APP_ID || "";
 
@@ -74,6 +75,10 @@ export function SkyPrivyProvider({ children }: { children: React.ReactNode }) {
           logo: "/logo.png",
           landingHeader: "Welcome to SkyBOT Mint",
         },
+        // All SkyBOT chains (incl. Ink, Robinhood, Arc, which are not in Privy's defaults): without this,
+        // signing on those chains never resolves.
+        supportedChains: PRIVY_CHAINS,
+        defaultChain: DEFAULT_PRIVY_CHAIN,
         embeddedWallets: {
           ethereum: { createOnLogin: "users-without-wallets" },
         },

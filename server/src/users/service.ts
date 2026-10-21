@@ -357,9 +357,24 @@ export async function syncPrivyWallet(
     hdIndex: input.hdIndex ?? null,
     isMain: count === 0,
     createdAt: now(),
-  });
-  return walletView((await db.select().from(wallets).where(eq(wallets.id, id)))[0]!);
+  })
+    // Two tabs / effects can sync the same new wallet at once: the loser of the race just reads the winner's row.
+    .onConflictDoNothing();
+  const row =
+    (await db.select().from(wallets).where(eq(wallets.id, id)))[0] ??
+    (await db
+      .select()
+      .from(wallets)
+      .where(and(eq(wallets.userId, userId), eq(wallets.address, address)))
+      .limit(1))[0];
+  if (row && row.id !== id && looksLikeRealPrivyId(input.privyWalletId) && !looksLikeRealPrivyId(row.privyWalletId)) {
+    await db.update(wallets).set({ privyWalletId: input.privyWalletId }).where(eq(wallets.id, row.id));
+    row.privyWalletId = input.privyWalletId;
+  }
+  return walletView(row!);
 }
+
+const looksLikeRealPrivyId = (s: string | null | undefined) => Boolean(s && !/^0x/i.test(s));
 
 export async function generateWallets(user: AppUser, count: number, group: string | null = null, labelPrefix = "gen") {
   if (count < 1 || count > 50) throw Object.assign(new Error("count must be 1..50"), { statusCode: 400 });

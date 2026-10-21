@@ -60,6 +60,10 @@
     "./stage-eligibility": {
       "types": "./dist/core/mint/stageEligibility.d.ts",
       "default": "./dist/core/mint/stageEligibility.js"
+    },
+    "./chains": {
+      "types": "./dist/config/chains.d.ts",
+      "default": "./dist/config/chains.js"
     }
   },
   "types": "dist/vercel.d.ts",

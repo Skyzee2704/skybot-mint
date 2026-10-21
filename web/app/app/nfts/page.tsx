@@ -7,6 +7,7 @@ import { fmtEth, short } from "@/lib/api";
 import { useApi, useShell } from "@/components/AppShell";
 import { formatDateTime, localTimeZone } from "@/lib/time";
 import { useNow } from "@/lib/useNow";
+import { assertSignableChain, withSignTimeout } from "@/lib/signing";
 
 type Item = {
   key: string;
@@ -65,6 +66,7 @@ export default function NftsPage() {
   useEffect(() => setTz(localTimeZone()), []);
   const now = useNow(1000);
   const autoScanned = useRef(false);
+  const stopRef = useRef<AbortController | null>(null);
 
   const accept = (v: View) => {
     setView(v);
@@ -173,13 +175,15 @@ export default function NftsPage() {
   };
   const toValid = ADDR_RE.test(to.trim());
   const running = Object.values(run).some((r) => r.status === "signing" || r.status === "sent" || r.status === "queued");
+  const signingNow = Object.values(run).some((r) => r.status === "signing" || r.status === "queued");
   const resetQuote = () => {
     setQuote(null);
     setChecked(false);
     setRun({});
   };
 
-  const review = async () => {
+  type QuoteIn = { walletId: string; chain: string; contract: string; tokenId: string; standard: string; quantity: string };
+  const review = async (list?: QuoteIn[]) => {
     setErr(null);
     resetQuote();
     setBusy("Checking ownership and gas…");
@@ -188,14 +192,16 @@ export default function NftsPage() {
         await api("/api/nfts/send/quote", {
           body: {
             to: to.trim(),
-            items: selected.map((i) => ({
-              walletId: i.walletId,
-              chain: i.chain,
-              contract: i.contract,
-              tokenId: i.tokenId,
-              standard: i.standard,
-              quantity: qtyFor(i),
-            })),
+            items:
+              list ??
+              selected.map((i) => ({
+                walletId: i.walletId,
+                chain: i.chain,
+                contract: i.contract,
+                tokenId: i.tokenId,
+                standard: i.standard,
+                quantity: qtyFor(i),
+              })),
           },
         }),
       );
@@ -220,7 +226,8 @@ export default function NftsPage() {
             if (s.status === "pending") continue;
             const it = list.find((x) => x.hash.toLowerCase() === s.hash.toLowerCase());
             if (!it) continue;
-            setRun((st) => ({ ...st, [it.key]: { ...st[it.key], status: s.status } }));
+            // Ignore results for a batch the user already closed / re-quoted.
+            setRun((st) => (st[it.key] ? { ...st, [it.key]: { ...st[it.key], status: s.status } } : st));
             pending = pending.filter((x) => x !== it);
           }
         } catch {
@@ -236,28 +243,40 @@ export default function NftsPage() {
     setRun(Object.fromEntries(items.map((i) => [i.key, { status: i.tx ? "queued" : "skipped", error: i.skip ?? undefined }])));
     const sent: { key: string; chain: string; hash: string }[] = [];
     const broken = new Set<string>(); // wallet:chain whose earlier transfer failed (later nonces would be stuck)
+    const stop = new AbortController();
+    stopRef.current = stop;
     // Sequential: one Privy signature at a time, each broadcast immediately, in nonce order per wallet.
     for (const it of items.filter((i) => i.tx)) {
       const lane = `${it.walletId}:${it.chain}`;
+      if (stop.signal.aborted) {
+        setRun((r) => ({ ...r, [it.key]: { status: "skipped", error: "stopped before signing" } }));
+        continue;
+      }
       if (broken.has(lane)) {
         setRun((r) => ({ ...r, [it.key]: { status: "skipped", error: "an earlier transfer from this wallet failed" } }));
         continue;
       }
       setRun((r) => ({ ...r, [it.key]: { status: "signing" } }));
       try {
-        const { signature } = await signTransaction(
-          {
-            to: it.tx.to,
-            value: it.tx.value,
-            nonce: it.tx.nonce,
-            gasLimit: it.tx.gasLimit,
-            gasPrice: it.tx.gasPrice,
-            chainId: it.tx.chainId,
-            type: 0,
-            data: it.tx.data,
-          },
-          { address: it.address, uiOptions: { showWalletUIs: false } },
+        assertSignableChain(it.tx.chainId);
+        // Never wait forever on the wallet: 60 s timeout, and Stop aborts the wait (nothing is broadcast unsigned).
+        const { signature } = await withSignTimeout(
+          signTransaction(
+            {
+              to: it.tx.to,
+              value: it.tx.value,
+              nonce: it.tx.nonce,
+              gasLimit: it.tx.gasLimit,
+              gasPrice: it.tx.gasPrice,
+              chainId: it.tx.chainId,
+              type: 0,
+              data: it.tx.data,
+            },
+            { address: it.address, uiOptions: { showWalletUIs: false } },
+          ),
+          { signal: stop.signal, what: "Wallet signature" },
         );
+        if (stop.signal.aborted) throw new Error("Stopped. Nothing was sent.");
         const r = await api("/api/nfts/send", {
           body: { chain: it.chain, walletId: it.walletId, tx: it.tx, quoteToken: it.quoteToken, signed: signature },
         });
@@ -268,13 +287,42 @@ export default function NftsPage() {
         setRun((s) => ({ ...s, [it.key]: { status: "failed", error: String(e?.message ?? e).slice(0, 200) } }));
       }
     }
-    setPicked({});
+    stopRef.current = null;
+    // Keep unsent NFTs selected so Retry / a new review can pick them up.
+    setPicked((p) => {
+      const n = { ...p };
+      for (const x of sent) delete n[x.key];
+      return n;
+    });
     // The server already updated the cached holdings for the affected wallets; re-read the cache (no scan).
     api<View>("/api/nfts")
       .then(accept)
       .catch(() => {});
     if (sent.length) await pollAll(sent);
   };
+
+  /** Re-quote everything that wasn't broadcast (fresh nonces, gas and ownership), keeping quantities. */
+  const retryUnsent = () => {
+    const items = (quote?.items ?? []) as any[];
+    const again = items.filter((i) => {
+      const st = run[i.key]?.status;
+      return i.tx && st !== "sent" && st !== "confirmed";
+    });
+    if (!again.length) return;
+    void review(
+      again.map((i) => ({
+        walletId: i.walletId,
+        chain: i.chain,
+        contract: i.contract,
+        tokenId: i.tokenId,
+        standard: i.standard,
+        quantity: i.standard === "erc721" ? "1" : i.quantity,
+      })),
+    );
+  };
+  const unsent = ((quote?.items ?? []) as any[]).filter(
+    (i) => i.tx && run[i.key] && !["sent", "confirmed", "signing", "queued"].includes(run[i.key].status),
+  ).length;
 
   const cooldownLeft = view ? Math.max(0, view.cooldownMs - (now - loadedAt)) : 0;
   const scanErrors = (view?.scans ?? []).filter((s) => s.error);
@@ -503,7 +551,7 @@ export default function NftsPage() {
               resetQuote();
             }}
           />
-          <button disabled={!selected.length || !toValid || !selected.every(qtyValid) || !!busy || running} onClick={review}>
+          <button disabled={!selected.length || !toValid || !selected.every(qtyValid) || !!busy || running} onClick={() => review()}>
             Review {selected.length || ""} Transfer{selected.length === 1 ? "" : "s"}
           </button>
         </div>
@@ -607,6 +655,22 @@ export default function NftsPage() {
                 </div>
               ))}
           </div>
+          {signingNow && (
+            <div className="row" style={{ marginTop: 12 }}>
+              <span className="muted">Waiting for your wallet signature (up to 60s per transfer)…</span>
+              <button className="ghost" onClick={() => stopRef.current?.abort()}>
+                Stop
+              </button>
+            </div>
+          )}
+          {!signingNow && Object.keys(run).length > 0 && (
+            <div className="row" style={{ marginTop: 12 }}>
+              {unsent > 0 && <button onClick={retryUnsent}>Retry {unsent} Unsent</button>}
+              <button className="ghost" onClick={resetQuote}>
+                Close
+              </button>
+            </div>
+          )}
           {!Object.keys(run).length && (
             <>
               <label className="row" style={{ marginTop: 12 }}>

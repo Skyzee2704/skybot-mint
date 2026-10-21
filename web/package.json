@@ -20,7 +20,8 @@
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "@nft-mint-bot/server": "*",
-    "server-only": "^0.0.1"
+    "server-only": "^0.0.1",
+    "viem": "^2.56.5"
   },
   "license": "AGPL-3.0-only"
 }

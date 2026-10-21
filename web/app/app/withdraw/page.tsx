@@ -1,7 +1,8 @@
 "use client";
 // SPDX-License-Identifier: AGPL-3.0-only
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { assertSignableChain, withSignTimeout } from "@/lib/signing";
 import { usePrivy, useSignTransaction } from "@privy-io/react-auth";
 import { fmtEth, short } from "@/lib/api";
 import { useApi, useShell } from "@/components/AppShell";
@@ -29,6 +30,7 @@ export default function WithdrawPage() {
   const [run, setRun] = useState<RunState>({});
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const stopRef = useRef<AbortController | null>(null);
   useEffect(() => {
     const w = new URLSearchParams(window.location.search).get("wallet");
     if (w) setPicked({ [w]: true });
@@ -46,20 +48,21 @@ export default function WithdrawPage() {
   const ids = list.wallets.filter((w) => picked[w.id]).map((w) => w.id);
   const allPicked = list.wallets.length > 0 && ids.length === list.wallets.length;
   const toValid = ADDR_RE.test(to.trim());
-  const running = Object.values(run).some((r) => r.status === "signing" || r.status === "sent");
+  const running = Object.values(run).some((r) => r.status === "signing" || r.status === "sent" || r.status === "queued");
+  const signingNow = Object.values(run).some((r) => r.status === "signing" || r.status === "queued");
   const reset = () => {
     setQuote(null);
     setChecked(false);
     setRun({});
   };
 
-  const review = async () => {
+  const review = async (only?: string[]) => {
     setErr(null);
     reset();
     setBusy("Preparing withdrawal…");
     try {
       const q = await api("/api/withdraw/quote", {
-        body: { chain, to: to.trim(), wallets: ids.map((walletId) => ({ walletId, amount: (amounts[walletId] ?? "").trim() || "max" })) },
+        body: { chain, to: to.trim(), wallets: (only ?? ids).map((walletId) => ({ walletId, amount: (amounts[walletId] ?? "").trim() || "max" })) },
       });
       setQuote(q);
     } catch (e: any) {
@@ -76,7 +79,7 @@ export default function WithdrawPage() {
       try {
         const s = (await api("/api/tx/status", { body: { chain: quote.chain, hashes: [hash] } })).statuses[0];
         if (s && s.status !== "pending") {
-          setRun((r) => ({ ...r, [walletId]: { ...r[walletId], status: s.status } }));
+          setRun((r) => (r[walletId] ? { ...r, [walletId]: { ...r[walletId], status: s.status } } : r));
           return;
         }
       } catch {
@@ -89,23 +92,35 @@ export default function WithdrawPage() {
     setErr(null);
     const items = quote.items as any[];
     setRun(Object.fromEntries(items.map((i) => [i.walletId, { status: i.tx ? "queued" : "skipped", error: i.skip ?? undefined }])));
+    const stop = new AbortController();
+    stopRef.current = stop;
     // Sequential: one Privy signature at a time, each broadcast immediately.
     for (const it of items.filter((i) => i.tx)) {
+      if (stop.signal.aborted) {
+        setRun((r) => ({ ...r, [it.walletId]: { status: "skipped", error: "stopped before signing" } }));
+        continue;
+      }
       setRun((r) => ({ ...r, [it.walletId]: { status: "signing" } }));
       try {
-        const { signature } = await signTransaction(
-          {
-            to: it.tx.to,
-            value: it.tx.value,
-            nonce: it.tx.nonce,
-            gasLimit: it.tx.gasLimit,
-            gasPrice: it.tx.gasPrice,
-            chainId: it.tx.chainId,
-            type: 0,
-            data: "0x",
-          },
-          { address: it.address, uiOptions: { showWalletUIs: false } },
+        assertSignableChain(it.tx.chainId);
+        // Never wait forever on the wallet: 60 s timeout, and Stop aborts the wait (nothing is broadcast unsigned).
+        const { signature } = await withSignTimeout(
+          signTransaction(
+            {
+              to: it.tx.to,
+              value: it.tx.value,
+              nonce: it.tx.nonce,
+              gasLimit: it.tx.gasLimit,
+              gasPrice: it.tx.gasPrice,
+              chainId: it.tx.chainId,
+              type: 0,
+              data: "0x",
+            },
+            { address: it.address, uiOptions: { showWalletUIs: false } },
+          ),
+          { signal: stop.signal, what: "Wallet signature" },
         );
+        if (stop.signal.aborted) throw new Error("Stopped. Nothing was sent.");
         const r = await api("/api/withdraw/send", {
           body: { chain: quote.chain, walletId: it.walletId, tx: it.tx, quoteToken: it.quoteToken, signed: signature },
         });
@@ -115,7 +130,11 @@ export default function WithdrawPage() {
         setRun((s) => ({ ...s, [it.walletId]: { status: "failed", error: String(e?.message ?? e).slice(0, 200) } }));
       }
     }
+    stopRef.current = null;
   };
+  const unsent = ((quote?.items ?? []) as any[])
+    .filter((i) => i.tx && run[i.walletId] && ["failed", "skipped"].includes(run[i.walletId].status))
+    .map((i) => i.walletId as string);
 
   const sym = quote?.nativeSymbol ?? "";
   const ready = quote?.items?.filter((i: any) => i.tx) ?? [];
@@ -233,7 +252,7 @@ export default function WithdrawPage() {
               reset();
             }}
           />
-          <button disabled={!ids.length || !toValid || !!busy || running} onClick={review}>
+          <button disabled={!ids.length || !toValid || !!busy || running} onClick={() => review()}>
             Review Withdrawal
           </button>
         </div>
@@ -324,6 +343,22 @@ export default function WithdrawPage() {
               {ready.length}
             </div>
           </div>
+          {signingNow && (
+            <div className="row" style={{ marginTop: 12 }}>
+              <span className="muted">Waiting for your wallet signature (up to 60s per transfer)…</span>
+              <button className="ghost" onClick={() => stopRef.current?.abort()}>
+                Stop
+              </button>
+            </div>
+          )}
+          {!signingNow && Object.keys(run).length > 0 && (
+            <div className="row" style={{ marginTop: 12 }}>
+              {unsent.length > 0 && <button onClick={() => review(unsent)}>Retry {unsent.length} Unsent</button>}
+              <button className="ghost" onClick={reset}>
+                Close
+              </button>
+            </div>
+          )}
           {!Object.keys(run).length && (
             <>
               <label className="row" style={{ marginTop: 12 }}>
