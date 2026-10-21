@@ -145,6 +145,10 @@ const DDL = [
   `CREATE INDEX IF NOT EXISTS minted_user_idx ON minted(user_id)`,
   `CREATE TABLE IF NOT EXISTS telegram_links (
     code TEXT PRIMARY KEY, user_id TEXT NOT NULL, expires_at TEXT NOT NULL, meta_json TEXT NOT NULL DEFAULT '{}')`,
+  `CREATE TABLE IF NOT EXISTS audit_log (
+    id TEXT PRIMARY KEY, user_id TEXT NOT NULL, at TEXT NOT NULL, action TEXT NOT NULL,
+    chain TEXT, target TEXT, detail_json TEXT NOT NULL DEFAULT '{}')`,
+  `CREATE INDEX IF NOT EXISTS audit_user_idx ON audit_log(user_id, action)`,
   `CREATE TABLE IF NOT EXISTS rate_buckets (
     key TEXT PRIMARY KEY, count INTEGER NOT NULL DEFAULT 0, window_start INTEGER NOT NULL)`,
 ];

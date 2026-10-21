@@ -111,6 +111,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const nav = [
     { href: "/app/mint", label: "Mint" },
     { href: "/app/wallets", label: "Wallets" },
+    { href: "/app/withdraw", label: "Withdraw" },
     { href: "/app/jobs", label: "Jobs" },
     { href: "/app/settings", label: "Settings" },
     ...(me?.user?.role === "admin" ? [{ href: "/app/admin", label: "Admin" }] : []),

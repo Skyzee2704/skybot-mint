@@ -70,6 +70,7 @@ export async function configureBotProfile(bot: Bot) {
     { command: "mint", description: "Resolve a drop: /mint <link|address>" },
     { command: "wallets", description: "List your wallets" },
     { command: "jobs", description: "Recent mint jobs" },
+    { command: "withdraw", description: "Withdraw funds from your wallets" },
     { command: "help", description: "How to use SkyBOT Mint" },
   ]);
   if (publicHttpsReady()) {
@@ -238,6 +239,15 @@ export function createBot(token: string, opts: ConstructorParameters<typeof Bot>
     if (!js.length) return ctx.reply("No jobs yet.");
     await ctx.reply(js.map((j) => `${j.status} · ${j.chain} · <code>${j.target.slice(0, 10)}…</code> · ${j.runAt ?? "now"}`).join("\n"), {
       parse_mode: "HTML",
+    });
+  });
+
+  bot.command("withdraw", async (ctx) => {
+    const kb = new InlineKeyboard();
+    if (publicHttpsReady()) kb.webApp("Open Withdraw", dashUrl("/app/withdraw"));
+    else kb.url("Open Withdraw", dashUrl("/app/withdraw"));
+    await ctx.reply("Withdrawals are reviewed and signed in the dashboard. Pick wallets, a destination and amounts there.", {
+      reply_markup: kb,
     });
   });
 

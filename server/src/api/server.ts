@@ -11,6 +11,7 @@ import { getPool } from "../core/rpc/pool.js";
 import { getResolved, refresh, remember } from "../core/resolver/cache.js";
 import { checkEligibility } from "../core/mint/eligibility.js";
 import { cachedBalance } from "../util/balanceCache.js";
+import { registerWithdrawRoutes } from "./withdrawRoutes.js";
 import { simulateMint } from "../core/mint/simulate.js";
 import { consumePlan } from "../core/plans.js";
 import { cancelJob, enqueueMint } from "../jobs/scheduler.js";
@@ -443,6 +444,9 @@ export async function buildServer(): Promise<FastifyInstance> {
       return { ok: true };
     });
     a.get("/api/minted", async (req) => ({ minted: await listMinted(req.user!.id) }));
+
+    // Withdraw (native token, browser-signed, server-validated)
+    registerWithdrawRoutes(a);
 
     // Admin
     a.register(async (ad) => {

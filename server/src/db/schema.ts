@@ -129,3 +129,18 @@ export const rateBuckets = sqliteTable("rate_buckets", {
   count: integer("count").notNull().default(0),
   windowStart: integer("window_start").notNull(),
 });
+
+/** Security-relevant actions (withdrawals, admin actions). Never contains keys or tokens. */
+export const auditLog = sqliteTable(
+  "audit_log",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    at: text("at").notNull(),
+    action: text("action").notNull(),
+    chain: text("chain"),
+    target: text("target"),
+    detailJson: text("detail_json").notNull().default("{}"),
+  },
+  (t) => [index("audit_user_idx").on(t.userId, t.action)],
+);

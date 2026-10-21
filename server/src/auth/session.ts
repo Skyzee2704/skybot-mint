@@ -28,6 +28,11 @@ function key(): Buffer {
   return secret!;
 }
 
+/** Purpose-bound key derived from the session secret (never the raw secret). */
+export function derivedKey(purpose: string): Buffer {
+  return createHmac("sha256", key()).update(`skybot:${purpose}`).digest();
+}
+
 const mac = (s: string) => createHmac("sha256", key()).update(s).digest("base64url");
 
 export function signSession(userId: string, ttlSec = SESSION_TTL_SEC) {

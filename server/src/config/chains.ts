@@ -22,6 +22,11 @@ export interface ChainConfig {
   blockscoutApi?: string; // Etherscan-compatible ".../api"
   /** SeaDrop V1 (0x00005EA0…24bf5) verified deployed via eth_getCode on 2026-10-21. */
   seadrop: boolean;
+  /**
+   * Rollup stack, for fee math: "op" = OP Stack (extra L1 data fee from GasPriceOracle 0x…420…0F, verified on-chain
+   * 2026-10-21 for Base/Unichain/Ink); "arbitrum" = Nitro/Orbit (L1 cost is folded into gas units by eth_estimateGas).
+   */
+  stack?: "op" | "arbitrum";
   /** Optional per-chain safety overrides (native units). */
   safety?: { maxPricePerNft?: string; maxDailySpend?: string };
 }
@@ -57,6 +62,7 @@ export const CHAINS: ChainConfig[] = [
     etherscanV2: true,
     blockscoutApi: "https://base.blockscout.com/api",
     seadrop: true,
+    stack: "op",
   },
   {
     key: "polygon",
@@ -82,6 +88,7 @@ export const CHAINS: ChainConfig[] = [
     etherscanV2: true,
     blockscoutApi: "https://arbitrum.blockscout.com/api",
     seadrop: true,
+    stack: "arbitrum",
   },
   {
     key: "bnb",
@@ -106,6 +113,7 @@ export const CHAINS: ChainConfig[] = [
     etherscanV2: true,
     blockscoutApi: "https://unichain.blockscout.com/api",
     seadrop: true,
+    stack: "op",
   },
   {
     key: "ink",
@@ -117,6 +125,7 @@ export const CHAINS: ChainConfig[] = [
     publicRpcs: ["https://rpc-gel.inkonchain.com", "https://rpc-qnd.inkonchain.com", "https://ink.drpc.org"],
     blockscoutApi: "https://explorer.inkonchain.com/api",
     seadrop: true, // not in Etherscan v2 chainlist (verified 2026-10)
+    stack: "op",
   },
   {
     key: "robinhood",
@@ -130,6 +139,7 @@ export const CHAINS: ChainConfig[] = [
     etherscanV2: true,
     blockscoutApi: "https://robinhoodchain.blockscout.com/api",
     seadrop: true,
+    stack: "arbitrum",
   },
   {
     key: "arc",
