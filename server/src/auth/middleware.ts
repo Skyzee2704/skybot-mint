@@ -3,10 +3,12 @@ import { verifyPrivyAccessToken } from "./privy.js";
 import { privyConfigured } from "../config/env.js";
 import { upsertUserFromPrivy, checkRateLimit, userByTelegram, type AppUser } from "../users/service.js";
 import { validateInitData } from "../bot/telegramWebApp.js";
+import { readCookie, verifySession } from "./session.js";
+import { requireUser } from "../users/service.js";
 import { log, redactString } from "../util/log.js";
 
 declare module "fastify" {
-  interface FastifyRequest { user?: AppUser; privyAccessToken?: string; authVia?: "privy" | "telegram-init"; }
+  interface FastifyRequest { user?: AppUser; privyAccessToken?: string; authVia?: "privy" | "telegram-session" | "telegram-init"; }
 }
 
 /** Extract Bearer token. Never log it. */
@@ -18,7 +20,8 @@ export function bearer(req: FastifyRequest): string | null {
 /**
  * Authenticate private routes:
  * 1) Privy access token (primary)
- * 2) Fallback: X-Telegram-Init-Data HMAC → linked SkyBOT user (Mini App without Privy Telegram login)
+ * 2) SkyBOT session cookie (Telegram-first)
+ * 3) Fallback: X-Telegram-Init-Data HMAC → linked SkyBOT user (Mini App without Privy Telegram login)
  */
 export async function requireAuth(req: FastifyRequest, reply: FastifyReply) {
   const token = bearer(req);
@@ -49,6 +52,18 @@ export async function requireAuth(req: FastifyRequest, reply: FastifyReply) {
       log.warn("privy auth failed", redactString(String(e?.message ?? e)));
       // fall through to telegram initData
     }
+  }
+
+  // 2) SkyBOT session cookie (Telegram-first login). Writes need the CSRF header.
+  const sid = verifySession(readCookie(req.headers.cookie));
+  if (sid) {
+    const unsafe = !["GET", "HEAD", "OPTIONS"].includes(req.method);
+    if (unsafe && req.headers["x-skybot-csrf"] !== "1") return reply.code(403).send({ error: "CSRF header missing" });
+    try {
+      const user = await requireUser(sid);
+      await checkRateLimit(user.id, req.routeOptions.url ?? req.url.split("?")[0]);
+      req.user = user; req.authVia = "telegram-session"; return;
+    } catch (e: any) { return reply.code(e.statusCode ?? 401).send({ error: e.message }); }
   }
 
   const initData = (req.headers["x-telegram-init-data"] as string | undefined)

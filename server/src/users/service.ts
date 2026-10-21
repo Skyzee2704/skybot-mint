@@ -4,7 +4,8 @@ import { getAddress } from "ethers";
 import { getDb } from "../db/client.js";
 import { users, wallets, groups, settings, telegramLinks, jobs, spend, minted, rateBuckets } from "../db/schema.js";
 import { env } from "../config/env.js";
-import { createPrivyWallets, importPrivyWallet } from "../auth/privy.js";
+import { createPrivyWallets, importPrivyWallet, getPrivy } from "../auth/privy.js";
+import { privyConfigured } from "../config/env.js";
 import { log } from "../util/log.js";
 
 export type AppUser = typeof users.$inferSelect;
@@ -38,7 +39,7 @@ export async function requireUser(userId: string): Promise<AppUser> {
 }
 
 export function publicUser(u: AppUser) {
-  return { id: u.id, email: u.email, name: u.name, role: u.role, telegramLinked: Boolean(u.telegramUserId), telegramUsername: u.telegramUsername, createdAt: u.createdAt };
+  return { id: u.id, email: u.email, name: u.name, role: u.role, telegramLinked: Boolean(u.telegramUserId), telegramUsername: u.telegramUsername, privyBacked: !u.privyUserId.startsWith("tg:"), createdAt: u.createdAt };
 }
 
 /* ----------------------------- wallets (per user) ----------------------------- */
@@ -83,6 +84,7 @@ export async function syncPrivyWallet(userId: string, input: { privyWalletId: st
 
 export async function generateWallets(user: AppUser, count: number, group: string | null = null, labelPrefix = "gen") {
   if (count < 1 || count > 50) throw Object.assign(new Error("count must be 1..50"), { statusCode: 400 });
+  if (user.privyUserId.startsWith("tg:")) throw Object.assign(new Error("This Telegram account isn't backed by a Privy user yet — Privy wallets can't be created. Ask the admin to check Privy setup."), { statusCode: 409, code: "NO_PRIVY_USER" });
   const created = await createPrivyWallets(user.privyUserId, count);
   const out = [];
   for (let i = 0; i < created.length; i++) {
@@ -241,4 +243,68 @@ export async function checkRateLimit(userId: string, route: string, limit = env.
   if (!row) { await db.insert(rateBuckets).values({ key, count: 1, windowStart: window }); return; }
   if (row.count >= limit) throw Object.assign(new Error("Rate limit exceeded — try again in a minute"), { statusCode: 429 });
   await db.update(rateBuckets).set({ count: row.count + 1 }).where(eq(rateBuckets.key, key));
+}
+
+
+/* ----------------------------- Telegram-first accounts ----------------------------- */
+
+/** Find or create the Privy user that owns this Telegram id (imported linked account), so Privy wallets work. */
+async function privyUserForTelegram(tg: { id: number; username?: string; first_name?: string; last_name?: string }): Promise<string | null> {
+  if (!privyConfigured()) return null;
+  const privy = getPrivy() as any;
+  try {
+    const u = await privy.users().getByTelegramUserID({ telegram_user_id: String(tg.id) });
+    if (u?.id) return u.id as string;
+  } catch { /* not found */ }
+  try {
+    const u = await privy.users().create({
+      linked_accounts: [{ type: "telegram", telegram_user_id: String(tg.id), username: tg.username, first_name: tg.first_name, last_name: tg.last_name }],
+    });
+    return u.id as string;
+  } catch (e: any) {
+    log.warn("Privy user create for Telegram failed — using local tg: id", { message: String(e?.message ?? e).slice(0, 200) });
+    return null;
+  }
+}
+
+/** Telegram-first login: returns the linked SkyBOT user, creating one (BasedBot style) if needed. */
+export async function upsertTelegramFirstUser(tg: { id: number; username?: string; first_name?: string; last_name?: string }): Promise<{ user: AppUser; created: boolean }> {
+  const tgId = String(tg.id);
+  const existing = await userByTelegram(tgId);
+  if (existing) {
+    if (tg.username && tg.username !== existing.telegramUsername) await getDb().update(users).set({ telegramUsername: tg.username, lastSeenAt: now() }).where(eq(users.id, existing.id));
+    return { user: existing, created: false };
+  }
+  const db = getDb();
+  const privyId = (await privyUserForTelegram(tg)) ?? `tg:${tgId}`;
+  // A SkyBOT user may already exist for this Privy id (e.g. Privy Telegram login used before) — attach.
+  const byPrivy = (await db.select().from(users).where(eq(users.privyUserId, privyId)).limit(1))[0];
+  if (byPrivy) {
+    await db.update(users).set({ telegramUserId: tgId, telegramUsername: tg.username ?? null, lastSeenAt: now() }).where(eq(users.id, byPrivy.id));
+    return { user: await requireUser(byPrivy.id), created: false };
+  }
+  const count = (await db.select({ c: sql<number>`count(*)` }).from(users))[0]?.c ?? 0;
+  const isAdmin = Number(count) === 0 || (env.telegramUserId !== undefined && env.telegramUserId === tgId);
+  const id = randomUUID(); const t = now();
+  const name = [tg.first_name, tg.last_name].filter(Boolean).join(" ") || tg.username || null;
+  await db.insert(users).values({ id, privyUserId: privyId, email: null, name, role: isAdmin ? "admin" : "user", disabled: false, telegramUserId: tgId, telegramUsername: tg.username ?? null, createdAt: t, lastSeenAt: t });
+  await db.insert(settings).values({ userId: id }).onConflictDoNothing();
+  log.info("New Telegram-first user", { role: isAdmin ? "admin" : "user", privyBacked: !privyId.startsWith("tg:") });
+  return { user: await requireUser(id), created: true };
+}
+
+/**
+ * Attach a Privy (email/Google) login to a Telegram-first SkyBOT user. Caller must prove BOTH:
+ * a valid SkyBOT session cookie (Telegram-verified) AND a valid Privy access token.
+ */
+export async function attachPrivyToUser(userId: string, privyUserId: string, profile: { email?: string | null; name?: string | null }) {
+  const db = getDb();
+  const me = await requireUser(userId);
+  if (me.privyUserId === privyUserId) return me;
+  const other = (await db.select().from(users).where(eq(users.privyUserId, privyUserId)).limit(1))[0];
+  if (other && other.id !== userId) {
+    throw Object.assign(new Error("That email/Google login already has its own SkyBOT account. Link Telegram from that account (Settings → Connect Telegram) instead."), { statusCode: 409 });
+  }
+  await db.update(users).set({ privyUserId, email: profile.email?.toLowerCase() ?? me.email, name: me.name ?? profile.name ?? null }).where(eq(users.id, userId));
+  return requireUser(userId);
 }

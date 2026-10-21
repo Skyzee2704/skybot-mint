@@ -26,15 +26,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           setTgOnly(false);
           return;
         }
-        // Mini App fallback: initData HMAC → linked SkyBOT user (no Privy Telegram login yet)
+        // Mini App: Privy Telegram seamless login didn't sign us in → verified-initData SkyBOT session (Telegram-first account).
         if (isMiniApp && initData) {
-          const sess = await api<{ linked: boolean; user?: any; hint?: string }>("/api/telegram/session", { body: { initData } });
-          if (sess.linked && sess.user) {
-            setMe({ user: sess.user });
-            setTgOnly(true);
-            return;
-          }
-          setErr(sess.hint ?? "Link Telegram in Settings first, then reopen.");
+          const sess = await api<{ ok: boolean; user: any }>("/api/telegram/session", { body: { initData } });
+          setMe({ user: sess.user, authVia: "telegram-session" });
+          setTgOnly(true);
+          return;
         }
         if (!isMiniApp) login();
       } catch (e: any) {
@@ -79,7 +76,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         {nav.map((n) => <Link key={n.href} href={n.href} className={path.startsWith(n.href) ? "active" : ""}>{n.label}</Link>)}
         <span className="spacer" />
         <span className="muted" style={{ fontSize: 13 }}>{me?.user?.email ?? user?.email?.address ?? (tgOnly ? `@${me?.user?.telegramUsername ?? "tg"}` : "signed in")}</span>
-        {!tgOnly && <button className="ghost" onClick={() => logout().then(() => router.push("/"))}>Sign out</button>}
+        {!tgOnly && !isMiniApp && <button className="ghost" onClick={() => logout().then(() => router.push("/"))}>Sign out</button>}
       </nav>
       <main className="app">{children}</main>
     </>
@@ -92,6 +89,7 @@ export function useApi() {
   return async function call<T = any>(path: string, opts: { method?: string; body?: unknown } = {}) {
     const token = authenticated ? await getAccessToken() : null;
     const idToken = await (user as any)?.getIdentityToken?.().catch?.(() => null);
-    return api<T>(path, { ...opts, token, idToken, telegramInitData: initData });
+    // Prefer Privy token; otherwise the httpOnly session cookie carries auth (initData header only as last resort).
+    return api<T>(path, { ...opts, token, idToken, telegramInitData: token ? null : initData });
   };
 }

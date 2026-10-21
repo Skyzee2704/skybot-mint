@@ -108,3 +108,28 @@ describe("telegram webhook requires secret", () => {
     await app.close();
   });
 });
+
+describe("telegram-first session", () => {
+  it("signs/verifies and rejects tampering + expiry", async () => {
+    process.env.SESSION_SECRET = "x".repeat(48);
+    const { signSession, verifySession } = await import("../src/auth/session.js");
+    const { token } = signSession("user-1");
+    expect(verifySession(token)).toBe("user-1");
+    const [v, , exp, sig] = token.split(".");
+    expect(verifySession(`${v}.${Buffer.from("admin").toString("base64url")}.${exp}.${sig}`)).toBeNull();
+    expect(verifySession(signSession("user-1", -5).token)).toBeNull();
+  });
+
+  it("cookie writes require CSRF header; session endpoint rejects forged initData", async () => {
+    process.env.SESSION_SECRET = "x".repeat(48);
+    const { buildServer } = await import("../src/api/server.js");
+    const { signSession } = await import("../src/auth/session.js");
+    const app = await buildServer();
+    const cookie = `sb_session=${encodeURIComponent(signSession("u1").token)}`;
+    const r = await app.inject({ method: "POST", url: "/api/telegram/unlink", headers: { cookie }, payload: {} });
+    expect(r.statusCode).toBe(403);
+    const f = await app.inject({ method: "POST", url: "/api/telegram/session", payload: { initData: "user=%7B%22id%22%3A1%7D&auth_date=9999999999&hash=" + "0".repeat(64) } });
+    expect(f.statusCode).toBe(401);
+    await app.close();
+  });
+});

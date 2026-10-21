@@ -1,6 +1,8 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useApi } from "@/components/AppShell";
+import { usePrivy } from "@privy-io/react-auth";
+import { api as rawApi } from "@/lib/api";
 
 export default function SettingsPage() {
   const api = useApi();
@@ -8,6 +10,21 @@ export default function SettingsPage() {
   const [link, setLink] = useState<any>(null); const [claim, setClaim] = useState("");
   const [msg, setMsg] = useState<string | null>(null); const [err, setErr] = useState<string | null>(null);
   const [health, setHealth] = useState<any[] | null>(null);
+  const [me, setMe] = useState<any>(null);
+  const { login, authenticated, getAccessToken, user } = usePrivy();
+  const [attachWanted, setAttachWanted] = useState(false);
+  useEffect(() => { api("/api/me").then(setMe).catch(() => {}); }, []); // eslint-disable-line
+  useEffect(() => {
+    if (!attachWanted || !authenticated) return;
+    (async () => {
+      try {
+        const token = await getAccessToken();
+        const idToken = await (user as any)?.getIdentityToken?.().catch?.(() => null);
+        const r = await rawApi("/api/account/attach-privy", { body: {}, token, idToken });
+        setMe((m: any) => ({ ...m, user: r.user })); setMsg("Email/Google linked to this account"); setAttachWanted(false);
+      } catch (e: any) { setErr(e.message); setAttachWanted(false); }
+    })();
+  }, [attachWanted, authenticated]); // eslint-disable-line
 
   const load = () => api("/api/settings").then((s) => { setSt(s); setEdit(Object.fromEntries(s.chains.map((c: any) => [c.key, { maxPricePerNft: c.maxPricePerNft, maxDailySpend: c.maxDailySpend }]))); });
   useEffect(() => { load().catch((e) => setErr(e.message)); const i = setInterval(() => load().catch(() => {}), 5000); return () => clearInterval(i); }, []); // eslint-disable-line
@@ -17,6 +34,14 @@ export default function SettingsPage() {
   return (
     <>
       {err && <div className="err">{err}</div>}{msg && <div className="notice">{msg}</div>}
+
+      {me?.authVia === "telegram-session" && !me?.user?.email && (
+        <div className="card">
+          <h2>Add email or Google</h2>
+          <p className="muted">You signed in with Telegram. Add an email or Google login so you can also use SkyBOT in a normal browser.</p>
+          <button onClick={() => { setAttachWanted(true); if (!authenticated) login(); }}>Link email / Google</button>
+        </div>
+      )}
 
       <div className="card">
         <h2>Connect Telegram</h2>

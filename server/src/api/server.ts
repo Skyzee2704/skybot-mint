@@ -23,6 +23,9 @@ import { defaultCapValues, dailySpent } from "../core/safety/safety.js";
 import { MintRequest } from "../core/mint/types.js";
 import { redactString, log } from "../util/log.js";
 import { dbMode } from "../db/client.js";
+import { signSession, verifySession, readCookie, sessionCookie, clearSessionCookie } from "../auth/session.js";
+import { verifyPrivyAccessToken, getPrivy } from "../auth/privy.js";
+import { upsertTelegramFirstUser, attachPrivyToUser, checkRateLimit } from "../users/service.js";
 import { validateInitData, publicHttpsReady } from "../bot/telegramWebApp.js";
 import { webhookCallback } from "../bot/telegram.js";
 
@@ -52,7 +55,7 @@ export async function buildServer(): Promise<FastifyInstance> {
       cb(null, ok);
     },
     credentials: true,
-    allowedHeaders: ["Authorization", "Content-Type", "Privy-Id-Token", "X-Telegram-Init-Data"],
+    allowedHeaders: ["Authorization", "Content-Type", "Privy-Id-Token", "X-Telegram-Init-Data", "X-SkyBOT-CSRF"],
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   });
 
@@ -69,19 +72,42 @@ export async function buildServer(): Promise<FastifyInstance> {
     miniApp: publicHttpsReady(), webhook: Boolean(env.publicApiUrl),
   }));
 
-  /** Mini App fallback auth: validate Telegram initData HMAC → linked SkyBOT user. */
-  app.post("/api/telegram/session", async (req) => {
-    const { initData } = z.object({ initData: z.string().min(10) }).parse(req.body);
-    const v = validateInitData(initData);
-    const u = await userByTelegram(String(v.user.id));
-    if (!u) {
-      return {
-        linked: false,
-        telegram: { id: v.user.id, username: v.user.username ?? null },
-        hint: "Link via Settings → Connect Telegram, or /link in the bot.",
-      };
+  /**
+   * Mini App login (fallback when Privy Telegram seamless auth is off): verify initData HMAC (max 1h old),
+   * find or create the Telegram-first SkyBOT user, and set a 1h httpOnly session cookie.
+   */
+  app.post("/api/telegram/session", async (req, reply) => {
+    const { initData } = z.object({ initData: z.string().min(10).max(4096) }).parse(req.body);
+    const v = validateInitData(initData, 3600);
+    const { user, created } = await upsertTelegramFirstUser(v.user);
+    if (user.disabled) return reply.code(403).send({ error: "Account disabled" });
+    await checkRateLimit(user.id, "/api/telegram/session", 20);
+    const { token, exp } = signSession(user.id);
+    reply.header("set-cookie", sessionCookie(token));
+    reply.header("cache-control", "no-store");
+    return { ok: true, created, expiresAt: new Date(exp * 1000).toISOString(), user: publicUser(user) };
+  });
+  app.post("/api/session/logout", async (_req, reply) => { reply.header("set-cookie", clearSessionCookie()); return { ok: true }; });
+
+  /** Attach email/Google (Privy) to a Telegram-first account. Needs BOTH the session cookie and a Privy token. */
+  app.post("/api/account/attach-privy", async (req, reply) => {
+    if (req.headers["x-skybot-csrf"] !== "1") return reply.code(403).send({ error: "CSRF header missing" });
+    const sid = verifySession(readCookie(req.headers.cookie));
+    const tok = (req.headers.authorization ?? "").startsWith("Bearer ") ? req.headers.authorization!.slice(7) : null;
+    if (!sid || !tok) return reply.code(401).send({ error: "Need Telegram session and Privy login" });
+    const claims = await verifyPrivyAccessToken(tok).catch(() => null);
+    if (!claims) return reply.code(401).send({ error: "Invalid Privy token" });
+    let email: string | null = null; let name: string | null = null;
+    const idToken = req.headers["privy-id-token"] as string | undefined;
+    if (idToken) {
+      try {
+        const u = await getPrivy().utils().auth().verifyIdentityToken(idToken);
+        const acc = (u.linked_accounts as any[]) ?? [];
+        email = acc.find((x) => x.type === "email")?.address ?? acc.find((x) => x.type === "google_oauth")?.email ?? null;
+        name = acc.find((x) => x.type === "google_oauth")?.name ?? null;
+      } catch { /* optional */ }
     }
-    return { linked: true, user: publicUser(u), telegram: { id: v.user.id, username: v.user.username ?? null } };
+    return { user: publicUser(await attachPrivyToUser(sid, claims.privyUserId, { email, name })) };
   });
 
   /** Telegram webhook (production). Secret compared to TELEGRAM_WEBHOOK_SECRET. */
@@ -121,7 +147,7 @@ export async function buildServer(): Promise<FastifyInstance> {
   app.register(async (a) => {
     a.addHook("onRequest", requireAuth);
 
-    a.get("/api/me", async (req) => ({ user: publicUser(req.user!), serverSigning: privyServerSigningReady() }));
+    a.get("/api/me", async (req) => ({ user: publicUser(req.user!), authVia: req.authVia, serverSigning: privyServerSigningReady() }));
 
     a.get("/api/chains/health", async () => Promise.all(CHAINS.map(async (c) => {
       const pool = getPool(c);

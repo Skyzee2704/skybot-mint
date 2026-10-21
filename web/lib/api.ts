@@ -12,7 +12,7 @@ function url(path: string) {
 export async function api<T = any>(path: string, opts: {
   method?: string; body?: unknown; token?: string | null; idToken?: string | null; telegramInitData?: string | null;
 } = {}): Promise<T> {
-  const headers: Record<string, string> = {};
+  const headers: Record<string, string> = { "x-skybot-csrf": "1" };
   if (opts.token) headers.authorization = `Bearer ${opts.token}`;
   if (opts.idToken) headers["privy-id-token"] = opts.idToken;
   if (opts.telegramInitData) headers["x-telegram-init-data"] = opts.telegramInitData;
@@ -20,6 +20,7 @@ export async function api<T = any>(path: string, opts: {
   const res = await fetch(url(path), {
     method: opts.method ?? (opts.body !== undefined ? "POST" : "GET"),
     headers,
+    credentials: "include",
     body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
   });
   const json = await res.json().catch(() => ({}));
