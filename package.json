@@ -26,7 +26,8 @@
     "esbuild@0.18.20": true
   },
   "overrides": {
-    "ws@^8": "^8.22.0"
+    "ws@^8": "^8.22.0",
+    "light-my-request": "6.6.0"
   },
   "license": "AGPL-3.0-only",
   "devDependencies": {
