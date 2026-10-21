@@ -67,22 +67,40 @@ function openDashboardKeyboard() {
   return kb;
 }
 
+export const BOT_COMMANDS = [
+  { command: "start", description: "Welcome and open the dashboard" },
+  { command: "check", description: "Eligibility of all your wallets: /check <link|address>" },
+  { command: "mint", description: "Drop summary, then mint in the dashboard" },
+  { command: "wallets", description: "List your wallets" },
+  { command: "jobs", description: "Recent and scheduled mints" },
+  { command: "withdraw", description: "Withdraw funds from your wallets" },
+  { command: "help", description: "How to use SkyBOT Mint" },
+];
+
+/** Keep the command menu in sync after a deploy (once per instance; one getMyCommands call when nothing changed). */
+let commandsSynced = false;
+async function syncCommandsOnce(bot: Bot) {
+  if (commandsSynced) return;
+  commandsSynced = true;
+  try {
+    const cur = await bot.api.getMyCommands();
+    const same =
+      cur.length === BOT_COMMANDS.length &&
+      cur.every((c, i) => c.command === BOT_COMMANDS[i]!.command && c.description === BOT_COMMANDS[i]!.description);
+    if (!same) await configureBotProfile(bot);
+  } catch (e: any) {
+    log.warn("telegram command sync failed", redactString(String(e?.message ?? e)));
+  }
+}
+
 /** Commands, profile and menu button. Menu button opens the Mini App when PUBLIC_URL is public https. */
 export async function configureBotProfile(bot: Bot) {
   await bot.api.setMyName("SkyBOT Mint").catch(() => {});
   await bot.api
-    .setMyDescription("SkyBOT Mint — mint OpenSea drops and any NFT contract from Telegram or the web dashboard.")
+    .setMyDescription("SkyBOT Mint — check and mint OpenSea drops and any NFT contract from the web dashboard or the Telegram Mini App.")
     .catch(() => {});
   await bot.api.setMyShortDescription("Mint NFTs with SkyBOT. Tap the menu button to open the dashboard.").catch(() => {});
-  await bot.api.setMyCommands([
-    { command: "start", description: "Welcome and open the dashboard" },
-    { command: "check", description: "Eligibility of all your wallets: /check <link|address>" },
-    { command: "mint", description: "Drop summary, then mint in the dashboard" },
-    { command: "wallets", description: "List your wallets" },
-    { command: "jobs", description: "Recent and scheduled mints" },
-    { command: "withdraw", description: "Withdraw funds from your wallets" },
-    { command: "help", description: "How to use SkyBOT Mint" },
-  ]);
+  await bot.api.setMyCommands(BOT_COMMANDS);
   if (publicHttpsReady()) {
     await bot.api.setChatMenuButton({ menu_button: { type: "web_app", text: "SkyBOT Mint", web_app: { url: dashUrl("/") } } });
     return { menuButton: dashUrl("/") };
@@ -116,6 +134,7 @@ export async function handleWebhookUpdate(update: unknown) {
     await webhookBot.init();
   }
   await webhookBot.handleUpdate(update as any);
+  await syncCommandsOnce(webhookBot);
 }
 
 /** Local dev: long polling (deletes any webhook first). */
