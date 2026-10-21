@@ -52,9 +52,9 @@ Open http://localhost:3000. On first launch you create the **master password**. 
 | arbitrum | 42161 | ✅ | same |
 | bnb | 56 | ✅ | Etherscan v2 → Sourcify → probe |
 | unichain | 130 | ✅ | same |
-| ink | 57073 | ✅ | Blockscout → Sourcify → probe |
-| robinhood | 4663 | ✅ | Blockscout → Sourcify → probe |
-| arc | 5042 (native USDC) | ✅ | Blockscout → Sourcify → probe |
+| ink | 57073 | ✅ | Blockscout → Sourcify → probe (Ink is not in the Etherscan v2 chainlist) |
+| robinhood | 4663 | ✅ | Etherscan v2 → Blockscout → Sourcify → probe |
+| arc | 5042 (native USDC) | ✅ | Etherscan v2 → Blockscout → Sourcify → probe |
 
 SeaDrop presence was verified on every chain with read-only `eth_getCode`.
 
@@ -85,4 +85,7 @@ SeaDrop presence was verified on every chain with read-only `eth_getCode`.
 - Generic contracts: there is no allowlist, merkle-proof or signature support (those mints are flagged as unsupported). Check the auto-detected price and mint function before confirming.
 - ERC-1155 SeaDrop drops and non-public stages only work through the OpenSea API path, which requires `OPENSEA_API_KEY`. That path is ERC-721 SeaDrop V1 per OpenSea's docs.
 - Without `OPENSEA_API_KEY`, slug-only input cannot be resolved; paste the contract address and chain instead.
+- With `ETHERSCAN_API_KEY`, Etherscan v2 serves verified ABIs on 8 of the 9 chains (all except Ink); this was checked in October 2026, including proxy-implementation lookup.
+- OpenSea's mint API checks the minter's **balance before the allowlist**. For an unfunded wallet it returns `422 Insufficient balance`, so allowlist status shows as `unknown` until the wallet is funded. A real allowlist rejection shows as `not_eligible`. `409` means the stage is not active.
+- Contracts without an ERC-721/1155 interface (ERC-165) are resolved but never recommended for minting, because the detected `mint` may be admin-only.
 - The Etherscan v2 free tier may not cover every chain. Some Blockscout instances sit behind Cloudflare challenges; the resolver then falls through to Sourcify and a bytecode probe.

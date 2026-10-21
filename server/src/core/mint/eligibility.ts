@@ -30,8 +30,16 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (t: T) => Promise<R
 export function stagePriceWei(t: ResolvedTarget, strategy: Strategy): bigint | null {
   if (strategy === "seadrop_public") return t.seadrop?.publicDrop ? BigInt(t.seadrop.publicDrop.mintPriceWei) : null;
   if (strategy === "generic") return t.generic?.values.priceWei ? BigInt(t.generic.values.priceWei) : null;
-  const s = t.stages.find((x) => x.source === "opensea" && x.status === "active") ?? t.stages.find((x) => x.status === "upcoming");
-  return s?.priceWei ? BigInt(s.priceWei) : null;
+  const s = osStage(t);
+  return s.priceWei !== null ? BigInt(s.priceWei) : null;
+}
+
+/** Stage the OpenSea mint API will mint into: the drop's active stage, else its next stage, else resolved stages. */
+export function osStage(t: ResolvedTarget): { priceWei: string | null; maxPerWallet: number | null } {
+  const d = t.opensea?.drop; const raw = d?.active_stage ?? d?.next_stage;
+  if (raw) return { priceWei: raw.price ?? null, maxPerWallet: raw.max_per_wallet ? Number(raw.max_per_wallet) : null };
+  const s = t.stages.find((x) => x.status === "active") ?? t.stages.find((x) => x.status === "upcoming");
+  return { priceWei: s?.priceWei ?? null, maxPerWallet: s?.maxPerWallet ?? null };
 }
 
 /** Pure decision logic (unit-tested). */
@@ -67,7 +75,7 @@ export async function checkEligibility(t: ResolvedTarget, strategy: Strategy, wa
   const stageEnded = strategy === "seadrop_public" ? pubStage?.status === "ended" : false;
   const maxPerWallet = strategy === "seadrop_public" ? t.seadrop?.publicDrop?.maxPerWallet ?? null
     : strategy === "generic" ? (t.generic?.values.maxPerWallet ? Number(t.generic.values.maxPerWallet) : null)
-    : (t.stages.find((s) => s.source === "opensea" && s.status === "active")?.maxPerWallet ?? null);
+    : osStage(t).maxPerWallet;
   const supplyRemaining = t.supply.remaining !== null ? BigInt(t.supply.remaining) : null;
   const useOs = strategy === "opensea_api" && os.available && Boolean(t.slug);
   if (strategy === "opensea_api" && !useOs) notes.push("OpenSea API key or slug missing — allowlist status unknown.");
@@ -85,6 +93,10 @@ export async function checkEligibility(t: ResolvedTarget, strategy: Strategy, wa
       catch (e: any) {
         if (e instanceof MintBuildError && e.code === "NOT_ELIGIBLE") { allowlist = "not_eligible"; d.reasons.push(e.message); }
         else if (e instanceof MintBuildError && e.code === "NOT_ACTIVE") { allowlist = "not_active"; }
+        else if (e instanceof MintBuildError && e.code === "INSUFFICIENT_FUNDS") {
+          // OpenSea checks balance before allowlist; only add a reason if our own balance check didn't already.
+          if (!d.reasons.some((r) => r.startsWith("insufficient balance"))) d.reasons.push("OpenSea: insufficient balance to mint");
+        }
         else d.reasons.push(`OpenSea check failed: ${String(e.message).slice(0, 120)}`);
       }
     }

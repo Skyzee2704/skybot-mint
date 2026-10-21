@@ -6,6 +6,12 @@ import { SEADROP_ADDRESS, encodeMintPublic } from "../resolver/seadrop.js";
 import { isDangerousFunctionName, assertSafeMintTx } from "../safety/safety.js";
 import { BuiltTx, MintRequest } from "./types.js";
 
+/** Map official mint-API errors. 422 is also returned for an unfunded minter, which says nothing about allowlist status. */
+export function osErrorCode(status: number, message = ""): string {
+  if (status === 409) return "NOT_ACTIVE";
+  if (status === 422) return /insufficient (balance|funds)/i.test(message) ? "INSUFFICIENT_FUNDS" : "NOT_ELIGIBLE";
+  return `HTTP_${status}`;
+}
 export class MintBuildError extends Error { statusCode = 422; constructor(m: string, public code = "BUILD") { super(m); } }
 
 /** Allowed `to` for each strategy — anything else is rejected by the safety guard. */
@@ -39,7 +45,7 @@ export async function buildMintTx(t: ResolvedTarget, req: MintRequest, wallet: s
         if (r.chain && r.chain !== chain.openseaChain && r.chain !== chain.key) throw new MintBuildError(`OpenSea returned chain "${r.chain}" but target is ${chain.key}`);
       } catch (e: any) {
         if (e instanceof OpenSeaHttpError) {
-          const code = e.status === 409 ? "NOT_ACTIVE" : e.status === 422 ? "NOT_ELIGIBLE" : `HTTP_${e.status}`;
+          const code = osErrorCode(e.status, e.message);
           throw new MintBuildError(`OpenSea: ${e.message || e.status}`, code);
         }
         throw e;

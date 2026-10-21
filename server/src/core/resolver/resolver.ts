@@ -149,7 +149,7 @@ export async function resolveTarget(opts: ResolveOptions): Promise<ResolvedTarge
   for (const s of drop?.stages ?? []) {
     const type = mapOsStageType(s.stage_type);
     if (type === "public" && seadrop?.publicDrop) continue; // on-chain is authoritative
-    stages.push({ name: s.label || s.stage_type || "stage", type, priceWei: s.price ?? null, start: s.start_time ?? null, end: s.end_time ?? null, maxPerWallet: s.max_per_wallet ? Number(s.max_per_wallet) : null, status: stageStatus(toSec(s.start_time), toSec(s.end_time)), source: "opensea" });
+    stages.push({ name: s.label || s.stage_type || "stage", type, priceWei: s.price ?? null, start: iso(toSec(s.start_time)), end: iso(toSec(s.end_time)), maxPerWallet: s.max_per_wallet ? Number(s.max_per_wallet) : null, status: stageStatus(toSec(s.start_time), toSec(s.end_time)), source: "opensea" });
   }
   if (seadrop && !drop) {
     if (seadrop.hasAllowList) stages.push({ name: "Allowlist (merkle root set; details need OpenSea)", type: "allowlist", priceWei: null, start: null, end: null, maxPerWallet: null, status: "unknown", source: "onchain" });
@@ -175,14 +175,20 @@ export async function resolveTarget(opts: ResolveOptions): Promise<ResolvedTarge
   if (isSeaDrop) {
     if (pub && pub.status !== "ended") recommendedStrategy = "seadrop_public";
     if (activeNonPublic && os.available && slug && (!pub || pub.status === "upcoming")) recommendedStrategy = "opensea_api";
-    if (recommendedStrategy === "none" && os.available && slug) recommendedStrategy = "opensea_api";
+    if (recommendedStrategy === "none" && os.available && slug && (drop?.is_minting || drop?.next_stage || activeNonPublic)) recommendedStrategy = "opensea_api";
     if (pub?.status === "ended" && !activeNonPublic) warnings.push("Public stage has ended.");
     if (seadrop?.publicDrop?.restrictFeeRecipients && !seadrop.feeRecipient) warnings.push("Drop restricts fee recipients and none are allowed — public mint cannot be built.");
     if (seadrop && seadrop.address !== SEADROP_ADDRESS) warnings.push("Unexpected SeaDrop address");
     if ((drop?.drop_type ?? "").includes("erc1155")) warnings.push("ERC-1155 SeaDrop drops are not supported by OpenSea's mint API; only on-chain public stage can be attempted.");
-  } else if (generic?.selected) recommendedStrategy = "generic";
+  } else if (generic?.selected) {
+    if (standard === "unknown") warnings.push("ERC-721/ERC-1155 interface not detected (ERC-165). This may not be an NFT contract, or the detected mint may be admin-only. Not recommending a mint; simulate before trying.");
+    else recommendedStrategy = "generic";
+  }
 
-  if (remaining === "0") warnings.push("Sold out (remaining supply is 0).");
+  const ZERO = "0x0000000000000000000000000000000000000000";
+  if ((drop?.stages ?? []).some((s) => s.price_currency_address && s.price_currency_address.toLowerCase() !== ZERO))
+    warnings.push("A stage is priced in an ERC-20 token, not the native coin. Paying in ERC-20 needs a token approval, which this bot blocks; such stages are not supported.");
+  if (remaining === "0") { warnings.push("Sold out (remaining supply is 0)."); recommendedStrategy = "none"; }
 
   return {
     input: opts.input, parsed,

@@ -62,18 +62,18 @@ export const CHAINS: ChainConfig[] = [
   {
     key: "ink", chainId: 57073, name: "Ink", nativeSymbol: "ETH", explorer: "https://explorer.inkonchain.com", openseaChain: "ink",
     publicRpcs: ["https://rpc-gel.inkonchain.com", "https://rpc-qnd.inkonchain.com", "https://ink.drpc.org"],
-    blockscoutApi: "https://explorer.inkonchain.com/api", seadrop: true,
+    blockscoutApi: "https://explorer.inkonchain.com/api", seadrop: true, // not in Etherscan v2 chainlist (verified 2026-10)
   },
   {
     key: "robinhood", chainId: 4663, name: "Robinhood Chain", nativeSymbol: "ETH", explorer: "https://robinhoodchain.blockscout.com", openseaChain: "robinhood",
     publicRpcs: ["https://rpc.mainnet.chain.robinhood.com"],
     sendOnlyRpcs: ["https://sequencer.mainnet.chain.robinhood.com"],
-    blockscoutApi: "https://robinhoodchain.blockscout.com/api", seadrop: true,
+    etherscanV2: true, blockscoutApi: "https://robinhoodchain.blockscout.com/api", seadrop: true,
   },
   {
     key: "arc", chainId: 5042, name: "Arc", nativeSymbol: "USDC", explorer: "https://explorer.arc.io", openseaChain: "arc",
     publicRpcs: ["https://rpc.mainnet.arc.io", "https://rpc.drpc.mainnet.arc.io"],
-    blockscoutApi: "https://explorer.arc.io/api", seadrop: true,
+    etherscanV2: true, blockscoutApi: "https://explorer.arc.io/api", seadrop: true,
     safety: { maxPricePerNft: "100", maxDailySpend: "500" }, // USDC-denominated defaults (native gas token is USDC)
   },
   // Add a chain: copy an entry, set chainId/explorer/publicRpcs, then set RPC_<KEY> in env.
