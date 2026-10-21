@@ -13,7 +13,7 @@ By participating, you agree to follow our [Code of Conduct](CODE_OF_CONDUCT.md).
 ## Development Setup
 
 ```bash
-git clone https://github.com/skyzee2706/skybot-mint.git
+git clone https://github.com/Skyzee2704/skybot-mint.git
 cd skybot-mint
 npm ci
 cp .env.example .env      # fill in at least Privy + Telegram for full flows
@@ -36,7 +36,7 @@ npm run build
 
 ## Pull Request Guidelines
 
-1. Fork [skyzee2706/skybot-mint](https://github.com/skyzee2706/skybot-mint) and create a branch from `main` (`feat/…`, `fix/…`, `docs/…`).
+1. Fork [Skyzee2704/skybot-mint](https://github.com/Skyzee2704/skybot-mint) and create a branch from `main` (`feat/…`, `fix/…`, `docs/…`).
 2. Keep pull requests focused. One logical change per PR.
 3. Use [Conventional Commits](https://www.conventionalcommits.org/) for commit messages (`feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:`).
 4. Add or update tests for behavior changes, especially auth, scoping, signing, and scheduling.

@@ -18,7 +18,7 @@ Plan for about 30 minutes for the first deployment.
 ## 1. Push to GitHub
 
 ```bash
-git remote add origin https://github.com/skyzee2706/skybot-mint.git
+git remote add origin https://github.com/Skyzee2704/skybot-mint.git
 git push -u origin main
 ```
 

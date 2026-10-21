@@ -6,11 +6,11 @@
 
 **Multi-user NFT mint desk for OpenSea drops and any NFT contract — on the web and inside Telegram.**
 
-[![License: AGPL-3.0-only](https://img.shields.io/github/license/skyzee2706/skybot-mint?color=blue)](LICENSE)
+[![License: AGPL-3.0-only](https://img.shields.io/github/license/Skyzee2704/skybot-mint?color=blue)](LICENSE)
 [![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=next.js)](https://nextjs.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org)
-[![Deploy with Vercel](https://img.shields.io/badge/deploy-Vercel-000?logo=vercel)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fskyzee2706%2Fskybot-mint&root-directory=web)
-[![CI](https://github.com/skyzee2706/skybot-mint/actions/workflows/ci.yml/badge.svg)](https://github.com/skyzee2706/skybot-mint/actions/workflows/ci.yml)
+[![Deploy with Vercel](https://img.shields.io/badge/deploy-Vercel-000?logo=vercel)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FSkyzee2704%2Fskybot-mint&root-directory=web)
+[![CI](https://github.com/Skyzee2704/skybot-mint/actions/workflows/ci.yml/badge.svg)](https://github.com/Skyzee2704/skybot-mint/actions/workflows/ci.yml)
 
 </div>
 
@@ -114,7 +114,7 @@ To add a chain, add an entry to `server/src/config/chains.ts` and set `RPC_<KEY>
 Requirements: Node.js 20.9 or newer and npm 10 or newer.
 
 ```bash
-git clone https://github.com/skyzee2706/skybot-mint.git
+git clone https://github.com/Skyzee2704/skybot-mint.git
 cd skybot-mint
 npm ci
 cp .env.example .env        # fill in Privy, Telegram, and RPC values
@@ -234,7 +234,7 @@ Read the full threat model and production checklist in **[SECURITY.md](SECURITY.
 
 ## Contributing
 
-Contributions are welcome — open an [issue](https://github.com/skyzee2706/skybot-mint/issues) or a [pull request](https://github.com/skyzee2706/skybot-mint/pulls). Please read [CONTRIBUTING.md](CONTRIBUTING.md) and our [Code of Conduct](CODE_OF_CONDUCT.md). Report security issues privately as described in [SECURITY.md](SECURITY.md).
+Contributions are welcome — open an [issue](https://github.com/Skyzee2704/skybot-mint/issues) or a [pull request](https://github.com/Skyzee2704/skybot-mint/pulls). Please read [CONTRIBUTING.md](CONTRIBUTING.md) and our [Code of Conduct](CODE_OF_CONDUCT.md). Report security issues privately as described in [SECURITY.md](SECURITY.md).
 
 ## License
 

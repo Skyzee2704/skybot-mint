@@ -21,5 +21,5 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Project documentation (README, DEPLOY, SECURITY, CONTRIBUTING, Code of Conduct), GitHub Actions CI, ESLint, and Prettier.
 - Licensed under AGPL-3.0-only, with a "Source" link in the web footer.
 
-[Unreleased]: https://github.com/skyzee2706/skybot-mint/compare/v1.0.0...HEAD
-[1.0.0]: https://github.com/skyzee2706/skybot-mint/releases/tag/v1.0.0
+[Unreleased]: https://github.com/Skyzee2704/skybot-mint/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/Skyzee2704/skybot-mint/releases/tag/v1.0.0
