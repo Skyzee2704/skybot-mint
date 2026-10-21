@@ -191,6 +191,13 @@ export async function housekeeping() {
     .where(lt(telegramLinks.expiresAt, new Date(now).toISOString()))
     .returning({ code: telegramLinks.code });
   out.purgedCodes = del.length;
+  // Sign-in-only signer: fix wallet ids and confirm the signer on wallets not yet verified (each at most every 6 h).
+  try {
+    const { backfillSiweSigners } = await import("../users/siweSigner.js");
+    (out as any).siweSigners = await backfillSiweSigners();
+  } catch (e: any) {
+    log.warn("siwe signer backfill", String(e?.message ?? e).slice(0, 160));
+  }
   return out;
 }
 

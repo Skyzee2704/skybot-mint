@@ -56,6 +56,10 @@
     "./siwe": {
       "types": "./dist/core/resolver/siweGuard.d.ts",
       "default": "./dist/core/resolver/siweGuard.js"
+    },
+    "./stage-eligibility": {
+      "types": "./dist/core/mint/stageEligibility.d.ts",
+      "default": "./dist/core/mint/stageEligibility.js"
     }
   },
   "types": "dist/vercel.d.ts",

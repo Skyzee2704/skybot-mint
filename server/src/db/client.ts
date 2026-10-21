@@ -164,6 +164,7 @@ const DDL = [
   `CREATE TABLE IF NOT EXISTS nft_scan_state (user_id TEXT PRIMARY KEY, last_refresh_at BIGINT NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS rate_buckets (
     key TEXT PRIMARY KEY, count INTEGER NOT NULL DEFAULT 0, window_start INTEGER NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS siwe_signers (wallet_id TEXT PRIMARY KEY, attached_at TEXT, checked_at TEXT NOT NULL, note TEXT)`,
 ];
 
 async function migrate() {

@@ -630,3 +630,31 @@ html.tg-mini-app main.app {
   color: var(--warn);
   border-color: var(--warn);
 }
+
+/* Wallet eligibility grouped per allowlist stage */
+.stage-groups {
+  display: grid;
+  gap: 10px;
+  margin: 8px 0 12px;
+}
+.stage-group {
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.08));
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+.stage-group-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.stage-group-head .spacer {
+  flex: 1;
+}
+.stage-group ul {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}

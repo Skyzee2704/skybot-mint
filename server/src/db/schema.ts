@@ -210,3 +210,12 @@ export const nftScanState = sqliteTable("nft_scan_state", {
   userId: text("user_id").primaryKey(),
   lastRefreshAt: integer("last_refresh_at").notNull(),
 });
+
+/** Sign-in-only signer (OpenSea SIWE) status per wallet: attachedAt set once Privy lists the quorum on the wallet. */
+export const siweSigners = sqliteTable("siwe_signers", {
+  walletId: text("wallet_id").primaryKey(),
+  attachedAt: text("attached_at"),
+  checkedAt: text("checked_at").notNull(),
+  /** Short reason when not attached (e.g. "owner authorization needed"). */
+  note: text("note"),
+});

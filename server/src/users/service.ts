@@ -335,7 +335,8 @@ export async function syncPrivyWallet(
     await db
       .update(wallets)
       .set({
-        privyWalletId: input.privyWalletId,
+        // Clients without the Privy wallet id send the address: never overwrite a real id with it.
+        privyWalletId: /^0x/i.test(input.privyWalletId) && existing.privyWalletId ? existing.privyWalletId : input.privyWalletId,
         label: input.label ?? existing.label,
         groupName: input.group === undefined ? existing.groupName : input.group,
         removedAt: null,

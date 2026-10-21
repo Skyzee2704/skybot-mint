@@ -13,6 +13,7 @@ import { ConfirmBox } from "@/components/Confirm";
 import { formatDateTime, localTimeZone, zoneLabel, zonedWallTimeToDate } from "@/lib/time";
 import { useNow } from "@/lib/useNow";
 import { clampQty } from "@nft-mint-bot/server/qty";
+import { groupByStage, verdictText } from "@nft-mint-bot/server/stage-eligibility";
 
 type Strategy = "seadrop_public" | "opensea_api" | "generic";
 const STRAT = STRATEGY_LABELS as Record<Strategy, string>;
@@ -193,6 +194,21 @@ export default function MintPage() {
     }
   };
   const rows = elig?.rows ?? [];
+  // Allowlist stages (Public excluded: every wallet can mint), soonest first, each with its wallet verdicts.
+  const stageGroups = useMemo(
+    () => (elig?.rows?.length && t?.stages?.length ? groupByStage(t.stages, elig.rows, elig.targetStage ?? null) : []),
+    [elig, t],
+  );
+  const stageWhen = (s: any) =>
+    s.status === "active"
+      ? s.end
+        ? `live · ends ${fmt(s.end)}`
+        : "live now"
+      : s.status === "upcoming" && s.start
+        ? `starts ${fmt(s.start)}`
+        : s.start
+          ? fmt(s.start)
+          : "";
   const sym = t?.chain?.nativeSymbol ?? "";
   const selRows = rows.filter((r: any) => sel[r.walletId]);
   const totalWei = selRows.reduce((a: bigint, r: any) => a + rowCostWei(r), 0n);
@@ -401,18 +417,9 @@ export default function MintPage() {
       {elig && (
         <div className="card">
           <h2>2 · Wallet Eligibility</h2>
-          {elig.noteItems?.map((n: any, i: number) => (
-            <div key={`ni${i}`} className="notice">
-              {n.kind === "stage_upcoming" ? (
-                <>
-                  <b>{n.label}</b> starts {n.start ? fmt(n.start) : "soon"}.
-                  {n.needsVerification ? " Some wallets couldn't be verified with OpenSea yet." : ""}
-                </>
-              ) : (
-                "No mint stage is live or scheduled right now."
-              )}
-            </div>
-          ))}
+          {elig.noteItems?.some((n: any) => n.kind === "no_stage") && (
+            <div className="notice">No mint stage is live or scheduled right now.</div>
+          )}
           {elig.notes?.map((n: string) => (
             <div key={n} className="notice">
               {n}
@@ -425,6 +432,31 @@ export default function MintPage() {
             </div>
           )}
           {verifyNote && <div className="notice">{verifyNote}</div>}
+          {stageGroups.length > 0 && (
+            <div className="stage-groups">
+              {stageGroups.map((g) => (
+                <div key={g.stage.name} className="stage-group">
+                  <div className="stage-group-head">
+                    <b>{g.stage.name}</b>
+                    <span className="muted small">{stageWhen(g.stage)}</span>
+                    <span className="spacer" />
+                    <span className={g.eligible ? "ok small" : "muted small"}>
+                      {g.eligible} of {g.total} eligible
+                    </span>
+                  </div>
+                  <ul>
+                    {g.wallets.map((w) => (
+                      <li key={w.walletId}>
+                        <span className={STATE_CLASS[w.state]}>{STATE_ICON[w.state]}</span> {w.label}{" "}
+                        <span className="mono muted">{short(w.address)}</span>{" "}
+                        <span className={STATE_CLASS[w.state]}>— {verdictText(w)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </div>
+          )}
           <div className="row" style={{ marginBottom: 8 }}>
             <button
               className="ghost"
@@ -482,7 +514,7 @@ export default function MintPage() {
                       {r.label} <span className="mono muted">{short(r.address)}</span>
                     </td>
                     <td>
-                      <Access a={r.access} stages={r.stages} />
+                      <Access r={r} />
                     </td>
                     <td className="hide-sm">
                       {r.simulation?.ok === true ? (
@@ -708,33 +740,24 @@ const STAGE_TYPE: Record<string, string> = {
   unknown: "Unknown",
 };
 
-const ACCESS_LABEL: Record<string, string> = {
-  yes: "Eligible",
-  public: "Eligible (public)",
-  no: "Not eligible",
-  unknown: "Unknown",
-  "n/a": "No allowlist",
-};
+const STATE_ICON = { eligible: "✓", not_eligible: "✕", unverified: "?", unknown: "?" } as const;
+const STATE_CLASS = { eligible: "ok", not_eligible: "bad", unverified: "muted", unknown: "muted" } as const;
 
-function Access({ a, stages }: { a: any; stages?: any[] | null }) {
+/** Verdict for the stage being minted (per-stage details are listed above the table). */
+function Access({ r }: { r: any }) {
+  const a = r?.access;
   if (!a) return <span className="muted">—</span>;
+  if (r.needsOpenSeaLogin) return <span className="muted">Not verified yet</span>;
+  const label =
+    a.status === "yes"
+      ? "Eligible"
+      : a.status === "public"
+        ? "Eligible (public)"
+        : a.status === "no"
+          ? "Not eligible"
+          : a.status === "n/a"
+            ? "No allowlist"
+            : "Unknown";
   const cls = a.status === "yes" || a.status === "public" ? "ok" : a.status === "no" ? "bad" : "muted";
-  return (
-    <div>
-      <b className={cls}>{ACCESS_LABEL[a.status] ?? a.status}</b>
-      <div className="muted" style={{ fontSize: 12 }}>
-        {a.detail ? `${a.detail} · ` : ""}
-        {a.source}
-      </div>
-      {stages && stages.length > 1 && (
-        <div className="stage-list">
-          {stages.map((s: any) => (
-            <span key={s.uuid ?? s.label} className={s.eligible ? "ok" : s.eligible === false ? "bad" : "muted"} style={{ marginRight: 8 }}>
-              {s.label ?? s.type}: {s.eligible ? "yes" : s.eligible === false ? "no" : "?"}
-            </span>
-          ))}
-        </div>
-      )}
-    </div>
-  );
+  return <b className={cls}>{label}</b>;
 }

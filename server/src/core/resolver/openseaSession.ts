@@ -70,9 +70,20 @@ export async function loadJwt(userId: string, address: string): Promise<string |
  * Sign OpenSea's login on the server through the sign-in-only Privy signer. Returns null when the signer isn't
  * configured, the wallet id is unknown, or Privy refuses (signer not added to this wallet yet).
  */
-export async function serverSignIn(userId: string, wallet: { address: string; privyWalletId: string | null }): Promise<string | null> {
-  if (!privySiweSignerReady() || !wallet.privyWalletId || /^0x/i.test(wallet.privyWalletId)) return null;
+export async function serverSignIn(
+  userId: string,
+  wallet: { id?: string; address: string; privyWalletId: string | null },
+): Promise<string | null> {
+  if (!privySiweSignerReady()) return null;
   try {
+    // Older rows stored the address instead of the Privy wallet id: resolve (and fix) it first.
+    const { resolvePrivyWalletId } = await import("../../users/siweSigner.js");
+    const privyWalletId = wallet.id
+      ? await resolvePrivyWalletId({ id: wallet.id, userId, address: wallet.address, privyWalletId: wallet.privyWalletId })
+      : /^0x/i.test(wallet.privyWalletId ?? "0x")
+        ? null
+        : wallet.privyWalletId;
+    if (!privyWalletId) return null;
     const msg = await prepareSiwe(wallet.address);
     // Mandatory guard: only OpenSea's exact SIWE text for this wallet, fresh nonce/issuedAt.
     assertFieldsMatch(msg.text, msg.fields, wallet.address);
@@ -80,7 +91,7 @@ export async function serverSignIn(userId: string, wallet: { address: string; pr
     const r: any = await getPrivy()
       .wallets()
       .ethereum()
-      .signMessage(wallet.privyWalletId, {
+      .signMessage(privyWalletId, {
         message: msg.text,
         authorization_context: { authorization_private_keys: [env.privySiweAuthPrivateKey!] },
       } as any);

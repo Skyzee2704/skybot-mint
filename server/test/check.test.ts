@@ -55,11 +55,11 @@ const row = (label: string, access: any, extra: any = {}) => ({
 
 describe("/check formatting", () => {
   const now = Date.parse("2026-10-21T14:40:00Z");
-  it("summary line, human times in the user's zone, per-wallet verdicts, escaped HTML", () => {
+  it("per-stage headline and sections, human times in the user's zone, Public excluded, escaped HTML", () => {
     const [msg] = formatCheck({
       target,
       rows: [
-        row("Main", { status: "yes", source: "x", detail: 'eligible for "GTD"' }),
+        row("Main", { status: "yes", source: "x" }, { stages: [{ label: "GTD", type: "signed", eligible: true, maxPerWallet: 2 }] }),
         row("Alt", { status: "no", source: "x", detail: 'not eligible for "GTD"' }),
         row("New", { status: "unknown", source: "x" }, { needsOpenSeaLogin: true }),
       ] as any,
@@ -67,22 +67,77 @@ describe("/check formatting", () => {
       timeZone: "Asia/Kolkata",
       now,
     });
-    expect(msg.split("\n")[0]).toBe("<b>1 of 3 wallets eligible for GTD</b> · 1 unknown");
+    const lines = msg.split("\n");
+    expect(lines[0]).toBe("<b>GTD: 1 of 3 eligible</b>");
     expect(msg).toContain("Kabuki &lt;Killers&gt;");
-    expect(msg).toContain("starts Thu, 22 Oct 2026 · 19:30 (UTC+5:30) · in 23h 20m");
-    expect(msg).toContain("Free");
-    expect(msg).toContain("max 2/wallet");
-    expect(msg).toContain("✅ <b>Main</b> <code>0x668B…27A0</code> · Eligible");
-    expect(msg).toContain("❌ <b>Alt</b>");
-    expect(msg).toContain("Unknown — open app once to verify");
-    expect(msg).toContain("Open in SkyBOT");
+    expect(msg).toContain("<b>GTD</b> — starts Thu, 22 Oct 2026 · 19:30 (UTC+5:30) · in 23h 20m");
+    expect(msg).toContain("✅ Main <code>0x668B…27A0</code> — eligible (max 2)");
+    expect(msg).toContain("❌ Alt <code>0x668B…27A0</code> — not eligible");
+    expect(msg).toContain("❔ New <code>0x668B…27A0</code> — not verified yet");
+    expect(msg).toContain("1 wallet not verified yet.");
+    // Public stays in the stage summary but gets no per-wallet section.
+    expect(msg).toContain("• <b>Public</b> — Free");
+    expect(msg).not.toMatch(/^<b>Public<\/b> —/m);
+    // No redundant or duplicated wording.
+    expect(msg).not.toMatch(/GTD: (yes|no)|Public stage: \?|not eligible for/);
     expect(msg).toContain("Times shown in Asia/Kolkata.");
+    expect(msg).toContain("Read-only check. No transactions were sent.");
     expect(msg).not.toMatch(/\d{4}-\d{2}-\d{2}T/);
+  });
+  it("one section per allowlist stage, soonest first, verdicts from OpenSea per-stage results", () => {
+    const t3 = {
+      ...target,
+      stages: [
+        { name: "FCFS", type: "signed", priceWei: "1", start: "2026-10-22T15:00:00Z", end: null, maxPerWallet: 2, status: "upcoming" },
+        {
+          name: "Public (on-chain)",
+          type: "public",
+          priceWei: "1",
+          start: "2026-10-22T16:00:00Z",
+          end: null,
+          maxPerWallet: 1000,
+          status: "upcoming",
+        },
+        ...target.stages.slice(0, 1),
+      ],
+    };
+    const st = [
+      { label: "GTD", type: "signed", eligible: false, maxPerWallet: null },
+      { label: "FCFS", type: "signed", eligible: true, maxPerWallet: 2 },
+    ];
+    const [msg] = formatCheck({
+      target: t3,
+      rows: [row("wallet-1", { status: "no", source: "x" }, { stages: st })] as any,
+      targetStage: { label: "GTD", start: null, active: false },
+      timeZone: "UTC",
+      now,
+    });
+    expect(msg.split("\n")[0]).toBe("<b>GTD: 0 of 1 eligible · FCFS: 1 of 1 eligible</b>");
+    const gtd = msg.indexOf("<b>GTD</b> — starts");
+    const fcfs = msg.indexOf("<b>FCFS</b> — starts");
+    expect(gtd).toBeGreaterThan(0);
+    expect(fcfs).toBeGreaterThan(gtd);
+    expect(msg.slice(gtd, fcfs)).toContain("❌ wallet-1");
+    expect(msg.slice(fcfs)).toContain("✅ wallet-1 <code>0x668B…27A0</code> — eligible (max 2)");
+    expect(msg).not.toContain("<b>Public (on-chain)</b> —  starts");
+    expect(msg).not.toContain("not verified yet");
+  });
+  it("public-only drops keep a simple per-wallet list", () => {
+    const tp = { ...target, stages: target.stages.slice(1) };
+    const [msg] = formatCheck({
+      target: tp,
+      rows: [row("w", { status: "public", source: "x" })] as any,
+      targetStage: null,
+      timeZone: "UTC",
+      now,
+    });
+    expect(msg.split("\n")[0]).toBe("<b>1 of 1 wallet eligible</b>");
+    expect(msg).toContain("✅ w <code>0x668B…27A0</code> — eligible");
   });
   it("labels UTC when the user's timezone is unknown", () => {
     const [msg] = formatCheck({ target, rows: [], targetStage: null, timeZone: null, now });
     expect(msg).toContain("(UTC)");
-    expect(msg).toContain("Times shown in UTC. Open SkyBOT once");
+    expect(msg).toContain("Times shown in UTC. Open SkyBOT once to use your own time zone.");
   });
   it("splits long messages on line boundaries under Telegram's limit", () => {
     const parts = splitMessage(Array.from({ length: 400 }, (_, i) => `<b>line ${i}</b> ${"x".repeat(40)}`));

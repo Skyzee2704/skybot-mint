@@ -68,6 +68,16 @@ const mintReq = z.object({
   forceWalletIds: z.array(z.string().max(100)).max(500).optional(),
 });
 
+/** Best effort, time-boxed: never blocks or fails the request it rides on. */
+async function attachSiweSigners(user: { id: string; privyUserId: string | null }, userJwt: string) {
+  if (!privySiweSignerReady()) return;
+  const { ensureSiweSigners } = await import("../users/siweSigner.js");
+  await Promise.race([
+    ensureSiweSigners(user, { userJwt }).catch((e) => log.warn("siwe signer attach", redactString(String(e?.message ?? e)).slice(0, 160))),
+    new Promise((r) => setTimeout(r, 6_000)),
+  ]);
+}
+
 export async function buildServer(): Promise<FastifyInstance> {
   const app = Fastify({ logger: false, bodyLimit: 2 * 1024 * 1024 });
   await app.register(helmet, {
@@ -211,13 +221,19 @@ export async function buildServer(): Promise<FastifyInstance> {
       const { setUserTimeZone } = await import("../users/service.js");
       return { timeZone: await setUserTimeZone(req.user!, timeZone) };
     });
-    a.get("/api/me", async (req) => ({
+    a.get("/api/me", async (req) => {
+      // Signed-in with Privy: attach the sign-in-only signer to this member's wallets server-side (owner-authorized
+      // with their own access token), so Telegram /check can verify upcoming OpenSea stages later on its own.
+      if (req.privyAccessToken) await attachSiweSigners(req.user!, req.privyAccessToken);
+      return meView(req);
+    });
+    const meView = (req: any) => ({
       user: publicUser(req.user!),
       authVia: req.authVia,
       serverSigning: privyServerSigningReady(),
       // Public ids only (no keys): lets the app add the sign-in-only signer to embedded wallets silently.
       siweSigner: privySiweSignerReady() ? { signerId: env.privySiweKeyQuorumId, policyId: env.privySiwePolicyId } : null,
-    }));
+    });
 
     a.get("/api/chains/health", async () =>
       Promise.all(
@@ -329,6 +345,8 @@ export async function buildServer(): Promise<FastifyInstance> {
         .parse(req.body);
       const out = [];
       for (const w of b.wallets) out.push(await syncPrivyWallet(req.user!.id, w));
+      // New / imported wallets get the sign-in-only signer right away (same signed-in request).
+      if (req.privyAccessToken) await attachSiweSigners(req.user!, req.privyAccessToken);
       return { wallets: out };
     });
     a.post("/api/wallets/generate", async (req) => {
