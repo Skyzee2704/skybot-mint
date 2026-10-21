@@ -1,6 +1,5 @@
 "use client";
 // SPDX-License-Identifier: AGPL-3.0-only
-import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { getIdentityToken, usePrivy, useSigners, useWallets } from "@privy-io/react-auth";
 import { localTimeZone } from "@/lib/time";
@@ -8,6 +7,7 @@ import { createContext, useCallback, useContext, useEffect, useState } from "rea
 import { api } from "@/lib/api";
 import { useTelegram } from "@/lib/telegram";
 import { clearWalletCache } from "@/lib/wallets";
+import { ShellNav } from "./ShellNav";
 
 /** How long the Mini App waits for Privy's seamless Telegram login before using the verified-initData fallback. */
 const SEAMLESS_WAIT_MS = 2500;
@@ -171,43 +171,24 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     );
   }
 
-  const nav = [
-    { href: "/app/mint", label: "Mint" },
-    { href: "/app/wallets", label: "Wallets" },
-    { href: "/app/withdraw", label: "Withdraw" },
-    { href: "/app/nfts", label: "NFTs" },
-    { href: "/app/jobs", label: "Jobs" },
-    { href: "/app/settings", label: "Settings" },
-    ...(me?.user?.role === "admin" ? [{ href: "/app/admin", label: "Admin" }] : []),
-  ];
+  const account =
+    me?.user?.email ?? user?.email?.address ?? (me?.user?.telegramUsername ? `@${me.user.telegramUsername}` : "Signed in");
 
   return (
     <>
-      <nav className="shell-nav">
-        <Link href="/" className="brand">
-          <img src="/logo.png" alt="" /> SkyBOT Mint
-        </Link>
-        {nav.map((n) => (
-          <Link key={n.href} href={n.href} className={path.startsWith(n.href) ? "active" : ""}>
-            {n.label}
-          </Link>
-        ))}
-        <span className="spacer" />
-        <span className="muted" style={{ fontSize: 13 }}>
-          {me?.user?.email ?? user?.email?.address ?? (me?.user?.telegramUsername ? `@${me.user.telegramUsername}` : "signed in")}
-        </span>
-        {!tgOnly && !isMiniApp && (
-          <button
-            className="ghost"
-            onClick={() => {
-              clearWalletCache();
-              logout().then(() => router.push("/"));
-            }}
-          >
-            Sign Out
-          </button>
-        )}
-      </nav>
+      <ShellNav
+        path={path}
+        isAdmin={me?.user?.role === "admin"}
+        account={account}
+        onSignOut={
+          !tgOnly && !isMiniApp
+            ? () => {
+                clearWalletCache();
+                logout().then(() => router.push("/"));
+              }
+            : undefined
+        }
+      />
       <main className="app">
         {tgOnly && (
           <div className="notice row" style={{ justifyContent: "space-between" }}>

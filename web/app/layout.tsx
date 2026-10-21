@@ -17,11 +17,18 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 1,
   themeColor: "#070707",
+  viewportFit: "cover",
 };
+
+/** Mark the Mini App before first paint (Telegram passes tgWebApp* in the URL hash) so the mobile nav never flashes. */
+const MINI_APP_EARLY = `try{var h=location.hash||"";if(/tgWebApp(Data|Version|Platform)=/.test(h)){sessionStorage.setItem("skybot-tg","1")}if(sessionStorage.getItem("skybot-tg")==="1"){document.documentElement.classList.add("tg-mini-app")}}catch(e){}`;
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: MINI_APP_EARLY }} />
+      </head>
       <body>
         <Script src="https://telegram.org/js/telegram-web-app.js" strategy="beforeInteractive" />
         <TelegramProvider>
