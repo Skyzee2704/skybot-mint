@@ -1,5 +1,6 @@
 "use client";
 // SPDX-License-Identifier: AGPL-3.0-only
+import { CopyAddress } from "@/components/CopyAddress";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePrivy, useSignTransaction } from "@privy-io/react-auth";
@@ -138,7 +139,7 @@ export default function NftsPage() {
       const w = walletById.get(g);
       return (
         <>
-          {w?.label ?? "Wallet"} <span className="mono muted">{short(w?.address)}</span>
+          {w?.label ?? "Wallet"} <span className="mono muted">{short(w?.address)}</span> <CopyAddress address={w?.address} />
         </>
       );
     }
@@ -601,7 +602,7 @@ export default function NftsPage() {
                       <div className="muted small">{it ? collectionOf(it) : short(i.contract)}</div>
                     </td>
                     <td>
-                      {i.label} <span className="mono muted">{short(i.address)}</span>
+                      {i.label} <span className="mono muted">{short(i.address)}</span> <CopyAddress address={i.address} />
                     </td>
                     <td>{i.chainName}</td>
                     <td className="mono">{i.standard === "erc721" ? "1" : i.quantity}</td>

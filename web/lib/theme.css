@@ -944,3 +944,103 @@ html.tg-mini-app body:has(.tabbar) .site-footer {
     font-size: 10px;
   }
 }
+
+/* ───────── Copy address ───────── */
+.copy-addr {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: 40px;
+  min-height: 40px;
+  margin: -8px 0 -8px 2px;
+  padding: 0 10px;
+  vertical-align: middle;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--cream-dim);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  -webkit-tap-highlight-color: transparent;
+}
+button.copy-addr:hover {
+  background: var(--panel-2);
+  color: var(--cream);
+  border-color: var(--line);
+  box-shadow: none;
+}
+button.copy-addr.copied,
+button.copy-addr.copied:hover {
+  color: var(--orange);
+  background: rgba(255, 107, 26, 0.12);
+  border-color: rgba(255, 107, 26, 0.35);
+}
+.copy-addr:focus-visible {
+  outline: 2px solid var(--orange-hot);
+  outline-offset: 1px;
+}
+.copy-addr-label {
+  font-family: var(--font-body);
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+.copy-toast {
+  position: fixed;
+  left: 12px;
+  right: 12px;
+  bottom: calc(var(--tabbar-h) + var(--safe-bottom) + 12px);
+  z-index: 60;
+  max-width: 520px;
+  margin: 0 auto;
+  padding: 12px 14px;
+  border: 1px solid rgba(255, 107, 26, 0.45);
+  border-radius: 14px;
+  background: var(--panel);
+  color: var(--cream);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+}
+@media (min-width: 768px) {
+  html:not(.tg-mini-app) .copy-toast {
+    bottom: 24px;
+  }
+}
+.copy-toast-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--cream-dim);
+}
+.copy-toast-close {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  margin: -8px -8px 0 0;
+  padding: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--cream-dim);
+}
+button.copy-toast-close:hover {
+  background: var(--panel-2);
+  box-shadow: none;
+}
+.copy-toast-addr {
+  margin-top: 6px;
+  font-size: 14px;
+  word-break: break-all;
+  user-select: all;
+  -webkit-user-select: all;
+  color: var(--cream);
+}

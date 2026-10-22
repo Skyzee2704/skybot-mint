@@ -1,5 +1,6 @@
 "use client";
 // SPDX-License-Identifier: AGPL-3.0-only
+import { CopyAddress } from "@/components/CopyAddress";
 import { short } from "@/lib/api";
 import { useEffect, useRef, useState } from "react";
 import { useWalletList } from "@/lib/wallets";
@@ -171,6 +172,7 @@ export default function WalletsPage() {
                 <td className="mono" title={w.address}>
                   <span className="addr-full">{w.address}</span>
                   <span className="addr-short">{short(w.address)}</span>
+                  <CopyAddress address={w.address} />
                 </td>
                 <td>{w.group ?? "—"}</td>
                 <td className="mono">
@@ -232,7 +234,9 @@ export default function WalletsPage() {
                 {removedList.map((w: any) => (
                   <tr key={w.id}>
                     <td>{w.label}</td>
-                    <td className="mono">{short(w.address)}</td>
+                    <td className="mono">
+                      {short(w.address)} <CopyAddress address={w.address} />
+                    </td>
                     <td>
                       <button
                         className="ghost"

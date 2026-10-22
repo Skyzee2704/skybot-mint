@@ -1,5 +1,6 @@
 "use client";
 // SPDX-License-Identifier: AGPL-3.0-only
+import { CopyAddress } from "@/components/CopyAddress";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { assertSignableChain, withSignTimeout } from "@/lib/signing";
@@ -203,7 +204,7 @@ export default function WithdrawPage() {
                   />
                 </td>
                 <td>
-                  {w.label} <span className="mono muted">{short(w.address)}</span>
+                  {w.label} <span className="mono muted">{short(w.address)}</span> <CopyAddress address={w.address} />
                 </td>
                 <td className="mono">
                   {balances[w.id] === undefined ? (
@@ -296,7 +297,7 @@ export default function WithdrawPage() {
                 return (
                   <tr key={i.walletId}>
                     <td>
-                      {i.label} <span className="mono muted">{short(i.address)}</span>
+                      {i.label} <span className="mono muted">{short(i.address)}</span> <CopyAddress address={i.address} />
                     </td>
                     <td className="mono">{i.tx ? `${fmtEth(i.valueWei, 8)} ${sym}` : "—"}</td>
                     <td className="mono">{i.tx ? `${fmtEth(i.feeWei, 9)} ${sym}` : "—"}</td>
