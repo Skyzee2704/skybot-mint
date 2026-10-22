@@ -167,6 +167,38 @@ async function saveVerdicts(userId: string, walletId: string, slug: string, stag
     .catch(() => {});
 }
 
+/**
+ * OpenSea stage ids come in two spellings: the drops API returns bare hex ("f7768398416f49de…") while the
+ * eligibility API returns dashed UUIDs ("f7768398-416f-49de-…"). Compare them in one canonical form.
+ */
+export const stageKey = (uuid: string | null | undefined): string | null =>
+  uuid ? uuid.toLowerCase().replace(/[^0-9a-z]/g, "") || null : null;
+export const sameStage = (a: string | null | undefined, b: string | null | undefined): boolean => {
+  const x = stageKey(a);
+  return x !== null && x === stageKey(b);
+};
+
+/** Drop stages joined with OpenSea's per-stage verdicts (matched by canonical stage id), in stage order. */
+export function mapStageVerdicts(
+  all: readonly OsStage[],
+  res: readonly { stage_uuid: string; is_eligible: boolean | null; price?: string | null; max_total_mintable_by_wallet?: string | number | null }[],
+): StageVerdict[] {
+  return sortStages(
+    all.map((s) => {
+      const v = res.find((r) => sameStage(r.stage_uuid, s.uuid));
+      return {
+        uuid: s.uuid ?? null,
+        label: s.label ?? null,
+        type: s.stage_type ?? null,
+        start: s.start_time ?? null,
+        eligible: v ? Boolean(v.is_eligible) : null,
+        maxPerWallet: v?.max_total_mintable_by_wallet ? Number(v.max_total_mintable_by_wallet) : null,
+        priceWei: v?.price ?? s.price ?? null,
+      };
+    }),
+  );
+}
+
 const isPublicStage = (s: OsStage | null | undefined) => /public/i.test(s?.stage_type ?? "");
 
 export async function checkEligibility(
@@ -345,42 +377,39 @@ export async function checkEligibility(
             await storeJwt(userId, w.address, jwt);
           }
           const cached = cachedVerdicts.get(w.id);
-          if (!jwt && !cached && opts.serverSign) jwt = await serverSignIn(userId, w);
+          // A saved verdict is only a fallback: refresh it through the server signer whenever possible.
+          if (!jwt && opts.serverSign) jwt = await serverSignIn(userId, w).catch(() => null);
           if (!jwt && !cached) needsOpenSeaLogin = true;
           else {
-            const res = jwt ? await eligibilityWithJwt(jwt, t.slug) : cached!.stages;
-            if (jwt) await saveVerdicts(userId, w.id, t.slug, res);
+            let live: CachedVerdict["stages"] | null = null;
+            if (jwt) {
+              try {
+                live = await eligibilityWithJwt(jwt, t.slug);
+              } catch (e) {
+                if (!cached) throw e; // fall back to the saved verdict when OpenSea is unavailable
+              }
+            }
+            const res = live ?? cached!.stages;
+            if (live) await saveVerdicts(userId, w.id, t.slug, live);
             const all = drop?.stages?.length
               ? drop.stages
               : [activeOs, nextOs].filter(Boolean as any as (x: OsStage | null) => x is OsStage);
-            stages = all.map((s) => {
-              const v = res.find((r) => r.stage_uuid === s.uuid);
-              return {
-                uuid: s.uuid ?? null,
-                label: s.label ?? null,
-                type: s.stage_type ?? null,
-                start: s.start_time ?? null,
-                eligible: v ? Boolean(v.is_eligible) : null,
-                maxPerWallet: v?.max_total_mintable_by_wallet ? Number(v.max_total_mintable_by_wallet) : null,
-                priceWei: v?.price ?? s.price ?? null,
-              };
-            });
-            stages = sortStages(stages);
-            const target = stages.find((s) => s.uuid === targetOs.uuid);
+            stages = mapStageVerdicts(all, res);
+            const target = stages.find((s) => sameStage(s.uuid, targetOs.uuid));
             const label = targetOs.label ?? targetOs.stage_type ?? "stage";
             if (target?.eligible === true) {
               access = {
                 status: isPublicStage(targetOs) ? "public" : "yes",
-                source: jwt ? "OpenSea eligibility API" : "OpenSea eligibility API (saved result)",
+                source: live ? "OpenSea eligibility API" : "OpenSea eligibility API (saved result)",
                 detail: `eligible for "${label}"${activeOs ? "" : " (upcoming)"}`,
               };
               legacy = "eligible";
               if (target.maxPerWallet && target.maxPerWallet > 0) d.suggestedQty = Math.min(d.suggestedQty, target.maxPerWallet);
             } else if (target?.eligible === false) {
-              const later = stages.find((s) => s.eligible && s.uuid !== targetOs.uuid);
+              const later = stages.find((s) => s.eligible && !sameStage(s.uuid, targetOs.uuid));
               access = {
                 status: "no",
-                source: jwt ? "OpenSea eligibility API" : "OpenSea eligibility API (saved result)",
+                source: live ? "OpenSea eligibility API" : "OpenSea eligibility API (saved result)",
                 detail: `not eligible for "${label}"${later ? `; eligible for "${later.label ?? later.type}"` : ""}`,
               };
               legacy = "not_eligible";
@@ -433,7 +462,7 @@ export async function checkEligibility(
       maxPerWallet,
       remainingForWallet: d.remaining,
       maxQty: walletMaxQty({
-        maxPerWallet: stages?.find((x) => x.uuid === targetOs?.uuid)?.maxPerWallet ?? maxPerWallet,
+        maxPerWallet: stages?.find((x) => sameStage(x.uuid, targetOs?.uuid))?.maxPerWallet ?? maxPerWallet,
         minted,
         supplyRemaining: supplyRemaining !== null ? Number(supplyRemaining > 100000n ? 100000n : supplyRemaining) : null,
       }),
