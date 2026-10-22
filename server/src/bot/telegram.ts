@@ -25,27 +25,53 @@ const JOB_STATUS: Record<string, string> = {
 const jobStatusLabel = (s: string) => JOB_STATUS[s] ?? s;
 import { publicHttpsReady } from "./telegramWebApp.js";
 import { log, redactString } from "../util/log.js";
-import { formatEther } from "ethers";
 
 import { esc, formatCheck, parseCheckArgs } from "./check.js";
+import { formatDropSummary, openSeaUrl } from "./format.js";
 import { formatDateTime } from "../util/time.js";
 export { esc };
 
 const tzFooter = (tz: string | null | undefined) => (tz ? "" : "\n<i>Times in UTC. Open SkyBOT once to see your own timezone.</i>");
 
+/** Back-compat alias: the compact drop summary used by /mint and plain links. */
 export function summarize(t: Awaited<ReturnType<typeof resolveTarget>>, timeZone: string | null = null): string {
-  return [
-    `<b>${esc(t.name ?? "Unknown")}</b> (${esc(t.symbol ?? "?")}) on ${esc(t.chain.name)}`,
-    `Contract: <code>${t.contract}</code>${t.slug ? ` · <a href="https://opensea.io/collection/${encodeURIComponent(t.slug)}">OpenSea</a>` : ""}`,
-    `Type: ${t.kind === "seadrop" ? "OpenSea SeaDrop" : "Generic"} · ${t.standard}`,
-    `Supply: ${t.supply.total ?? "?"}/${t.supply.max ?? "?"} (remaining ${t.supply.remaining ?? "?"})`,
-    ...t.stages.map(
-      (s) =>
-        `• ${esc(s.name)}: ${s.priceWei !== null ? (s.priceWei === "0" ? "Free" : formatEther(s.priceWei) + " " + t.chain.nativeSymbol) : "price unknown"}${s.maxPerWallet ? ` · max ${s.maxPerWallet}/wallet` : ""} · ${s.status === "upcoming" && s.start ? "starts " + formatDateTime(s.start, { timeZone }) : s.status === "active" ? "live now" : s.status}`,
-    ),
-    ...t.warnings.map((w) => `⚠️ ${esc(w)}`),
-  ].join("\n");
+  return formatDropSummary(t, timeZone);
 }
+
+/** Callback payload for "Check eligibility" (≤ 64 bytes): the OpenSea slug when it fits, else chain + contract. */
+export function checkCallbackData(t: { slug: string | null; chain: { key: string }; contract: string }): string {
+  if (t.slug && `chk:s:${t.slug}`.length <= 64) return `chk:s:${t.slug}`;
+  return `chk:a:${t.chain.key}:${t.contract}`.slice(0, 64);
+}
+export function parseCheckCallback(data: string): { input: string; chain?: string } | null {
+  const m = /^chk:s:(.+)$/.exec(data);
+  if (m) return { input: m[1]! };
+  const a = /^chk:a:([a-z0-9-]+):(0x[0-9a-fA-F]{40})$/.exec(data);
+  return a ? { input: a[2]!, chain: a[1]! } : null;
+}
+
+/** web_app buttons only work in private chats; groups get a plain URL button. */
+function addOpenButton(kb: InlineKeyboard, chatType: string | undefined, label: string, url: string) {
+  if (publicHttpsReady() && chatType === "private") kb.webApp(label, url);
+  else kb.url(label, url);
+  return kb;
+}
+
+/** Keyboard under a drop summary: [Open in SkyBOT] [Check eligibility] / [OpenSea]. */
+export function dropKeyboard(
+  t: Awaited<ReturnType<typeof resolveTarget>>,
+  input: string,
+  chatType: string | undefined,
+  opts: { check?: boolean } = {},
+) {
+  const kb = new InlineKeyboard();
+  addOpenButton(kb, chatType, "Open in SkyBOT", dashUrl(mintPath(input, t.chain.key)));
+  if (opts.check !== false) kb.text("Check eligibility", checkCallbackData(t));
+  const os = openSeaUrl(t);
+  if (os) kb.row().url("OpenSea", os);
+  return kb;
+}
+const mintPath = (input: string, chain: string) => `/app/mint?input=${encodeURIComponent(input)}&chain=${encodeURIComponent(chain)}`;
 
 async function linkedUser(ctx: { from?: { id: number } | undefined }): Promise<AppUser | null> {
   if (!ctx.from) return null;
@@ -283,18 +309,7 @@ export function createBot(token: string, opts: ConstructorParameters<typeof Bot>
     );
   });
 
-  bot.command("check", async (ctx) => {
-    const u = await linkedUser(ctx);
-    if (!u)
-      return ctx.reply("Open SkyBOT first: tap Open Dashboard or the menu button to sign in with Telegram.", {
-        reply_markup: openDashboardKeyboard(),
-      });
-    const args = parseCheckArgs(ctx.message?.text ?? "");
-    if (!args)
-      return ctx.reply(
-        "Send an OpenSea link or a contract address, for example:\n<code>/check https://opensea.io/collection/name</code>\n<code>/check base:0x1234…abcd</code>",
-        { parse_mode: "HTML" },
-      );
+  async function runCheck(ctx: any, u: AppUser, args: { input: string; chain?: string }) {
     try {
       await checkRateLimit(u.id, "tg:check", 6);
     } catch {
@@ -303,10 +318,7 @@ export function createBot(token: string, opts: ConstructorParameters<typeof Bot>
     await ctx.replyWithChatAction("typing").catch(() => {});
     try {
       const t = await resolveCached(args.input, args.chain);
-      const path = `/app/mint?input=${encodeURIComponent(args.input)}&chain=${t.chain.key}`;
-      const kb = new InlineKeyboard();
-      if (mini) kb.webApp("Open in SkyBOT", dashUrl(path));
-      else kb.url("Open in SkyBOT", dashUrl(path));
+      const kb = dropKeyboard(t, args.input, ctx.chat?.type, { check: false });
       let rows: any[] = [];
       let targetStage: any = null;
       if (t.recommendedStrategy !== "none") {
@@ -327,6 +339,21 @@ export function createBot(token: string, opts: ConstructorParameters<typeof Bot>
     } catch (e: any) {
       await ctx.reply(`Couldn't check that: ${esc(redactString(String(e?.message ?? e)).slice(0, 200))}`, { parse_mode: "HTML" });
     }
+  }
+
+  bot.command("check", async (ctx) => {
+    const u = await linkedUser(ctx);
+    if (!u)
+      return ctx.reply("Open SkyBOT first: tap Open Dashboard or the menu button to sign in with Telegram.", {
+        reply_markup: openDashboardKeyboard(),
+      });
+    const args = parseCheckArgs(ctx.message?.text ?? "");
+    if (!args)
+      return ctx.reply(
+        "Send an OpenSea link or a contract address, for example:\n<code>/check https://opensea.io/collection/name</code>\n<code>/check base:0x1234…abcd</code>",
+        { parse_mode: "HTML" },
+      );
+    await runCheck(ctx, u, args);
   });
 
   bot.command("withdraw", async (ctx) => {
@@ -349,21 +376,30 @@ export function createBot(token: string, opts: ConstructorParameters<typeof Bot>
     const [input, chain] = arg.split(/\s+/);
     try {
       const t = await resolveCached(input, chain);
-      const path = `/app/mint?input=${encodeURIComponent(input)}&chain=${t.chain.key}`;
-      const kb = new InlineKeyboard();
-      if (mini) kb.webApp("Open Dashboard", dashUrl(path));
-      else kb.url("Check eligibility & mint", dashUrl(path));
-      await ctx.reply(
-        `${summarize(t, u.timezone ?? null)}\n\nOpen the dashboard to pick wallets, simulate, and confirm.${tzFooter(u.timezone)}`,
-        {
-          parse_mode: "HTML",
-          reply_markup: kb,
-          link_preview_options: { is_disabled: true },
-        },
-      );
+      await ctx.reply(formatDropSummary(t, u.timezone ?? null), {
+        parse_mode: "HTML",
+        reply_markup: dropKeyboard(t, input, ctx.chat?.type),
+        link_preview_options: { is_disabled: true },
+      });
     } catch (e: any) {
       await ctx.reply(`Could not resolve: ${esc(redactString(e.message))}`, { parse_mode: "HTML" });
     }
+  });
+
+  // [Check eligibility] under a drop summary: same as /check for that collection.
+  bot.callbackQuery(/^chk:/, async (ctx) => {
+    const args = parseCheckCallback(ctx.callbackQuery.data);
+    const u = await linkedUser(ctx);
+    if (!u) {
+      await ctx.answerCallbackQuery({ text: "Open SkyBOT first to sign in with Telegram.", show_alert: true }).catch(() => {});
+      return;
+    }
+    if (!args) {
+      await ctx.answerCallbackQuery({ text: "This button has expired. Send the link again." }).catch(() => {});
+      return;
+    }
+    await ctx.answerCallbackQuery({ text: "Checking your wallets…" }).catch(() => {});
+    await runCheck(ctx, u, args);
   });
 
   bot.on("message:text", async (ctx) => {
@@ -376,18 +412,11 @@ export function createBot(token: string, opts: ConstructorParameters<typeof Bot>
     const [input, chain] = ctx.message.text.trim().split(/\s+/);
     try {
       const t = await resolveCached(input, chain);
-      const path = `/app/mint?input=${encodeURIComponent(input)}&chain=${t.chain.key}`;
-      const kb = new InlineKeyboard();
-      if (mini) kb.webApp("Open Dashboard", dashUrl(path));
-      else kb.url("Open in SkyBOT", dashUrl(path));
-      await ctx.reply(
-        `${summarize(t, u.timezone ?? null)}${tzFooter(u.timezone)}\n\nTip: /check ${esc(input)} shows eligibility for all your wallets.`,
-        {
-          parse_mode: "HTML",
-          reply_markup: kb,
-          link_preview_options: { is_disabled: true },
-        },
-      );
+      await ctx.reply(formatDropSummary(t, u.timezone ?? null), {
+        parse_mode: "HTML",
+        reply_markup: dropKeyboard(t, input, ctx.chat?.type),
+        link_preview_options: { is_disabled: true },
+      });
     } catch (e: any) {
       await ctx.reply(`Could not resolve: ${esc(redactString(e.message))}`, { parse_mode: "HTML" });
     }

@@ -3,18 +3,13 @@
  * Read-only `/check <OpenSea link | contract address>`: drop summary + per-wallet eligibility in chat.
  * Uses the dashboard's eligibility engine. Never mints or sends anything (at most an off-chain OpenSea sign-in).
  */
-import { formatEther } from "ethers";
-import { formatDateTime, isValidTimeZone } from "../util/time.js";
+import { isValidTimeZone } from "../util/time.js";
 import type { ResolvedTarget } from "../core/resolver/resolver.js";
 import type { EligibilityRow } from "../core/mint/eligibility.js";
-import { sortStages } from "../core/resolver/stageOrder.js";
 import { groupByStage, nameList, summarizeGroup } from "../core/mint/stageEligibility.js";
 
-export const esc = (s: unknown) =>
-  String(s ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+import { displayStages, dropHeader, esc, fmtInt, shortAddr, stageHeadLine, stageTimeLine } from "./format.js";
+export { esc };
 
 const CHAIN_WORD = /^[a-z][a-z0-9-]{1,20}$/i;
 
@@ -43,7 +38,6 @@ export function parseCheckArgs(text: string): { input: string; chain?: string } 
   return null;
 }
 
-const shortAddr = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 
 function verdict(r: EligibilityRow): { label: "Eligible" | "Not eligible" | "Unknown"; why: string } {
   if (r.needsOpenSeaLogin) return { label: "Unknown", why: "not verified yet" };
@@ -66,18 +60,7 @@ export interface CheckView {
   now?: number;
 }
 
-function stageWhen(s: ResolvedTarget["stages"][number], tz: string | null, now: number) {
-  if (s.status === "upcoming" && s.start) return `starts ${formatDateTime(s.start, { timeZone: tz, now })}`;
-  if (s.status === "active") return s.end ? `live · ends ${formatDateTime(s.end, { timeZone: tz, now })}` : "live now";
-  if (s.status === "ended") return s.end ? `ended ${formatDateTime(s.end, { timeZone: tz, now })}` : "ended";
-  return s.start ? formatDateTime(s.start, { timeZone: tz, now }) : "";
-}
-
 const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
-
-function priceText(s: ResolvedTarget["stages"][number], sym: string) {
-  return s.priceWei !== null ? (s.priceWei === "0" ? "Free" : `${formatEther(s.priceWei)} ${sym}`) : "price unknown";
-}
 
 /**
  * Telegram HTML message(s), each ≤ 3900 chars. One section per allowlist phase (soonest first) with its own price,
@@ -100,22 +83,16 @@ export function formatCheck(v: CheckView): string[] {
     const ok = v.rows.filter((r) => verdict(r).label === "Eligible").length;
     head.push(`<b>${ok} of ${plural(v.rows.length, "wallet")} eligible</b>`);
   }
-  head.push("", `<b>${esc(t.name ?? "Unknown collection")}</b> on ${esc(t.chain.name)}`, `<code>${t.contract}</code>`);
-  if (t.supply.max || t.supply.total) head.push(`Supply: ${t.supply.total ?? "?"} / ${t.supply.max ?? "?"}`);
+  head.push("", ...dropHeader(t));
   blocks.push(head);
 
   for (const g of groups) {
     const s = g.stage;
-    const when = stageWhen(s, tz, now);
     const sum = summarizeGroup(g);
-    const b = [
-      "",
-      `<b>${esc(s.name)}</b> · ${g.eligible}/${g.total} eligible`,
-      `${priceText(s, sym)}${s.maxPerWallet ? ` · max ${s.maxPerWallet}/wallet` : ""}${when ? ` · ${when}` : ""}`,
-    ];
+    const b = ["", stageHeadLine(s, sym), stageTimeLine(s, tz, now)];
     for (const w of sum.eligible)
       b.push(
-        `✅ ${esc(w.label)} <code>${shortAddr(w.address)}</code>${w.max ? ` (max ${w.max})` : ""}${w.note ? ` · ${esc(w.note)}` : ""}`,
+        `✅ ${esc(w.label)} <code>${shortAddr(w.address)}</code>${w.max ? ` (max ${fmtInt(w.max)})` : ""}${w.note ? ` · ${esc(w.note)}` : ""}`,
       );
     if (sum.notEligible.length) {
       if (!sum.eligible.length && !sum.unknown.length)
@@ -129,19 +106,10 @@ export function formatCheck(v: CheckView): string[] {
     blocks.push(b);
   }
 
-  // Everything that isn't a phase section: public / ended / no-wallet stage list, one line each.
-  const rest = sortStages(t.stages).filter((s) => !grouped.has(s));
-  if (rest.length) {
-    const b = ["", groups.length ? "<b>Other stages</b>" : "<b>Stages</b>"];
-    for (const s of rest) {
-      const when = stageWhen(s, tz, now);
-      const open = /public/i.test(s.name) || s.type === "public" ? " · open to all" : "";
-      b.push(
-        `• <b>${esc(s.name)}</b> · ${priceText(s, sym)}${s.maxPerWallet ? ` · max ${s.maxPerWallet}/wallet` : ""}${when ? ` · ${when}` : ""}${open}`,
-      );
-    }
-    blocks.push(b);
-  }
+  // Everything that isn't a phase section (Public, ended, or no wallets yet): same two-line block per stage.
+  const rest = displayStages(t.stages).filter((s) => !grouped.has(s));
+  if (rest.length && groups.length) blocks.push(["", "<b>Other stages</b>"]);
+  for (const s of rest) blocks.push(["", stageHeadLine(s, sym), stageTimeLine(s, tz, now)]);
 
   if (!groups.length && v.rows.length) {
     const b = ["", "<b>Wallets</b>"];
@@ -159,8 +127,7 @@ export function formatCheck(v: CheckView): string[] {
   for (const r of v.rows) if (r.needsOpenSeaLogin) unverified.add(r.walletId);
   if (unverified.size)
     foot.push("", `❔ ${plural(unverified.size, "wallet")} not verified yet. Open SkyBOT once and future checks run automatically.`);
-  foot.push("", tz ? `Times shown in ${esc(tz.replace(/_/g, " "))}.` : "Times shown in UTC. Open SkyBOT once to use your own time zone.");
-  foot.push("<i>Read-only check. No transactions were sent.</i>");
+  foot.push("", tz ? `<i>Times in ${esc(tz)}. Read-only check, nothing was sent.</i>` : "<i>Times in UTC. Open SkyBOT once to use your own time zone. Read-only check, nothing was sent.</i>");
   blocks.push(foot);
   return splitBlocks(blocks);
 }

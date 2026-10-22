@@ -69,19 +69,17 @@ describe("/check formatting", () => {
     });
     expect(msg.split("\n")[0]).toBe("<b>GTD: 1/3</b> eligible");
     expect(msg).toContain("Kabuki &lt;Killers&gt;");
-    expect(msg).toContain(
-      "<b>GTD</b> · 1/3 eligible\n0.00075 ETH · max 2/wallet · starts Thu, 22 Oct 2026 · 19:30 (UTC+5:30) · in 23h 20m",
-    );
+    expect(msg).toContain("<b>GTD</b> · 0.00075 ETH · max 2\n🕒 Thu, 22 Oct · 19:30 (UTC+5:30) · in 23h 20m\n✅ Main");
+    expect(msg).toContain("<b>Kabuki &lt;Killers&gt;</b> · Ethereum\n<code>0x0399…bF97</code>");
     expect(msg).toContain("✅ Main <code>0x668B…27A0</code> (max 2)");
     expect(msg).toContain("❌ 1 not eligible: Alt");
     expect(msg).toContain("❔ 1 not verified yet: New");
     expect(msg).toContain("1 wallet not verified yet. Open SkyBOT once");
     // Public: one summary line only, no wallet section; stage details never repeated.
-    expect(msg).toMatch(/• <b>Public<\/b> · Free · starts .* · open to all/);
-    expect(msg.match(/Thu, 22 Oct 2026 · 19:30/g)?.length).toBe(1);
+    expect(msg).toContain("<b>Other stages</b>\n\n<b>Public</b> · Free\n🕒 Fri, 23 Oct · 19:30 (UTC+5:30) · in 1d 23h");
+    expect(msg.match(/Thu, 22 Oct · 19:30/g)?.length).toBe(1);
     expect(msg).not.toMatch(/GTD: (yes|no)|Public stage: \?|not eligible for|Wallets \(/);
-    expect(msg).toContain("Times shown in Asia/Kolkata.");
-    expect(msg).toContain("Read-only check. No transactions were sent.");
+    expect(msg).toContain("<i>Times in Asia/Kolkata. Read-only check, nothing was sent.</i>");
     expect(msg).not.toMatch(/\d{4}-\d{2}-\d{2}T/);
   });
   it("many phases × many wallets: every allowlist phase gets a compact section, soonest first", () => {
@@ -148,7 +146,7 @@ describe("/check formatting", () => {
     expect(gtd).toContain("❔ 1 not verified yet: wallet-25");
     expect(msg.slice(pos[0], pos[1])).toContain("❌ 24 not eligible");
     expect(msg).not.toMatch(/<b>Public Mint<\/b> · \d+\/25/);
-    expect(msg).toContain("• <b>Public Mint</b> · ");
+    expect(msg).toContain("\n<b>Public</b> · 0.000000000000000001 ETH · max 5\n🕒 ");
     // Compact: 25 wallets × 4 phases still fits well inside one Telegram message.
     expect(parts.length).toBe(1);
     expect(msg.length).toBeLessThan(2500);
@@ -180,7 +178,7 @@ describe("/check formatting", () => {
   it("labels UTC when the user's timezone is unknown", () => {
     const [msg] = formatCheck({ target, rows: [], targetStage: null, timeZone: null, now });
     expect(msg).toContain("(UTC)");
-    expect(msg).toContain("Times shown in UTC. Open SkyBOT once to use your own time zone.");
+    expect(msg).toContain("Times in UTC. Open SkyBOT once to use your own time zone.");
   });
   it("splits long messages on line boundaries under Telegram's limit", () => {
     const parts = splitMessage(Array.from({ length: 400 }, (_, i) => `<b>line ${i}</b> ${"x".repeat(40)}`));
@@ -205,10 +203,13 @@ describe("stage order", () => {
     expect(sortStages(st).map((s) => s.name)).toEqual(["Live", "GTD", "FCFS", "Public (on-chain)", "Old"]);
     const t2 = {
       ...target,
-      stages: st.map((s) => ({ ...s, type: "public", priceWei: "0", end: null, maxPerWallet: null })),
+      stages: st.map((s) => ({ ...s, type: /public/i.test(s.name) ? "public" : "signed", priceWei: "0", end: null, maxPerWallet: null })),
     };
     const [msg] = formatCheck({ target: t2, rows: [], targetStage: null, timeZone: "UTC", now: Date.parse("2026-10-21T14:40:00Z") });
-    const pos = ["<b>Live</b>", "<b>GTD</b>", "<b>FCFS</b>", "<b>Public (on-chain)</b>", "<b>Old</b>"].map((x) => msg.indexOf(x));
+    // Display order: live, allowlist phases soonest first, Public after them, ended last.
+    const pos = ["<b>Live</b>", "<b>GTD</b>", "<b>FCFS</b>", "<b>Public</b>", "<b>Old</b>"].map((x) => msg.indexOf(x));
+    expect(msg).toContain("<b>Live</b> · Free\n🟢 Live now");
+    expect(msg).toContain("<b>Old</b> · Free\nEnded");
     expect(pos.every((p, i) => p > 0 && (i === 0 || p > pos[i - 1]!))).toBe(true);
   });
 });

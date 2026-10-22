@@ -80,7 +80,7 @@ export default function MintPage() {
   };
   useEffect(() => {
     const q = new URLSearchParams(window.location.search);
-    const i = q.get("input");
+    const i = q.get("input") ?? q.get("link");
     const c = q.get("chain") ?? "";
     if (i) {
       setInput(i);
