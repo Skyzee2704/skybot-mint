@@ -583,6 +583,72 @@ html.tg-mini-app body {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* NFT layouts: list (one per row) and dense grids (4 / 5 per row) */
+.layout-picker button {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 5px 9px;
+  font-size: 12px;
+  line-height: 1;
+}
+.layout-picker .layout-n {
+  font-variant-numeric: tabular-nums;
+}
+.nft-list .nft-card {
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+}
+.nft-list .nft-img {
+  width: 72px;
+  min-width: 72px;
+  height: 72px;
+}
+.nft-list .nft-img input {
+  top: 4px;
+  left: 4px;
+  width: 16px;
+  height: 16px;
+}
+.nft-list .nft-meta {
+  flex: 1;
+}
+.nft-grid.dense {
+  gap: 6px;
+}
+.nft-grid.dense .nft-card {
+  padding: 5px;
+  gap: 5px;
+  border-radius: 10px;
+}
+.nft-grid.dense .nft-meta {
+  font-size: 12px;
+  gap: 2px;
+}
+.nft-grid.dense .nft-meta .small,
+.nft-grid.dense .pill,
+.nft-grid.dense .tag {
+  font-size: 10px;
+}
+.nft-grid.dense .nft-img input {
+  top: 4px;
+  left: 4px;
+  width: 15px;
+  height: 15px;
+}
+@media (max-width: 640px) {
+  .nft-grid.dense .nft-meta > .nft-tags,
+  .nft-grid.cols-5 .nft-meta > span.mono {
+    display: none;
+  }
+  .nft-grid.cols-5 .nft-meta {
+    font-size: 11px;
+  }
+  .layout-picker button {
+    padding: 5px 7px;
+  }
+}
 .tag.warn {
   color: var(--warn);
   border-color: var(--warn);

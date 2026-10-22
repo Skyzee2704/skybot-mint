@@ -10,7 +10,7 @@ import { formatDateTime, localTimeZone } from "@/lib/time";
 import { useNow } from "@/lib/useNow";
 import { assertSignableChain, withSignTimeout } from "@/lib/signing";
 import { NFTS_KEY, ago, mutate as mutateCache, nftsFetcher, useSWR } from "@/lib/swr";
-import { LazyImg, NftGrid, thumb } from "@/components/NftGrid";
+import { LayoutPicker, LazyImg, NftGrid, thumb, useNftLayout } from "@/components/NftGrid";
 
 type Item = {
   key: string;
@@ -60,6 +60,7 @@ export default function NftsPage() {
   const [chain, setChain] = useState("");
   const [collection, setCollection] = useState("");
   const [group, setGroup] = useState<"wallet" | "collection">("wallet");
+  const [layout, setLayout] = useNftLayout();
   const [showSpam, setShowSpam] = useState(false);
   const [q, setQ] = useState("");
   const [picked, setPicked] = useState<Record<string, boolean>>({});
@@ -354,8 +355,9 @@ export default function NftsPage() {
         </div>
         <p className="muted">
           NFTs held by your wallets on every supported chain. Holdings are scanned once and saved, so opening this page doesn&apos;t use RPC
-          calls. Use Refresh after receiving NFTs elsewhere. Each transfer is signed by your Privy wallet in this browser, and SkyBOT checks
-          it matches what you reviewed before broadcasting.
+          calls. Names and images are checked against each token&apos;s on-chain metadata, so revealed collections update automatically. Use
+          Refresh after receiving NFTs elsewhere. Each transfer is signed by your Privy wallet in this browser, and SkyBOT checks it matches
+          what you reviewed before broadcasting.
         </p>
         {!authenticated && tgOnly && (
           <div className="notice row" style={{ justifyContent: "space-between" }}>
@@ -437,6 +439,7 @@ export default function NftsPage() {
             </label>
           )}
           <span className="spacer" />
+          <LayoutPicker value={layout} onChange={setLayout} />
           <span className="muted">
             {selected.length} selected · {visible.length} shown
           </span>
@@ -462,6 +465,7 @@ export default function NftsPage() {
         )}
 
         <NftGrid
+          layout={layout}
           groups={groups}
           header={(g, items) => {
             const all = items.every((i) => picked[i.key]);
@@ -482,7 +486,11 @@ export default function NftsPage() {
             return (
               <label key={i.key} className={`nft-card${on ? " on" : ""}`}>
                 <div className="nft-img">
-                  {i.image ? <LazyImg src={thumb(i.image) ?? i.image} /> : <span className="muted small">No image</span>}
+                  {i.image ? (
+                    <LazyImg src={thumb(i.image, layout === "list" || layout >= 4 ? 160 : 256) ?? i.image} />
+                  ) : (
+                    <span className="muted small">No image</span>
+                  )}
                   <input
                     type="checkbox"
                     checked={on}
@@ -498,7 +506,7 @@ export default function NftsPage() {
                   <span className="small mono" title={i.tokenId}>
                     ID {shortId(i.tokenId)}
                   </span>
-                  <span className="row small" style={{ gap: 4 }}>
+                  <span className="row small nft-tags" style={{ gap: 4 }}>
                     <span className="pill">{chainByKey.get(i.chain)?.name ?? i.chain}</span>
                     <span className="tag">{i.standard === "erc721" ? "ERC-721" : `ERC-1155 × ${i.quantity ?? "?"}`}</span>
                     {i.spam && <span className="tag warn">Spam?</span>}

@@ -43,6 +43,26 @@ export function authContext() {
   return { authorization_private_keys: [env.privyAuthPrivateKey!] };
 }
 
+/**
+ * How a wallet entered Privy, from Privy's own record: `imported_at` is set only for private-key imports.
+ * Returns null when Privy isn't configured, the id isn't a Privy wallet id, or the lookup fails (caller keeps its value).
+ */
+export async function privyWalletOrigin(
+  privyWalletId: string | null | undefined,
+): Promise<{ source: "imported" | "created"; createdAt: string | null } | null> {
+  if (!privyWalletId || /^0x/i.test(privyWalletId) || !privyConfigured()) return null;
+  try {
+    const w: any = await getPrivy().wallets().get(privyWalletId);
+    const ts = (v: unknown) => {
+      const n = typeof v === "number" ? v : typeof v === "string" ? Date.parse(v) : NaN;
+      return Number.isFinite(n) ? new Date(n < 1e12 ? n * 1000 : n).toISOString() : null;
+    };
+    return { source: w?.imported_at ? "imported" : "created", createdAt: ts(w?.created_at) };
+  } catch {
+    return null;
+  }
+}
+
 /** Create N ethereum wallets owned by a Privy user (server wallets API — keys stay in Privy). */
 export async function createPrivyWallets(privyUserId: string, count: number) {
   const privy = getPrivy();

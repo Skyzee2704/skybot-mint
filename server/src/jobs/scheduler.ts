@@ -198,12 +198,26 @@ export async function housekeeping() {
   } catch (e: any) {
     log.warn("siwe signer backfill", String(e?.message ?? e).slice(0, 160));
   }
+  // Wallet origin (imported vs created) from Privy's record for rows not verified yet.
+  try {
+    const { reconcileWalletSources } = await import("../users/service.js");
+    (out as any).walletSources = await reconcileWalletSources({ limit: 10 });
+  } catch (e: any) {
+    log.warn("wallet sources", String(e?.message ?? e).slice(0, 160));
+  }
   // Webhook-driven NFT re-scans still due (backstop + second pass), then keep Alchemy webhooks in sync.
   try {
     const { processRescanQueue } = await import("../core/nft/rescan.js");
     (out as any).nftRescans = await processRescanQueue({ limit: 20 });
   } catch (e: any) {
     log.warn("nft rescan queue", String(e?.message ?? e).slice(0, 160));
+  }
+  // Tokens that still look unrevealed: cheap on-chain tokenURI re-check (reveals don't trigger transfer webhooks).
+  try {
+    const { recheckDueMetadata } = await import("../core/nft/holdings.js");
+    (out as any).nftMetadata = await recheckDueMetadata({ limit: 3 });
+  } catch (e: any) {
+    log.warn("nft metadata recheck", String(e?.message ?? e).slice(0, 160));
   }
   try {
     const { syncAlchemyWebhooks } = await import("../core/alchemy/sync.js");

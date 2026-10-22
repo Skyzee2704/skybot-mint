@@ -186,7 +186,12 @@ export default function WalletsPage() {
               <tr key={w.id}>
                 <td>
                   {w.label} {w.isMain && <span className="pill accent">Main</span>}{" "}
-                  <span className="tag">{w.source === "privy" ? "Privy" : w.source}</span>
+                  <span
+                    className="tag"
+                    title={w.source === "imported" ? "Imported with a private key (held by Privy)" : "Created by Privy"}
+                  >
+                    {w.source === "imported" ? "Imported" : "Created"}
+                  </span>
                 </td>
                 <td className="mono" title={w.address}>
                   <span className="addr-full">{w.address}</span>

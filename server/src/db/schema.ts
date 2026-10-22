@@ -205,6 +205,15 @@ export const nftHoldings = sqliteTable(
   (t) => [index("nft_holdings_user").on(t.userId)],
 );
 
+/** Wallet × chain pairs holding tokens that still look unrevealed: housekeeping re-checks their token URIs at dueAt. */
+export const nftMetaDue = sqliteTable("nft_meta_due", {
+  id: text("id").primaryKey(), // `${walletId}:${chain}`
+  userId: text("user_id").notNull(),
+  walletId: text("wallet_id").notNull(),
+  chain: text("chain").notNull(),
+  dueAt: integer("due_at").notNull(),
+});
+
 /** Last full manual holdings refresh per user (cooldown shared by every serverless instance). */
 export const nftScanState = sqliteTable("nft_scan_state", {
   userId: text("user_id").primaryKey(),

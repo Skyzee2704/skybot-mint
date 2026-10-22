@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { eq, and, sql, desc, isNull, isNotNull } from "drizzle-orm";
+import { eq, and, sql, asc, desc, isNull, isNotNull } from "drizzle-orm";
 import { randomBytes, randomUUID } from "node:crypto";
 import { getAddress } from "ethers";
 import { getDb } from "../db/client.js";
 import { users, wallets, groups, settings, telegramLinks, jobs, walletTombstones } from "../db/schema.js";
 import { env } from "../config/env.js";
-import { createPrivyWallets, getPrivy } from "../auth/privy.js";
+import { createPrivyWallets, getPrivy, privyWalletOrigin } from "../auth/privy.js";
 import { privyConfigured } from "../config/env.js";
 import { log } from "../util/log.js";
 
@@ -238,11 +238,15 @@ export function walletView(w: WalletRow) {
 /** Active (not removed) wallets. Every feature — eligibility, /check, mint, withdraw, jobs — goes through this. */
 export async function listWallets(userId: string) {
   return (
-    await getDb()
-      .select()
-      .from(wallets)
-      .where(and(eq(wallets.userId, userId), isNull(wallets.removedAt)))
-  ).map(walletView);
+    (
+      await getDb()
+        .select()
+        .from(wallets)
+        .where(and(eq(wallets.userId, userId), isNull(wallets.removedAt)))
+        // Chronological (first added at the top) everywhere: Wallets, Withdraw, NFTs, /check, mint.
+        .orderBy(asc(wallets.createdAt), asc(wallets.id))
+    ).map(walletView)
+  );
 }
 
 /** Wallets the user hid from SkyBOT (still in Privy custody); restorable. */
@@ -252,6 +256,7 @@ export async function listRemovedWallets(userId: string) {
       .select()
       .from(wallets)
       .where(and(eq(wallets.userId, userId), isNotNull(wallets.removedAt)))
+      .orderBy(asc(wallets.createdAt), asc(wallets.id))
   ).map(walletView);
 }
 
@@ -332,9 +337,13 @@ export async function syncPrivyWallet(
     if (tomb) await db.delete(walletTombstones).where(eq(walletTombstones.id, tomb.id));
   }
   if (existing) {
+    // Source from Privy's record when ours is still unverified ("privy"), else an explicit client import wins.
+    const origin = existing.source === "privy" ? await privyWalletOrigin(input.privyWalletId || existing.privyWalletId) : null;
+    const source = origin?.source ?? (input.source === "imported" ? "imported" : existing.source);
     await db
       .update(wallets)
       .set({
+        source,
         // Clients without the Privy wallet id send the address: never overwrite a real id with it.
         privyWalletId: /^0x/i.test(input.privyWalletId) && existing.privyWalletId ? existing.privyWalletId : input.privyWalletId,
         label: input.label ?? existing.label,
@@ -346,27 +355,35 @@ export async function syncPrivyWallet(
   }
   const id = randomUUID();
   const count = (await listWallets(userId)).length;
-  await db.insert(wallets).values({
-    id,
-    userId,
-    privyWalletId: input.privyWalletId,
-    address,
-    label: input.label ?? `wallet-${count + 1}`,
-    groupName: input.group ?? null,
-    source: input.source ?? "privy",
-    hdIndex: input.hdIndex ?? null,
-    isMain: count === 0,
-    createdAt: now(),
-  })
+  // The client's background sync and the import form can race; Privy's record decides imported vs created.
+  const origin = await privyWalletOrigin(input.privyWalletId);
+  const t = now();
+  await db
+    .insert(wallets)
+    .values({
+      id,
+      userId,
+      privyWalletId: input.privyWalletId,
+      address,
+      label: input.label ?? `wallet-${count + 1}`,
+      groupName: input.group ?? null,
+      source: origin?.source ?? input.source ?? "privy",
+      hdIndex: input.hdIndex ?? null,
+      isMain: count === 0,
+      // When the wallet was added to Privy (an import done elsewhere may sync later); never in the future.
+      createdAt: origin?.createdAt && origin.createdAt < t ? origin.createdAt : t,
+    })
     // Two tabs / effects can sync the same new wallet at once: the loser of the race just reads the winner's row.
     .onConflictDoNothing();
   const row =
     (await db.select().from(wallets).where(eq(wallets.id, id)))[0] ??
-    (await db
-      .select()
-      .from(wallets)
-      .where(and(eq(wallets.userId, userId), eq(wallets.address, address)))
-      .limit(1))[0];
+    (
+      await db
+        .select()
+        .from(wallets)
+        .where(and(eq(wallets.userId, userId), eq(wallets.address, address)))
+        .limit(1)
+    )[0];
   if (row && row.id !== id && looksLikeRealPrivyId(input.privyWalletId) && !looksLikeRealPrivyId(row.privyWalletId)) {
     await db.update(wallets).set({ privyWalletId: input.privyWalletId }).where(eq(wallets.id, row.id));
     row.privyWalletId = input.privyWalletId;
@@ -795,4 +812,29 @@ export async function attachPrivyToUser(userId: string, privyUserId: string, pro
     .set({ privyUserId, email: profile.email?.toLowerCase() ?? me.email, name: me.name ?? profile.name ?? null })
     .where(eq(users.id, userId));
   return touchPrivyUser(await requireUser(userId), profile);
+}
+
+/**
+ * Data fix / backstop (housekeeping): wallets whose source is still the unverified "privy" get "imported" or
+ * "created" from Privy's record. Bounded per run; rows Privy can't answer for stay "privy" and are retried.
+ */
+export async function reconcileWalletSources(opts: { limit?: number; origin?: typeof privyWalletOrigin } = {}) {
+  const rows = await getDb()
+    .select({ id: wallets.id, privyWalletId: wallets.privyWalletId })
+    .from(wallets)
+    // Address-only ids can't be looked up; random order so a row Privy can't answer never starves the rest.
+    .where(and(eq(wallets.source, "privy"), sql`${wallets.privyWalletId} NOT LIKE '0x%'`))
+    .orderBy(sql`random()`)
+    .limit(opts.limit ?? 10);
+  let fixed = 0;
+  for (const r of rows) {
+    const o = await (opts.origin ?? privyWalletOrigin)(r.privyWalletId);
+    if (!o) continue;
+    await getDb()
+      .update(wallets)
+      .set({ source: o.source })
+      .where(and(eq(wallets.id, r.id), eq(wallets.source, "privy")));
+    fixed++;
+  }
+  return { checked: rows.length, fixed };
 }

@@ -170,6 +170,8 @@ const DDL = [
     at BIGINT NOT NULL, kinds TEXT NOT NULL DEFAULT '')`,
   `CREATE TABLE IF NOT EXISTS nft_rescan_queue (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, wallet_id TEXT NOT NULL,
     chain TEXT NOT NULL, address TEXT NOT NULL, due_at BIGINT NOT NULL, pass INTEGER NOT NULL DEFAULT 1)`,
+  `CREATE TABLE IF NOT EXISTS nft_meta_due (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, wallet_id TEXT NOT NULL,
+    chain TEXT NOT NULL, due_at BIGINT NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS siwe_signers (wallet_id TEXT PRIMARY KEY, attached_at TEXT, checked_at TEXT NOT NULL, note TEXT)`,
 ];
 

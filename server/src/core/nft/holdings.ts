@@ -5,13 +5,48 @@
  * 60 s cooldown per user, shared across instances via nft_scan_state) and "continue" (finish a large refresh that
  * ran out of time budget, no extra cooldown). Sends update the cache optimistically (no re-scan).
  */
-import { and, eq } from "drizzle-orm";
+import { and, eq, lte } from "drizzle-orm";
 import { CHAINS, getChain } from "../../config/chains.js";
 import { getDb } from "../../db/client.js";
-import { nftHoldings, nftScanState } from "../../db/schema.js";
+import { nftHoldings, nftMetaDue, nftScanState } from "../../db/schema.js";
 import { listWallets } from "../../users/service.js";
 import { redactString } from "../../util/log.js";
 import { scanHoldings, type Fetch, type NftItem } from "./indexer.js";
+import { META_RECHECK_MS, isPendingReveal, verifyMetadata, type VerifyOptions } from "./metadata.js";
+import type { ChainConfig } from "../../config/chains.js";
+
+export type Verify = typeof verifyMetadata;
+
+/**
+ * Indexer scan + on-chain metadata freshness check (see metadata.ts). The check never throws; when it can't run
+ * the indexer's items are kept. Tests that inject `scan` get no live check unless they also inject `verify`.
+ */
+async function scanAndVerify(
+  c: ChainConfig,
+  address: string,
+  prev: NftItem[],
+  opts: { fetchImpl?: Fetch; scan?: typeof scanHoldings; verify?: Verify | null; recheckPlaceholders?: boolean },
+) {
+  const r = await (opts.scan ?? scanHoldings)(c, address, opts.fetchImpl ?? (globalThis.fetch as any));
+  const verify = opts.verify === undefined ? (opts.scan ? null : verifyMetadata) : opts.verify;
+  if (!verify) return { ...r, placeholders: 0 };
+  const v = await verify(c, r.items, prev, {
+    fetchImpl: opts.fetchImpl,
+    recheckPlaceholders: opts.recheckPlaceholders,
+  } as VerifyOptions).catch(() => null);
+  return v ? { ...r, items: v.items, placeholders: v.placeholders } : { ...r, placeholders: 0 };
+}
+
+/** Schedule (or clear) the background re-check for tokens that still look unrevealed. */
+async function scheduleMetaRecheck(userId: string, walletId: string, chain: string, placeholders: number, now = Date.now()) {
+  const id = rowId(walletId, chain);
+  if (placeholders > 0)
+    await getDb()
+      .insert(nftMetaDue)
+      .values({ id, userId, walletId, chain, dueAt: now + META_RECHECK_MS })
+      .onConflictDoUpdate({ target: nftMetaDue.id, set: { dueAt: now + META_RECHECK_MS, userId } });
+  else await getDb().delete(nftMetaDue).where(eq(nftMetaDue.id, id));
+}
 
 export const REFRESH_COOLDOWN_MS = 60_000;
 const SCAN_CONCURRENCY = 4;
@@ -143,10 +178,9 @@ export type RefreshMode = "missing" | "all" | "continue";
 export async function refreshHoldings(
   userId: string,
   mode: RefreshMode,
-  opts: { fetchImpl?: Fetch; now?: number; budgetMs?: number; scan?: typeof scanHoldings } = {},
+  opts: { fetchImpl?: Fetch; now?: number; budgetMs?: number; scan?: typeof scanHoldings; verify?: Verify | null } = {},
 ) {
   const now = opts.now ?? Date.now();
-  const scan = opts.scan ?? scanHoldings;
   const [wallets, rows, last] = await Promise.all([listWallets(userId), loadRows(userId), lastRefresh(userId)]);
   const byId = new Map(rows.map((r) => [rowId(r.walletId, r.chain), r]));
   let since = 0;
@@ -179,7 +213,12 @@ export async function refreshHoldings(
     async ({ w, c }) => {
       const at = new Date().toISOString();
       try {
-        const r = await scan(c, w.address, opts.fetchImpl ?? (globalThis.fetch as any));
+        const prev = byId.get(rowId(w.id, c.key));
+        const r = await scanAndVerify(c, w.address, prev && prev.address.toLowerCase() === w.address.toLowerCase() ? prev.items : [], {
+          ...opts,
+          // Manual Refresh also re-reads mutable metadata of tokens that still look unrevealed.
+          recheckPlaceholders: mode !== "missing",
+        });
         await saveRow(userId, w.id, c.key, w.address, {
           items: r.items,
           source: r.source,
@@ -187,6 +226,7 @@ export async function refreshHoldings(
           error: null,
           scannedAt: at,
         });
+        await scheduleMetaRecheck(userId, w.id, c.key, r.placeholders).catch(() => {});
         scanned++;
       } catch (e: any) {
         failed++;
@@ -211,15 +251,17 @@ export async function rescanPair(
   userId: string,
   walletId: string,
   chainKey: string,
-  opts: { fetchImpl?: Fetch; scan?: typeof scanHoldings } = {},
+  opts: { fetchImpl?: Fetch; scan?: typeof scanHoldings; verify?: Verify | null } = {},
 ): Promise<"scanned" | "failed" | "skipped"> {
   const c = getChain(chainKey);
   const w = (await listWallets(userId)).find((x) => x.id === walletId);
   if (!c || !w) return "skipped";
   const at = new Date().toISOString();
   try {
-    const r = await (opts.scan ?? scanHoldings)(c, w.address, opts.fetchImpl ?? (globalThis.fetch as any));
+    const prev = (await loadRows(userId)).find((r) => r.walletId === w.id && r.chain === c.key);
+    const r = await scanAndVerify(c, w.address, prev && prev.address.toLowerCase() === w.address.toLowerCase() ? prev.items : [], opts);
     await saveRow(userId, w.id, c.key, w.address, { items: r.items, source: r.source, truncated: r.truncated, error: null, scannedAt: at });
+    await scheduleMetaRecheck(userId, w.id, c.key, r.placeholders).catch(() => {});
     return "scanned";
   } catch (e: any) {
     const had = (await loadRows(userId)).some((r) => r.walletId === w.id && r.chain === c.key);
@@ -302,4 +344,46 @@ export async function cachedNftCount(userId: string, walletId: string) {
     .map((r) => ({ chain: r.chain, count: r.items.filter((i) => !i.spam).length, scannedAt: r.scannedAt }))
     .filter((x) => x.count > 0);
   return { total: byChain.reduce((s, x) => s + x.count, 0), byChain, scanned: rows.length > 0 };
+}
+
+/**
+ * Background metadata re-check (housekeeping): for due wallet × chain pairs, re-read tokenURI() only for tokens that
+ * still look unrevealed (one Multicall3 call per pair, no indexer scan) and resolve the ones that changed.
+ */
+export async function recheckDueMetadata(
+  opts: { now?: number; limit?: number; fetchImpl?: Fetch; verify?: Verify } = {},
+): Promise<{ checked: number; fixed: number }> {
+  const now = opts.now ?? Date.now();
+  const due = await getDb()
+    .select()
+    .from(nftMetaDue)
+    .where(lte(nftMetaDue.dueAt, now))
+    .limit(opts.limit ?? 3);
+  const out = { checked: 0, fixed: 0 };
+  for (const d of due) {
+    const c = getChain(d.chain);
+    const row = (await loadRows(d.userId)).find((r) => r.walletId === d.walletId && r.chain === d.chain);
+    if (!c || !row) {
+      await getDb().delete(nftMetaDue).where(eq(nftMetaDue.id, d.id));
+      continue;
+    }
+    // Push the due time first so a slow/failed pass doesn't retry every 2 minutes.
+    await scheduleMetaRecheck(d.userId, d.walletId, d.chain, 1, now);
+    const v = await (opts.verify ?? verifyMetadata)(c, row.items, row.items, {
+      fetchImpl: opts.fetchImpl,
+      now,
+      recheckPlaceholders: true,
+      only: (it) => isPendingReveal(it, row.items),
+    }).catch(() => null);
+    if (!v) continue;
+    out.checked += v.checked;
+    out.fixed += v.fixed;
+    if (v.fixed > 0)
+      await getDb()
+        .update(nftHoldings)
+        .set({ itemsJson: JSON.stringify(v.items) })
+        .where(and(eq(nftHoldings.id, d.id), eq(nftHoldings.userId, d.userId)));
+    await scheduleMetaRecheck(d.userId, d.walletId, d.chain, v.placeholders, now);
+  }
+  return out;
 }

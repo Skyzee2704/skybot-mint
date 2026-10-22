@@ -10,6 +10,8 @@
 import { getAddress } from "ethers";
 import { CHAINS, type ChainConfig } from "../../config/chains.js";
 import { env } from "../../config/env.js";
+import type { MetaState } from "./metadata.js";
+import { canonUri } from "./uri.js";
 
 export type NftStandard = "erc721" | "erc1155";
 export interface NftItem {
@@ -23,6 +25,10 @@ export interface NftItem {
   collectionSlug: string | null;
   image: string | null;
   spam: boolean;
+  /** Canonical token URI the indexer built this metadata from (compared with tokenURI() on-chain). */
+  tokenUri?: string | null;
+  /** Freshness state from the on-chain check (see metadata.ts). */
+  meta?: MetaState;
 }
 export interface ScanResult {
   items: NftItem[];
@@ -106,6 +112,7 @@ export function fromAlchemy(n: any): NftItem | null {
     collectionSlug: str(os.collectionSlug) ?? str(n?.collection?.slug),
     image: httpsOnly(str(n?.image?.thumbnailUrl) ?? str(n?.image?.cachedUrl) ?? str(n?.image?.pngUrl) ?? str(n?.image?.originalUrl)),
     spam: Boolean(n?.contract?.isSpam),
+    tokenUri: canonUri(n?.tokenUri ?? n?.raw?.tokenUri),
   };
 }
 
@@ -126,6 +133,7 @@ export function fromOpenSea(n: any): NftItem | null {
     collectionSlug: str(n?.collection),
     image: httpsOnly(str(n?.display_image_url) ?? str(n?.image_url)),
     spam: Boolean(n?.is_disabled),
+    tokenUri: canonUri(n?.metadata_url),
   };
 }
 
