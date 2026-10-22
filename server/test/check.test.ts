@@ -74,7 +74,8 @@ describe("/check formatting", () => {
     expect(msg).toContain("✅ Main <code>0x668B…27A0</code> (max 2)");
     expect(msg).toContain("❌ 1 not eligible: Alt");
     expect(msg).toContain("❔ 1 not verified yet: New");
-    expect(msg).toContain("1 wallet not verified yet. Open SkyBOT once");
+    expect(msg).toContain("Not verified: New. SkyBOT couldn't sign these wallets in to OpenSea yet.");
+    expect(msg).not.toContain("Open SkyBOT once and future checks");
     // Public: one summary line only, no wallet section; stage details never repeated.
     expect(msg).toContain("<b>Other stages</b>\n\n<b>Public</b> · Free\n🕒 Fri, 23 Oct · 19:30 (UTC+5:30) · in 1d 23h");
     expect(msg.match(/Thu, 22 Oct · 19:30/g)?.length).toBe(1);

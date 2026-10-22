@@ -17,7 +17,8 @@ import { MintRequest, Strategy } from "./types.js";
 import { cachedJwt, eligibilityWithJwt, jwtFromSignature, validateSiweFields } from "../resolver/openseaAuth.js";
 import type { OsStage } from "../resolver/opensea.js";
 import { and, eq } from "drizzle-orm";
-import { loadJwt, serverSignIn, storeJwt } from "../resolver/openseaSession.js";
+import { eligibilityWithReauth, patKeeper, storeJwt, walletJwt, type SignInFailure } from "../resolver/openseaSession.js";
+import { OpenSeaHttpError } from "../resolver/openseaAuth.js";
 import { sortStages } from "../resolver/stageOrder.js";
 import { getDb } from "../../db/client.js";
 import { openseaVerdicts } from "../../db/schema.js";
@@ -74,6 +75,8 @@ export interface EligibilityRow {
   stages: StageVerdict[] | null;
   /** OpenSea can answer for this wallet once it signs OpenSea's off-chain sign-in message. */
   needsOpenSeaLogin: boolean;
+  /** Why the server couldn't sign this wallet in to OpenSea (set with needsOpenSeaLogin). */
+  unverifiedReason?: SignInFailure | null;
 }
 
 const DEFAULT_GAS: Record<Strategy, bigint> = { seadrop_public: 180_000n, opensea_api: 220_000n, generic: 200_000n };
@@ -181,7 +184,12 @@ export const sameStage = (a: string | null | undefined, b: string | null | undef
 /** Drop stages joined with OpenSea's per-stage verdicts (matched by canonical stage id), in stage order. */
 export function mapStageVerdicts(
   all: readonly OsStage[],
-  res: readonly { stage_uuid: string; is_eligible: boolean | null; price?: string | null; max_total_mintable_by_wallet?: string | number | null }[],
+  res: readonly {
+    stage_uuid: string;
+    is_eligible: boolean | null;
+    price?: string | null;
+    max_total_mintable_by_wallet?: string | number | null;
+  }[],
 ): StageVerdict[] {
   return sortStages(
     all.map((s) => {
@@ -327,6 +335,7 @@ export async function checkEligibility(
 
     let stages: StageVerdict[] | null = null;
     let needsOpenSeaLogin = false;
+    let unverifiedReason: SignInFailure | null = null;
     if (strategy === "opensea_api") {
       // Active stage: the official mint API answers directly (allowlist is checked before balance).
       if (useOs && activeOs && d.suggestedQty > 0) {
@@ -370,22 +379,30 @@ export async function checkEligibility(
       if (useOs && t.slug && access.status === "unknown" && targetOs) {
         const proof = proofs.get(w.id);
         try {
-          let jwt = await loadJwt(userId, w.address);
+          // Valid JWT → stored PAT exchange → server sign-in (never asks the member to open the app).
+          let got = await walletJwt(userId, w, { serverSign: false });
+          let jwt = got.jwt;
           if (!jwt && proof) {
             validateSiweFields(proof.fields, w.address);
-            jwt = await jwtFromSignature(proof.fields, proof.signature);
+            jwt = await jwtFromSignature(proof.fields, proof.signature, fetch, { keepPat: patKeeper(userId, w.address) });
             await storeJwt(userId, w.address, jwt);
           }
           const cached = cachedVerdicts.get(w.id);
           // A saved verdict is only a fallback: refresh it through the server signer whenever possible.
-          if (!jwt && opts.serverSign) jwt = await serverSignIn(userId, w).catch(() => null);
+          if (!jwt && opts.serverSign) {
+            got = await walletJwt(userId, w, { serverSign: true }).catch(() => ({ jwt: null, reason: "error" as const }));
+            jwt = got.jwt;
+          }
+          if (!jwt) unverifiedReason = got.reason ?? null;
           if (!jwt && !cached) needsOpenSeaLogin = true;
           else {
             let live: CachedVerdict["stages"] | null = null;
             if (jwt) {
               try {
-                live = await eligibilityWithJwt(jwt, t.slug);
-              } catch (e) {
+                // A rejected session (401/403) is dropped, re-authenticated silently and retried once.
+                live = await eligibilityWithReauth(userId, w, jwt, t.slug, { serverSign: opts.serverSign });
+              } catch (e: any) {
+                if (e?.signInReason) unverifiedReason = e.signInReason;
                 if (!cached) throw e; // fall back to the saved verdict when OpenSea is unavailable
               }
             }
@@ -417,6 +434,8 @@ export async function checkEligibility(
           }
         } catch (e: any) {
           needsOpenSeaLogin = !cachedJwt(w.address);
+          if (needsOpenSeaLogin && !unverifiedReason)
+            unverifiedReason = e instanceof OpenSeaHttpError && e.status === 429 ? "rate_limited" : "error";
           access = { status: "unknown", source: "OpenSea eligibility API", detail: `check failed: ${String(e.message).slice(0, 120)}` };
         }
         if (needsOpenSeaLogin && access.status === "unknown")
@@ -480,6 +499,7 @@ export async function checkEligibility(
       allowlist: legacy,
       stages,
       needsOpenSeaLogin,
+      unverifiedReason: needsOpenSeaLogin ? (unverifiedReason ?? (opts.serverSign ? "error" : "not_configured")) : null,
     };
   });
   const targetStage = targetOs
@@ -541,6 +561,11 @@ export async function savedStageRows(
   const saved = slug && drop?.stages?.length ? await loadVerdicts(userId, slug) : new Map<string, CachedVerdict>();
   return wallets.map((w) => {
     const c = saved.get(w.id);
-    return { walletId: w.id, label: w.label, address: w.address, stages: c && drop?.stages ? mapStageVerdicts(drop.stages, c.stages) : null };
+    return {
+      walletId: w.id,
+      label: w.label,
+      address: w.address,
+      stages: c && drop?.stages ? mapStageVerdicts(drop.stages, c.stages) : null,
+    };
   });
 }

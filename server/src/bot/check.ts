@@ -38,7 +38,6 @@ export function parseCheckArgs(text: string): { input: string; chain?: string } 
   return null;
 }
 
-
 function verdict(r: EligibilityRow): { label: "Eligible" | "Not eligible" | "Unknown"; why: string } {
   if (r.needsOpenSeaLogin) return { label: "Unknown", why: "not verified yet" };
   const a = r.access;
@@ -125,11 +124,41 @@ export function formatCheck(v: CheckView): string[] {
   const foot: string[] = [];
   const unverified = new Set(groups.flatMap((g) => g.wallets.filter((w) => w.state === "unverified").map((w) => w.walletId)));
   for (const r of v.rows) if (r.needsOpenSeaLogin) unverified.add(r.walletId);
-  if (unverified.size)
-    foot.push("", `❔ ${plural(unverified.size, "wallet")} not verified yet. Open SkyBOT once and future checks run automatically.`);
-  foot.push("", tz ? `<i>Times in ${esc(tz)}. Read-only check, nothing was sent.</i>` : "<i>Times in UTC. Open SkyBOT once to use your own time zone. Read-only check, nothing was sent.</i>");
+  if (unverified.size) foot.push(...unverifiedNotes(v.rows.filter((r) => unverified.has(r.walletId))));
+  foot.push(
+    "",
+    tz
+      ? `<i>Times in ${esc(tz)}. Read-only check, nothing was sent.</i>`
+      : "<i>Times in UTC. Open SkyBOT once to use your own time zone. Read-only check, nothing was sent.</i>",
+  );
   blocks.push(foot);
   return splitBlocks(blocks);
+}
+
+const REASON_TEXT: Record<string, string> = {
+  rate_limited: "OpenSea is rate-limiting sign-ins right now. Run /check again in a minute; SkyBOT signs in again automatically.",
+  no_signer:
+    "Automatic checks aren't enabled for these wallets yet. Tap Open in SkyBOT once: it enables them silently (sign-in only, it can never send transactions).",
+  no_privy_wallet: "These aren't SkyBOT (Privy) wallets, so SkyBOT can't sign OpenSea's sign-in for them.",
+  not_configured: "Automatic OpenSea sign-in isn't available on this server. Open in SkyBOT to verify.",
+  error: "OpenSea didn't answer for these wallets. Run /check again shortly; SkyBOT retries automatically.",
+  unknown: "SkyBOT couldn't sign these wallets in to OpenSea yet. Run /check again; if it keeps happening, tap Open in SkyBOT once.",
+};
+
+/** One line per reason: which wallets, and the one thing that fixes it. */
+export function unverifiedNotes(rows: Pick<EligibilityRow, "label" | "unverifiedReason">[]): string[] {
+  const by = new Map<string, string[]>();
+  for (const r of rows) {
+    const k = r.unverifiedReason && REASON_TEXT[r.unverifiedReason] ? r.unverifiedReason : "unknown";
+    by.set(k, [...(by.get(k) ?? []), r.label]);
+  }
+  const out: string[] = [];
+  for (const k of ["no_signer", "rate_limited", "error", "unknown", "no_privy_wallet", "not_configured"]) {
+    const names = by.get(k);
+    if (!names?.length) continue;
+    out.push("", `❔ Not verified: ${esc(names.join(", "))}. ${REASON_TEXT[k]}`);
+  }
+  return out;
 }
 
 /** Pack blocks (sections) into messages ≤ max chars; a block larger than max falls back to line splitting. */

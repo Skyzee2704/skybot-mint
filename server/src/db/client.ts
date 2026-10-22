@@ -157,6 +157,7 @@ const DDL = [
     id TEXT PRIMARY KEY, user_id TEXT NOT NULL, address TEXT NOT NULL, privy_wallet_id TEXT, removed_at TEXT NOT NULL)`,
   `CREATE INDEX IF NOT EXISTS wallet_tombstones_user ON wallet_tombstones(user_id)`,
   `CREATE TABLE IF NOT EXISTS opensea_tokens (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, token_enc TEXT NOT NULL, expires_at TEXT NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS opensea_pats (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, pat_enc TEXT NOT NULL, expires_at TEXT NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS nft_holdings (
     id TEXT PRIMARY KEY, user_id TEXT NOT NULL, wallet_id TEXT NOT NULL, chain TEXT NOT NULL, address TEXT NOT NULL,
     items_json TEXT NOT NULL DEFAULT '[]', source TEXT, error TEXT, truncated INTEGER NOT NULL DEFAULT 0, scanned_at TEXT NOT NULL)`,

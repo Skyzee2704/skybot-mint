@@ -186,6 +186,14 @@ export const openseaTokens = sqliteTable("opensea_tokens", {
   expiresAt: text("expires_at").notNull(),
 });
 
+/** OpenSea scoped PAT (read:eligibility only, encrypted) per wallet: mints new wallet JWTs without a signature. */
+export const openseaPats = sqliteTable("opensea_pats", {
+  id: text("id").primaryKey(), // lower-case wallet address
+  userId: text("user_id").notNull(),
+  patEnc: text("pat_enc").notNull(),
+  expiresAt: text("expires_at").notNull(),
+});
+
 /**
  * Cached NFT holdings per wallet × chain (from an NFT indexer, never per-token RPC scans).
  * The NFTs page reads only from here; scans run on first use, on manual Refresh (cooldown) or after a send.
