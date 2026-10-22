@@ -19,6 +19,7 @@ import { useCreateWallet, useImportWallet, useWallets, usePrivy } from "@privy-i
 import { useApi, useShell } from "@/components/AppShell";
 import { ChainSelect } from "@/components/ChainSelect";
 import Link from "next/link";
+import { FundWallets } from "@/components/FundWallets";
 
 export default function WalletsPage() {
   const api = useApi();
@@ -31,7 +32,7 @@ export default function WalletsPage() {
   // Wallets removed in this session stay hidden even if an in-flight refresh still returns them.
   const goneIds = useRef(new Set<string>());
   const goneAddrs = useRef(new Set<string>());
-  const data = { wallets: (list.wallets as any[]).filter((w) => !goneIds.current.has(w.id)), groups: list.groups };
+  const data = { wallets: (list.wallets as any[]).filter((w) => !goneIds.current.has(w.id)) };
   const removedList = list.removedWallets as any[];
   const [removal, setRemoval] = useState<{ w: any; chk: any | null; loading: boolean } | null>(null);
   const load = list.reload;
@@ -39,7 +40,6 @@ export default function WalletsPage() {
   const [msg, setMsg] = useState<string | null>(null);
   const [key, setKey] = useState("");
   const [label, setLabel] = useState("");
-  const [group, setGroup] = useState("");
   const [genN, setGenN] = useState(3);
   const [chain, setChainState] = useState(() => (typeof window === "undefined" ? "base" : preferredBalanceChain()));
   const setChain = (c: string) => {
@@ -176,7 +176,6 @@ export default function WalletsPage() {
             <tr>
               <th>Label</th>
               <th>Address</th>
-              <th>Group</th>
               <th>Balance</th>
               <th></th>
             </tr>
@@ -198,7 +197,6 @@ export default function WalletsPage() {
                   <span className="addr-short">{short(w.address)}</span>
                   <CopyAddress address={w.address} />
                 </td>
-                <td>{w.group ?? "—"}</td>
                 <td className="mono">
                   {balances[w.id] !== undefined ? (
                     balances[w.id] === "error" ? (
@@ -225,7 +223,7 @@ export default function WalletsPage() {
             {list.loading &&
               [0, 1, 2].map((i) => (
                 <tr key={`sk${i}`}>
-                  {[90, 260, 50, 70, 120].map((wd, j) => (
+                  {[90, 260, 70, 120].map((wd, j) => (
                     <td key={j}>
                       <span className="skeleton" style={{ width: wd }} />
                     </td>
@@ -234,7 +232,7 @@ export default function WalletsPage() {
               ))}
             {!list.loading && !data.wallets.length && (
               <tr>
-                <td colSpan={5} className="muted">
+                <td colSpan={4} className="muted">
                   No wallets yet.
                 </td>
               </tr>
@@ -286,20 +284,21 @@ export default function WalletsPage() {
         )}
       </div>
 
+      <FundWallets api={api} wallets={data.wallets} />
+
       <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(300px,1fr))" }}>
         <div className="card">
           <h2>Create Wallets</h2>
           <p className="muted">Creates Privy embedded wallets owned by you, then syncs them here.</p>
           <div className="row">
             <input type="number" min={1} max={50} value={genN} onChange={(e) => setGenN(Number(e.target.value))} style={{ width: 80 }} />
-            <input placeholder="Group (optional)" value={group} onChange={(e) => setGroup(e.target.value)} />
             <button
               disabled={busy}
               onClick={() =>
                 run(async () => {
                   // Prefer server-side generation (needs Privy app secret); fall back to client createWallet loop.
                   try {
-                    await api("/api/wallets/generate", { body: { count: genN, group: group || null } });
+                    await api("/api/wallets/generate", { body: { count: genN } });
                   } catch {
                     for (let i = 0; i < genN; i++) await createWallet({ createAdditional: true });
                   }
@@ -341,7 +340,6 @@ export default function WalletsPage() {
                             privyWalletId: (w as any).id ?? (w as any).walletId ?? "",
                             address: (w as any).address ?? (w as any).walletClient?.account?.address,
                             label,
-                            group: group || null,
                             source: "imported",
                             restore: true,
                           },
@@ -357,27 +355,11 @@ export default function WalletsPage() {
               <p className="muted" style={{ fontSize: 12 }}>
                 Export your own key only through Privy&apos;s wallet UI — SkyBOT has no export API.
               </p>
+              <p className="muted" style={{ fontSize: 12 }}>
+                Signed in as {user?.email?.address ?? "—"} · {privyWallets?.length ?? 0} Privy wallet(s) connected
+              </p>
             </div>
           )}
-        </div>
-        <div className="card">
-          <h2>Groups</h2>
-          <div className="row">
-            <input placeholder="New group" value={group} onChange={(e) => setGroup(e.target.value)} />
-            <button className="ghost" onClick={() => run(() => api("/api/groups", { body: { name: group } }), "Group created")}>
-              Create
-            </button>
-          </div>
-          <div style={{ marginTop: 10 }}>
-            {data.groups.map((g) => (
-              <span key={g.name} className="pill" style={{ marginRight: 6 }}>
-                {g.name} ({g.count})
-              </span>
-            ))}
-          </div>
-          <p className="muted" style={{ marginTop: 12 }}>
-            Signed in as {user?.email?.address ?? "—"} · {privyWallets?.length ?? 0} Privy wallet(s) connected
-          </p>
         </div>
       </div>
     </>

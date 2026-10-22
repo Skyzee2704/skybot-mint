@@ -14,6 +14,7 @@ import { assembleAndVerify, legacyGasPrice, parseAmount, quoteWallet, validateDe
 import { log, redactString } from "../util/log.js";
 import { nativeBalancesBatch } from "../core/rpc/multicall.js";
 import { invalidateBalances } from "../util/balanceCache.js";
+import { FUND_MAX_TARGETS, pickFundTargets, quoteFund } from "../core/fund.js";
 
 const hex = z.string().regex(/^0x[0-9a-fA-F]*$/);
 const unsignedTx = z.object({
@@ -169,6 +170,89 @@ export function registerWithdrawRoutes(a: FastifyInstance) {
     } catch (e: any) {
       const msg = redactString(String(e?.shortMessage ?? e?.message ?? e)).slice(0, 200);
       await audit(req.user!.id, "withdraw.failed", chain.key, b.tx.to.toLowerCase(), { ...base, error: msg });
+      throw Object.assign(new Error(`Broadcast failed: ${msg}`), { statusCode: 502 });
+    }
+  });
+
+  /* ---------------- Fund Wallets: Main → the member's other wallets (web / Mini App only) ---------------- */
+  const fundSecret = () => derivedKey("fund-quote");
+
+  a.post("/api/fund/quote", async (req) => {
+    const b = z
+      .object({
+        chain: z.string(),
+        walletIds: z.union([z.literal("all"), z.array(z.string().max(100)).min(1).max(FUND_MAX_TARGETS)]),
+        /** Total to split: "max" or a decimal amount in native units; `amountWei` (integer) is used by Retry. */
+        amount: z.string().max(40).optional(),
+        amountWei: z
+          .string()
+          .regex(/^\d{1,40}$/)
+          .optional(),
+      })
+      .parse(req.body);
+    await checkRateLimit(req.user!.id, "fund:quote", 30);
+    const chain = requireChain(b.chain);
+    const pool = getPool(chain);
+    const { main, targets } = pickFundTargets(await listWallets(req.user!.id), b.walletIds);
+    if (!targets.length) throw Object.assign(new Error("Add another wallet first: there is nothing to fund."), { statusCode: 400 });
+    const amount = b.amountWei ? { kind: "exact" as const, wei: BigInt(b.amountWei) } : parseAmount(b.amount ?? "");
+    const q = await quoteFund({
+      chain,
+      pool,
+      main,
+      targets,
+      amount,
+      gasPrice: await legacyGasPrice(pool),
+      userId: req.user!.id,
+      secret: fundSecret(),
+    });
+    const warnings: string[] = [];
+    if (chain.stack === "op")
+      warnings.push(`${chain.name} charges an L1 data fee. A small buffer is reserved per transfer; any unused part stays in Main.`);
+    if (chain.stack === "arbitrum") warnings.push(`${chain.name} refunds unused gas, so a tiny amount may stay in Main.`);
+    await audit(req.user!.id, "fund.quote", chain.key, main.address.toLowerCase(), {
+      wallets: targets.length,
+      perWalletWei: q.perWalletWei,
+    });
+    return { ...q, warnings };
+  });
+
+  a.post("/api/fund/send", async (req) => {
+    const b = z
+      .object({
+        chain: z.string(),
+        walletId: z.string().max(100),
+        tx: unsignedTx,
+        quoteToken: z.string().max(200),
+        signed: hex.max(20_000),
+      })
+      .parse(req.body);
+    await checkRateLimit(req.user!.id, "fund:send", 60);
+    const chain = requireChain(b.chain);
+    if (b.tx.chainId !== chain.chainId) throw Object.assign(new Error("Chain mismatch"), { statusCode: 400 });
+    // Sender is always the current Main wallet; the destination must be the member's own (non-Main) wallet.
+    const { main, targets } = pickFundTargets(await listWallets(req.user!.id), [b.walletId]);
+    const dest = targets[0];
+    if (dest.address.toLowerCase() !== b.tx.to.toLowerCase())
+      throw Object.assign(new Error("Destination does not match the selected wallet."), { statusCode: 400 });
+    const { raw } = assembleAndVerify({
+      secret: fundSecret(),
+      userId: req.user!.id,
+      walletId: main.id,
+      from: main.address,
+      tx: b.tx,
+      quoteToken: b.quoteToken,
+      signed: b.signed,
+    });
+    const base = { from: main.address, to: dest.address, valueWei: BigInt(b.tx.value).toString(), nonce: b.tx.nonce };
+    try {
+      const r = await getPool(chain).broadcast(raw);
+      invalidateBalances(chain.key, [main.address, dest.address]);
+      await audit(req.user!.id, "fund.sent", chain.key, dest.address.toLowerCase(), { ...base, hash: r.hash });
+      return { hash: r.hash, explorer: explorerTx(chain, r.hash) };
+    } catch (e: any) {
+      const msg = redactString(String(e?.shortMessage ?? e?.message ?? e)).slice(0, 200);
+      await audit(req.user!.id, "fund.failed", chain.key, dest.address.toLowerCase(), { ...base, error: msg });
       throw Object.assign(new Error(`Broadcast failed: ${msg}`), { statusCode: 502 });
     }
   });

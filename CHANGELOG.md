@@ -7,6 +7,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- **Fund Wallets** (Wallets page, dashboard and Mini App): split native coin from your Main wallet evenly across your other wallets on any supported chain. Send to all or pick wallets, enter a total or use Max (Main balance minus the exact network fees of every transfer); the wei rounding remainder stays in Main. Transfers are signed one by one in your browser (60 s timeout, Stop, Retry Unsent) and verified by SkyBOT before broadcasting. Not available through Telegram commands.
+
+### Removed
+
+- Wallet groups. The Group column, the group fields on Create and Import, and the `/api/groups` endpoints are gone. Existing group data is left untouched in the database.
+
 - **NFTs** page (dashboard and Mini App): every NFT held by your wallets on all supported chains, with image, collection, token ID, chain, standard and ERC-1155 quantity. Filter by wallet, chain or collection, group by wallet or collection, select one by one or all, and send to one address. ERC-721 and ERC-1155 `safeTransferFrom`, signed in the browser with Privy and verified by the server before broadcast. Ownership and gas are re-checked right before sending; wallets without gas are skipped with a clear reason.
 - Holdings come from an NFT indexer (Alchemy NFT API, OpenSea as fallback and for Ink), are cached in the database, and are only re-scanned for new wallets, on manual Refresh (60 s cooldown) or updated in place after a send.
 

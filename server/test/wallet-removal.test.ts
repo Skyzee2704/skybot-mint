@@ -47,7 +47,7 @@ describe("wallet removal", () => {
     const active = await svc.listWallets("u1");
     expect(active.map((w) => w.address)).toEqual([B]);
     expect(active[0]!.isMain).toBe(true); // main moved to the remaining wallet
-    expect((await svc.walletsAndGroups("u1")).removedWallets.map((w) => w.address)).toEqual([A]);
+    expect((await svc.walletsOverview("u1")).removedWallets.map((w) => w.address)).toEqual([A]);
     await expect(svc.getWallet("u1", a.id!)).rejects.toThrow(/removed/);
     // Explicit restore brings it back.
     await svc.restoreWallet("u1", a.id!);

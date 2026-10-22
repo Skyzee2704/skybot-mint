@@ -31,6 +31,7 @@ export const wallets = sqliteTable(
     privyWalletId: text("privy_wallet_id"),
     address: text("address").notNull(),
     label: text("label").notNull().default(""),
+    /** Retired (wallet groups were removed from the app on 2026-10-22). Kept so existing databases stay valid. */
     groupName: text("group_name"),
     source: text("source").notNull(),
     hdIndex: integer("hd_index"),
@@ -42,6 +43,7 @@ export const wallets = sqliteTable(
   (t) => [uniqueIndex("wallets_user_addr").on(t.userId, t.address), index("wallets_user_idx").on(t.userId)],
 );
 
+/** Retired: wallet groups were removed from the app (2026-10-22). Table kept, unused, so existing data is safe. */
 export const groups = sqliteTable(
   "groups",
   {

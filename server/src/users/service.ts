@@ -3,7 +3,7 @@ import { eq, and, sql, asc, desc, isNull, isNotNull } from "drizzle-orm";
 import { randomBytes, randomUUID } from "node:crypto";
 import { getAddress } from "ethers";
 import { getDb } from "../db/client.js";
-import { users, wallets, groups, settings, telegramLinks, jobs, walletTombstones } from "../db/schema.js";
+import { users, wallets, settings, telegramLinks, jobs, walletTombstones } from "../db/schema.js";
 import { env } from "../config/env.js";
 import { createPrivyWallets, getPrivy, privyWalletOrigin } from "../auth/privy.js";
 import { privyConfigured } from "../config/env.js";
@@ -225,7 +225,6 @@ export function walletView(w: WalletRow) {
     id: w.id,
     label: w.label,
     address: w.address,
-    group: w.groupName,
     source: w.source,
     isMain: w.isMain,
     privyWalletId: w.privyWalletId,
@@ -260,28 +259,10 @@ export async function listRemovedWallets(userId: string) {
   ).map(walletView);
 }
 
-export async function listGroups(userId: string, walletList?: { group: string | null }[]) {
-  const db = getDb();
-  const [gs, ws] = await Promise.all([
-    db.select().from(groups).where(eq(groups.userId, userId)),
-    walletList ? Promise.resolve(walletList) : listWallets(userId),
-  ]);
-  return gs.map((g) => ({ name: g.name, count: ws.filter((w) => w.group === g.name).length }));
-}
-
-/** Wallets + groups for one user with the two queries in parallel (Wallets page first paint). */
-export async function walletsAndGroups(userId: string) {
-  const db = getDb();
-  const [ws, gs, removed] = await Promise.all([
-    listWallets(userId),
-    db.select().from(groups).where(eq(groups.userId, userId)),
-    listRemovedWallets(userId),
-  ]);
-  return {
-    wallets: ws,
-    groups: gs.map((g) => ({ name: g.name, count: ws.filter((w) => w.group === g.name).length })),
-    removedWallets: removed,
-  };
+/** Active + removed wallets for one user, both queries in parallel (Wallets page first paint). */
+export async function walletsOverview(userId: string) {
+  const [ws, removed] = await Promise.all([listWallets(userId), listRemovedWallets(userId)]);
+  return { wallets: ws, removedWallets: removed };
 }
 
 export async function getWallet(userId: string, id: string, opts: { includeRemoved?: boolean } = {}): Promise<WalletRow> {
@@ -307,7 +288,6 @@ export async function syncPrivyWallet(
     privyWalletId: string;
     address: string;
     label?: string;
-    group?: string | null;
     source?: string;
     hdIndex?: number | null;
     /** Explicit user action (import / restore) — allowed to bring back a removed wallet. */
@@ -347,7 +327,6 @@ export async function syncPrivyWallet(
         // Clients without the Privy wallet id send the address: never overwrite a real id with it.
         privyWalletId: /^0x/i.test(input.privyWalletId) && existing.privyWalletId ? existing.privyWalletId : input.privyWalletId,
         label: input.label ?? existing.label,
-        groupName: input.group === undefined ? existing.groupName : input.group,
         removedAt: null,
       })
       .where(eq(wallets.id, existing.id));
@@ -366,7 +345,7 @@ export async function syncPrivyWallet(
       privyWalletId: input.privyWalletId,
       address,
       label: input.label ?? `wallet-${count + 1}`,
-      groupName: input.group ?? null,
+      groupName: null,
       source: origin?.source ?? input.source ?? "privy",
       hdIndex: input.hdIndex ?? null,
       isMain: count === 0,
@@ -393,7 +372,7 @@ export async function syncPrivyWallet(
 
 const looksLikeRealPrivyId = (s: string | null | undefined) => Boolean(s && !/^0x/i.test(s));
 
-export async function generateWallets(user: AppUser, count: number, group: string | null = null, labelPrefix = "gen") {
+export async function generateWallets(user: AppUser, count: number, labelPrefix = "gen") {
   if (count < 1 || count > 50) throw Object.assign(new Error("count must be 1..50"), { statusCode: 400 });
   if (user.privyUserId.startsWith("tg:"))
     throw Object.assign(
@@ -410,7 +389,6 @@ export async function generateWallets(user: AppUser, count: number, group: strin
         privyWalletId: created[i].id,
         address: created[i].address,
         label: `${labelPrefix}-${i + 1}`,
-        group,
         source: "generated",
       }),
     );
@@ -418,20 +396,19 @@ export async function generateWallets(user: AppUser, count: number, group: strin
   return out;
 }
 
-export async function importKey(_user: AppUser, _privateKey: string, _label = "", _group: string | null = null): Promise<never> {
+export async function importKey(_user: AppUser, _privateKey: string, _label = ""): Promise<never> {
   throw Object.assign(new Error("Private keys must be imported via Privy in the browser (importWallet). SkyBOT never accepts raw keys."), {
     statusCode: 403,
     code: "KEY_IMPORT_CLIENT_ONLY",
   });
 }
 
-export async function updateWallet(userId: string, id: string, patch: { label?: string; group?: string | null }) {
+export async function updateWallet(userId: string, id: string, patch: { label?: string }) {
   await getWallet(userId, id);
   await getDb()
     .update(wallets)
     .set({
       ...(patch.label !== undefined ? { label: patch.label.slice(0, 64) } : {}),
-      ...(patch.group !== undefined ? { groupName: patch.group } : {}),
     })
     .where(and(eq(wallets.userId, userId), eq(wallets.id, id)));
   return walletView(await getWallet(userId, id));
@@ -525,23 +502,6 @@ export async function setMain(userId: string, id: string) {
     .update(wallets)
     .set({ isMain: true })
     .where(and(eq(wallets.userId, userId), eq(wallets.id, id)));
-}
-
-export async function createGroup(userId: string, name: string) {
-  const n = name.trim().slice(0, 48);
-  if (!n) throw Object.assign(new Error("group name required"), { statusCode: 400 });
-  await getDb().insert(groups).values({ id: randomUUID(), userId, name: n, createdAt: now() }).onConflictDoNothing();
-  return listGroups(userId);
-}
-
-export async function deleteGroup(userId: string, name: string) {
-  const db = getDb();
-  await db.delete(groups).where(and(eq(groups.userId, userId), eq(groups.name, name)));
-  await db
-    .update(wallets)
-    .set({ groupName: null })
-    .where(and(eq(wallets.userId, userId), eq(wallets.groupName, name)));
-  return listGroups(userId);
 }
 
 /* ----------------------------- settings / telegram ----------------------------- */

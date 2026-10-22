@@ -6,7 +6,6 @@ export type WalletItem = {
   id: string;
   label: string;
   address: string;
-  group: string | null;
   source: string;
   isMain: boolean;
   privyWalletId: string | null;
@@ -14,7 +13,6 @@ export type WalletItem = {
 };
 export type WalletData = {
   wallets: WalletItem[];
-  groups: { name: string; count: number }[];
   /** Wallets hidden from SkyBOT (still in Privy custody). */
   removedWallets?: WalletItem[];
 };
@@ -105,7 +103,7 @@ export function useWalletList(
   /** Optimistic local update (also written to the cache so a reload never flashes stale rows). */
   const mutate = useCallback((fn: (d: WalletData) => WalletData) => {
     setData((d) => {
-      const next = fn(d ?? { wallets: [], groups: [], removedWallets: [] });
+      const next = fn(d ?? { wallets: [], removedWallets: [] });
       writeCache(next);
       return next;
     });
@@ -114,7 +112,6 @@ export function useWalletList(
   return {
     data,
     wallets: data?.wallets ?? [],
-    groups: data?.groups ?? [],
     removedWallets: data?.removedWallets ?? [],
     loading: !data && refreshing,
     refreshing,

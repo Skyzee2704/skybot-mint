@@ -28,7 +28,7 @@ SkyBOT Mint lets a community mint NFT drops quickly and safely from many wallets
 - **Privy custody**: embedded and server wallets, client-side key import and export, and server signing only through Privy authorization keys.
 - **Telegram Mini App**: the full dashboard opens inside Telegram with seamless login, native MainButton confirm, BackButton, haptics, and theme colors.
 - **Telegram bot**: same account as the web (Privy Telegram sign-in), read-only `/check` for every wallet's eligibility, `/mint` to open a drop in the Mini App, wallets and jobs lists, and notifications when mints finish. Times use your own timezone.
-- **Multi-user and admin**: per-user data scoping, wallet groups, optional spend caps, and an admin user list.
+- **Multi-user and admin**: per-user data scoping, Fund Wallets (split native coin from Main to your other wallets), optional spend caps, and an admin user list.
 - **Serverless-native**: a single Vercel project with Neon Postgres, QStash, and optional Upstash Redis rate limits.
 
 ## Screenshots

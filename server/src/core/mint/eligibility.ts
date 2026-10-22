@@ -44,7 +44,6 @@ export interface EligibilityRow {
   walletId: string;
   label: string;
   address: string;
-  group: string | null;
   balanceWei: string;
   balance: string;
   mintedSoFar: number | null;
@@ -428,7 +427,6 @@ export async function checkEligibility(
       walletId: w.id,
       label: w.label,
       address: w.address,
-      group: w.group,
       balanceWei: balance.toString(),
       balance: formatEther(balance),
       mintedSoFar: minted,

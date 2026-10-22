@@ -21,13 +21,11 @@ import { listJobs, getJob, listMinted } from "../core/jobs/repo.js";
 import {
   publicUser,
   listWallets,
-  walletsAndGroups,
+  walletsOverview,
   generateWallets,
   syncPrivyWallet,
   updateWallet,
   setMain,
-  createGroup,
-  deleteGroup,
   getSettings,
   updateSettings,
   createTelegramLinkCode,
@@ -350,7 +348,7 @@ export async function buildServer(): Promise<FastifyInstance> {
     // Wallets
     a.get("/api/wallets", async (req, reply) => {
       reply.header("cache-control", "private, no-store");
-      return walletsAndGroups(req.user!.id);
+      return walletsOverview(req.user!.id);
     });
     a.post("/api/wallets/sync", async (req) => {
       // Client reports Privy-created / imported wallets so our DB stays in sync.
@@ -362,7 +360,6 @@ export async function buildServer(): Promise<FastifyInstance> {
                 privyWalletId: z.string(),
                 address: addr,
                 label: z.string().max(64).optional(),
-                group: z.string().max(48).nullable().optional(),
                 source: z.string().optional(),
                 hdIndex: z.number().int().nullable().optional(),
                 restore: z.boolean().optional(),
@@ -380,11 +377,10 @@ export async function buildServer(): Promise<FastifyInstance> {
       const b = z
         .object({
           count: z.number().int().min(1).max(50),
-          group: z.string().max(48).nullable().optional(),
           labelPrefix: z.string().max(32).optional(),
         })
         .parse(req.body);
-      const created = await generateWallets(req.user!, b.count, b.group ?? null, b.labelPrefix);
+      const created = await generateWallets(req.user!, b.count, b.labelPrefix);
       await walletSetChanged();
       return { wallets: created };
     });
@@ -396,7 +392,7 @@ export async function buildServer(): Promise<FastifyInstance> {
       });
     });
     a.patch("/api/wallets/:id", async (req) => {
-      const b = z.object({ label: z.string().max(64).optional(), group: z.string().max(48).nullable().optional() }).parse(req.body);
+      const b = z.object({ label: z.string().max(64).optional() }).parse(req.body);
       return { wallet: await updateWallet(req.user!.id, (req.params as any).id, b) };
     });
     a.get("/api/wallets/:id/removal-check", async (req, reply) => {
@@ -423,12 +419,6 @@ export async function buildServer(): Promise<FastifyInstance> {
       await setMain(req.user!.id, (req.params as any).id);
       return { ok: true };
     });
-    a.post("/api/groups", async (req) => ({
-      groups: await createGroup(req.user!.id, z.object({ name: z.string() }).parse(req.body).name),
-    }));
-    a.delete("/api/groups/:name", async (req) => ({
-      groups: await deleteGroup(req.user!.id, decodeURIComponent((req.params as any).name)),
-    }));
     a.post("/api/wallets/balances", async (req, reply) => {
       const b = z.object({ chain: z.string(), walletIds: z.array(z.string()).optional(), fresh: z.boolean().optional() }).parse(req.body);
       const c = requireChain(b.chain);
