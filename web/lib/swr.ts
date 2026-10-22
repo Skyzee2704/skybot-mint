@@ -8,6 +8,7 @@
  *  - revalidates when the tab becomes visible again if the value is older than `staleMs`.
  */
 import { useCallback, useEffect, useSyncExternalStore } from "react";
+import { readChainPref, writeChainPref } from "./chainPref";
 
 const PREFIX = "skybot:swr:v1";
 const MAX_PERSIST_CHARS = 2_000_000;
@@ -206,21 +207,9 @@ export function ago(at: number, now = Date.now()) {
 
 /* ---------- shared keys / fetchers ---------- */
 type Api = <T = any>(path: string, opts?: { method?: string; body?: unknown }) => Promise<T>;
-const CHAIN_PREF = "skybot:pref:balanceChain";
-export function preferredBalanceChain() {
-  try {
-    return window.localStorage.getItem(CHAIN_PREF) || "base";
-  } catch {
-    return "base";
-  }
-}
-export function setPreferredBalanceChain(c: string) {
-  try {
-    window.localStorage.setItem(CHAIN_PREF, c);
-  } catch {
-    /* */
-  }
-}
+/** Wallets balance chain (shared localStorage preference; see lib/chainPref.ts). */
+export const preferredBalanceChain = () => readChainPref("balances", "base");
+export const setPreferredBalanceChain = (c: string) => writeChainPref("balances", c);
 export const balancesKey = (chain: string) => `balances:${chain}`;
 export const balancesFetcher =
   (api: Api, chain: string, fresh = false) =>

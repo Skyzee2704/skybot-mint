@@ -9,9 +9,7 @@ import {
   balancesAsOf,
   balancesFetcher,
   balancesKey,
-  preferredBalanceChain,
   revalidate,
-  setPreferredBalanceChain,
   useSWR,
 } from "@/lib/swr";
 import { useNow } from "@/lib/useNow";
@@ -20,6 +18,7 @@ import { useApi, useShell } from "@/components/AppShell";
 import { ChainSelect } from "@/components/ChainSelect";
 import Link from "next/link";
 import { FundWallets } from "@/components/FundWallets";
+import { usePersistedChain } from "@/lib/chainPref";
 
 export default function WalletsPage() {
   const api = useApi();
@@ -41,11 +40,7 @@ export default function WalletsPage() {
   const [key, setKey] = useState("");
   const [label, setLabel] = useState("");
   const [genN, setGenN] = useState(3);
-  const [chain, setChainState] = useState(() => (typeof window === "undefined" ? "base" : preferredBalanceChain()));
-  const setChain = (c: string) => {
-    setPreferredBalanceChain(c);
-    setChainState(c);
-  };
+  const [chain, setChain] = usePersistedChain("balances");
   const [busy, setBusy] = useState(false);
   const now = useNow(5000);
 

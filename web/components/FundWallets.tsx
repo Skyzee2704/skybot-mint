@@ -13,6 +13,7 @@ import { fmtEth, short } from "@/lib/api";
 import { assertSignableChain, withSignTimeout } from "@/lib/signing";
 import { balancesAsOf, balancesFetcher, balancesKey, revalidate } from "@/lib/swr";
 import type { useApi } from "@/components/AppShell";
+import { usePersistedChain } from "@/lib/chainPref";
 
 type W = { id: string; label: string; address: string; isMain: boolean };
 type Status = "queued" | "signing" | "sent" | "confirmed" | "failed" | "skipped";
@@ -32,7 +33,7 @@ export function FundWallets({ api, wallets, onDone }: { api: ReturnType<typeof u
   const { signTransaction } = useSignTransaction();
   const main = wallets.find((w) => w.isMain) ?? null;
   const others = useMemo(() => wallets.filter((w) => !w.isMain), [wallets]);
-  const [chain, setChain] = useState("base");
+  const [chain, setChain] = usePersistedChain("fund");
   const [mainBal, setMainBal] = useState<string | null | undefined>(undefined);
   const [picked, setPicked] = useState<Record<string, boolean>>({});
   const [amount, setAmount] = useState("");

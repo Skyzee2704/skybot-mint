@@ -9,6 +9,7 @@ import { fmtEth, short } from "@/lib/api";
 import { useApi, useShell } from "@/components/AppShell";
 import { ChainSelect } from "@/components/ChainSelect";
 import { useWalletList } from "@/lib/wallets";
+import { usePersistedChain } from "@/lib/chainPref";
 
 type Status = "queued" | "signing" | "sent" | "confirmed" | "failed" | "skipped";
 type RunState = Record<string, { status: Status; hash?: string; explorer?: string; error?: string }>;
@@ -21,7 +22,7 @@ export default function WithdrawPage() {
   const { authenticated } = usePrivy();
   const { signTransaction } = useSignTransaction();
   const list = useWalletList(api, userId);
-  const [chain, setChain] = useState("base");
+  const [chain, setChain] = usePersistedChain("withdraw");
   const [balances, setBalances] = useState<Record<string, string>>({});
   const [picked, setPicked] = useState<Record<string, boolean>>({});
   const [amounts, setAmounts] = useState<Record<string, string>>({});

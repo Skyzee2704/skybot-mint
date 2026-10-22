@@ -11,6 +11,7 @@ import { useNow } from "@/lib/useNow";
 import { assertSignableChain, withSignTimeout } from "@/lib/signing";
 import { NFTS_KEY, ago, mutate as mutateCache, nftsFetcher, useSWR } from "@/lib/swr";
 import { LayoutPicker, LazyImg, NftGrid, thumb, useNftLayout } from "@/components/NftGrid";
+import { usePersistedChain } from "@/lib/chainPref";
 
 type Item = {
   key: string;
@@ -57,7 +58,7 @@ export default function NftsPage() {
   const [scanning, setScanning] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [wallet, setWallet] = useState("");
-  const [chain, setChain] = useState("");
+  const [chain, setChain] = usePersistedChain("nftsFilter", "");
   const [collection, setCollection] = useState("");
   const [group, setGroup] = useState<"wallet" | "collection">("wallet");
   const [layout, setLayout] = useNftLayout();
@@ -120,6 +121,10 @@ export default function NftsPage() {
   const wallets = useMemo(() => view?.wallets ?? [], [view]);
   const walletById = useMemo(() => new Map(wallets.map((w) => [w.id, w])), [wallets]);
   const chainByKey = useMemo(() => new Map((view?.chains ?? []).map((c) => [c.key, c])), [view]);
+  // A remembered chain filter that is no longer offered falls back to "All chains".
+  useEffect(() => {
+    if (chain && view?.chains?.length && !chainByKey.has(chain)) setChain("");
+  }, [chain, view, chainByKey, setChain]);
   const spamCount = (view?.items ?? []).filter((i) => i.spam).length;
   const base = useMemo(
     () =>
