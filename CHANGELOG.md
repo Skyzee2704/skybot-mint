@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- **Remove wallets that still hold funds or NFTs**: the remove dialog lists balances per chain and cached NFTs, offers Withdraw first / Send NFTs first and (for Privy-created wallets) Export Private Key, and requires ticking an acknowledgement and typing the wallet name. Removal archives the wallet in Privy, the strongest removal Privy supports (there is no wallet delete endpoint, and embedded or imported wallets can't be unlinked from a Privy user). Removing the Main wallet asks which wallet becomes Main (default: the oldest remaining).
 - **Fund Wallets** (Wallets page, dashboard and Mini App): split native coin from your Main wallet evenly across your other wallets on any supported chain. Send to all or pick wallets, enter a total or use Max (Main balance minus the exact network fees of every transfer); the wei rounding remainder stays in Main. Transfers are signed one by one in your browser (60 s timeout, Stop, Retry Unsent) and verified by SkyBOT before broadcasting. Not available through Telegram commands.
 
 ### Removed

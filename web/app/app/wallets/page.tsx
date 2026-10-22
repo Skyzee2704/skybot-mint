@@ -13,7 +13,7 @@ import {
   useSWR,
 } from "@/lib/swr";
 import { useNow } from "@/lib/useNow";
-import { useCreateWallet, useImportWallet, useWallets, usePrivy } from "@privy-io/react-auth";
+import { useCreateWallet, useExportWallet, useImportWallet, useWallets, usePrivy } from "@privy-io/react-auth";
 import { useApi, useShell } from "@/components/AppShell";
 import { ChainSelect } from "@/components/ChainSelect";
 import Link from "next/link";
@@ -106,7 +106,11 @@ export default function WalletsPage() {
       setErr(e.message);
     }
   };
-  const removeWallet = async (w: any, mode: "delete" | "hide") => {
+  const removeWallet = async (
+    w: any,
+    mode: "delete" | "hide",
+    opts: { acknowledge?: boolean; confirmLabel?: string; newMainId?: string } = {},
+  ) => {
     setBusy(true);
     setErr(null);
     // Optimistic: drop the row now (and from the cache) so it never flashes back.
@@ -118,7 +122,7 @@ export default function WalletsPage() {
       removedWallets: mode === "hide" ? [...(d.removedWallets ?? []), { ...w, removedAt: new Date().toISOString() }] : d.removedWallets,
     }));
     try {
-      const r = await api(`/api/wallets/${w.id}`, { method: "DELETE", body: { confirm: "DELETE", mode } });
+      const r = await api(`/api/wallets/${w.id}`, { method: "DELETE", body: { confirm: "DELETE", mode, ...opts } });
       setMsg(r.message ?? "Wallet removed.");
       setRemoval(null);
     } catch (e: any) {
@@ -161,7 +165,8 @@ export default function WalletsPage() {
         </h2>
         <p className="muted">
           Wallets are created and held by Privy. SkyBOT never stores or accepts raw private keys. Import uses Privy in the browser; export
-          only via Privy UI. Removing a wallet never moves funds: empty wallets can be deleted, others are hidden and can be restored.
+          only via Privy UI. Removing a wallet never moves funds: hide it (restorable), or remove it for good, which archives it in Privy
+          (wallets that still hold funds need an explicit confirmation).
         </p>
         <div className="row" style={{ marginBottom: 10 }}>
           <ChainSelect value={chain} onChange={setChain} />
@@ -254,7 +259,9 @@ export default function WalletsPage() {
             removal={removal}
             busy={busy}
             onCancel={() => setRemoval(null)}
-            onRemove={(mode) => removeWallet(removal.w, mode)}
+            others={data.wallets.filter((x: any) => x.id !== removal.w.id)}
+            canExport={authenticated && (privyWallets ?? []).some((x: any) => x.address?.toLowerCase() === removal.w.address.toLowerCase())}
+            onRemove={(mode, opts) => removeWallet(removal.w, mode, opts)}
           />
         )}
         {removedList.length > 0 && (
@@ -364,7 +371,7 @@ export default function WalletsPage() {
                 Import via Privy
               </button>
               <p className="muted" style={{ fontSize: 12 }}>
-                Export your own key only through Privy&apos;s wallet UI — SkyBOT has no export API.
+                Keys are exported only in Privy&apos;s own window (Export Private Key in the remove dialog, or home.privy.io); SkyBOT never sees them.
               </p>
               <p className="muted" style={{ fontSize: 12 }}>
                 Signed in as {user?.email?.address ?? "—"} · {privyWallets?.length ?? 0} Privy wallet(s) connected
@@ -380,68 +387,153 @@ export default function WalletsPage() {
 function RemovalPanel({
   removal,
   busy,
+  others,
+  canExport,
   onCancel,
   onRemove,
 }: {
   removal: { w: any; chk: any | null; loading: boolean };
   busy: boolean;
+  others: any[];
+  canExport: boolean;
   onCancel: () => void;
-  onRemove: (mode: "delete" | "hide") => void;
+  onRemove: (mode: "delete" | "hide", opts: { acknowledge?: boolean; confirmLabel?: string; newMainId?: string }) => void;
 }) {
   const { w, chk, loading } = removal;
+  const { exportWallet } = useExportWallet();
+  const [ack, setAck] = useState(false);
+  const [typed, setTyped] = useState("");
+  const [newMain, setNewMain] = useState<string>(others[0]?.id ?? "");
+  const [exportErr, setExportErr] = useState<string | null>(null);
   const funded: any[] = chk?.funded ?? [];
-  const held = funded
-    .map(
-      (f) =>
-        `${Number(f.balance)
-          .toFixed(6)
-          .replace(/\.?0+$/, "")} ${f.symbol} on ${f.chainName}`,
-    )
-    .join(", ");
+  const unchecked: any[] = chk?.unchecked ?? [];
+  const nfts = Number(chk?.heldNfts ?? 0) + Number(chk?.mintedNfts ?? 0);
+  const fmt = (f: any) =>
+    `${Number(f.balance)
+      .toFixed(6)
+      .replace(/\.?0+$/, "")} ${f.symbol}`;
+  const archive = chk?.deleteMode === "archive_and_delete";
+  const hideOnly = chk?.deleteMode === "hide_only";
+  const needsConfirm = Boolean(chk?.requiresConfirmation);
+  const nameOk = typed.trim().toLowerCase() === String(w.label ?? "").trim().toLowerCase();
+  const confirmed = !needsConfirm || (ack && nameOk);
+  const mainOpts = w.isMain && others.length ? { newMainId: newMain || undefined } : {};
   return (
-    <div className="notice" role="dialog" aria-label={`Remove ${w.label}`} style={{ marginTop: 12 }}>
+    <div className="notice removal" role="dialog" aria-label={`Remove ${w.label}`} style={{ marginTop: 12 }}>
       <b>
         Remove {w.label || "wallet"} <span className="mono muted">{short(w.address)}</span>
+        {chk?.walletKind && chk.walletKind !== "unknown" && (
+          <span className="pill" style={{ marginLeft: 6 }}>
+            {chk.walletKind === "imported" ? "Imported" : chk.walletKind === "primary" ? "Primary Privy wallet" : "Created"}
+          </span>
+        )}
       </b>
       {loading && <p className="muted">Checking balances on all chains…</p>}
       {chk && (
         <>
-          {funded.length > 0 ? (
-            <p className="warn">
-              This wallet still holds {held} — withdraw first or it will be hidden, not deleted.{" "}
-              <Link href={`/app/withdraw?wallet=${encodeURIComponent(w.id)}`}>Withdraw first</Link>
+          {funded.length > 0 || unchecked.length > 0 || nfts > 0 ? (
+            <div className="warn">
+              <p style={{ margin: "6px 0" }}>This wallet still holds:</p>
+              <ul style={{ margin: "0 0 6px 18px" }}>
+                {funded.map((f) => (
+                  <li key={f.chain}>
+                    {fmt(f)} on {f.chainName}
+                  </li>
+                ))}
+                {unchecked.map((u) => (
+                  <li key={u.chain}>Unknown balance on {u.chainName} (couldn&apos;t be read)</li>
+                ))}
+                {nfts > 0 && <li>{nfts} NFT(s) per the last holdings scan</li>}
+              </ul>
+              <div className="row">
+                {funded.length > 0 && (
+                  <Link className="button ghost" href={`/app/withdraw?wallet=${encodeURIComponent(w.id)}`}>
+                    Withdraw first
+                  </Link>
+                )}
+                {nfts > 0 && (
+                  <Link className="button ghost" href="/app/nfts">
+                    Send NFTs first
+                  </Link>
+                )}
+              </div>
+            </div>
+          ) : (
+            <p>Empty on all {chk.balances.length} chains.</p>
+          )}
+          {(chk.warnings ?? []).map((n: string) => (
+            <p key={n} className={chk.walletKind === "created" ? "bad" : ""} style={{ margin: "6px 0" }}>
+              {n}
             </p>
-          ) : chk.canDelete && chk.deleteMode !== "hide_only" ? (
-            <p>
-              Empty on all {chk.balances.length} chains.{" "}
-              {chk.deleteMode === "archive_and_delete"
-                ? "Delete removes it from SkyBOT and archives it in Privy (it can no longer sign)."
-                : "Delete removes it from SkyBOT."}
-            </p>
-          ) : null}
+          ))}
+          {archive && chk.walletKind !== "imported" && (
+            <div className="row">
+              <button
+                className="ghost"
+                disabled={!canExport}
+                title={canExport ? "" : "Connect with Privy in this browser to export"}
+                onClick={async () => {
+                  setExportErr(null);
+                  try {
+                    await exportWallet({ address: w.address });
+                  } catch (e: any) {
+                    setExportErr(e?.message ?? "Export failed");
+                  }
+                }}
+              >
+                Export Private Key (Privy)
+              </button>
+              {!canExport && <span className="muted small">Connect with Privy in a browser to export, or use home.privy.io.</span>}
+              {exportErr && <span className="bad small">{exportErr}</span>}
+            </div>
+          )}
           {(chk.notes ?? []).map((n: string) => (
             <p key={n} className="muted small">
               {n}
             </p>
           ))}
+          {w.isMain && others.length > 0 && (
+            <label className="row" style={{ gap: 8 }}>
+              <span>New Main wallet</span>
+              <select value={newMain} onChange={(e) => setNewMain(e.target.value)} style={{ width: "auto" }}>
+                {others.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.label} ({short(o.address)})
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          {needsConfirm && !hideOnly && (
+            <div style={{ margin: "8px 0" }}>
+              <label className="row" style={{ gap: 8, alignItems: "flex-start" }}>
+                <input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} style={{ width: "auto" }} />
+                <span>I understand funds and NFTs left in this wallet will no longer be accessible from SkyBOT.</span>
+              </label>
+              <input
+                value={typed}
+                onChange={(e) => setTyped(e.target.value)}
+                placeholder={`Type "${w.label}" to confirm`}
+                aria-label="Type the wallet name to confirm"
+                style={{ marginTop: 6 }}
+              />
+            </div>
+          )}
           <div className="row">
-            {chk.canDelete && chk.deleteMode !== "hide_only" && (
+            {!hideOnly && (
               <button
                 className="danger"
-                disabled={busy}
+                disabled={busy || !confirmed}
                 onClick={() => {
-                  if (confirm(`Delete ${w.label || "this wallet"} permanently? This can't be undone in SkyBOT.`)) onRemove("delete");
+                  if (needsConfirm || confirm(`Remove ${w.label || "this wallet"} permanently? This can't be undone in SkyBOT.`))
+                    onRemove("delete", { ...(needsConfirm ? { acknowledge: ack, confirmLabel: typed } : {}), ...mainOpts });
                 }}
               >
-                Delete Permanently
+                {archive ? "Remove and Archive in Privy" : "Remove from SkyBOT"}
               </button>
             )}
-            <button
-              className={chk.canDelete && chk.deleteMode !== "hide_only" ? "ghost" : ""}
-              disabled={busy}
-              onClick={() => onRemove("hide")}
-            >
-              Hide from SkyBOT
+            <button className={hideOnly ? "" : "ghost"} disabled={busy} onClick={() => onRemove("hide", mainOpts)}>
+              Hide from SkyBOT (restorable)
             </button>
             <button className="ghost" disabled={busy} onClick={onCancel}>
               Cancel

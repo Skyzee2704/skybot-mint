@@ -404,9 +404,21 @@ export async function buildServer(): Promise<FastifyInstance> {
       return chk;
     });
     a.delete("/api/wallets/:id", async (req) => {
-      const b = z.object({ confirm: z.literal("DELETE"), mode: z.enum(["delete", "hide"]).default("hide") }).parse(req.body ?? {});
+      const b = z
+        .object({
+          confirm: z.literal("DELETE"),
+          mode: z.enum(["delete", "hide"]).default("hide"),
+          acknowledge: z.boolean().optional(),
+          confirmLabel: z.string().max(64).optional(),
+          newMainId: z.string().max(100).optional(),
+        })
+        .parse(req.body ?? {});
       const { removeWalletForUser } = await import("../users/walletRemoval.js");
-      const r = await removeWalletForUser(req.user!, (req.params as any).id, b.mode);
+      const r = await removeWalletForUser(req.user!, (req.params as any).id, b.mode, {
+        acknowledge: b.acknowledge,
+        confirmLabel: b.confirmLabel,
+        newMainId: b.newMainId,
+      });
       await walletSetChanged();
       return { ok: true, ...r };
     });

@@ -25,6 +25,14 @@ export default function WithdrawPage() {
   const [chain, setChain] = usePersistedChain("withdraw");
   const [balances, setBalances] = useState<Record<string, string>>({});
   const [picked, setPicked] = useState<Record<string, boolean>>({});
+  // "Withdraw first" from the remove dialog: preselect that wallet once the list is known.
+  const preselected = useRef(false);
+  useEffect(() => {
+    if (preselected.current || !list.wallets.length) return;
+    preselected.current = true;
+    const id = new URLSearchParams(window.location.search).get("wallet");
+    if (id && list.wallets.some((w) => w.id === id)) setPicked({ [id]: true });
+  }, [list.wallets]);
   const [amounts, setAmounts] = useState<Record<string, string>>({});
   const [to, setTo] = useState("");
   const [quote, setQuote] = useState<any>(null);

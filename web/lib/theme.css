@@ -1134,3 +1134,16 @@ button.copy-toast-close:hover {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
+
+/* Link styled as a button (e.g. "Withdraw first" in the remove dialog) */
+a.button {
+  display: inline-block;
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  text-decoration: none;
+  color: inherit;
+}
+a.button:hover {
+  border-color: var(--orange, #ff7a1a);
+}

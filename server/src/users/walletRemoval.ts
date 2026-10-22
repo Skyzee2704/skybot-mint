@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /**
  * Wallet removal.
- * - "delete": only when the wallet is empty on every configured chain (and holds no SkyBOT-minted NFTs).
- *   The wallet is archived in Privy (POST /v1/wallets/{id}/archive — Privy has no hard delete), then our
- *   row is deleted and a tombstone stops Privy sync from re-adding it.
- *   The user's primary embedded wallet (wallet_index 0, not imported) is never archived — it is hidden instead.
+ * - "delete": the strongest removal Privy supports (verified 2026-10-22 against the live API):
+ *   POST /v1/wallets/{id}/archive (no DELETE endpoint exists; embedded and imported wallets can't be unlinked from
+ *   the Privy user — unlink returns 400 linked_account_not_found), then our row is deleted and a tombstone stops
+ *   Privy sync from re-adding it. A wallet that still holds funds / NFTs needs explicit confirmation (the member
+ *   ticks the acknowledgement and types the wallet name).
+ *   The user's primary embedded wallet (wallet_index 0, not imported) anchors Privy's HD wallets: never archived.
  * - "hide": soft delete (removed_at). Funds stay in Privy custody; restorable from the Wallets page.
  */
 import { formatEther } from "ethers";
@@ -17,7 +19,7 @@ import { minted } from "../db/schema.js";
 import { getPrivy } from "../auth/privy.js";
 import { log, redactString } from "../util/log.js";
 import { cachedNftCount } from "../core/nft/holdings.js";
-import { getWallet, hardDeleteWallet, hideWallet, type AppUser } from "./service.js";
+import { getWallet, hardDeleteWallet, hideWallet, listWallets, setMain, type AppUser } from "./service.js";
 
 export interface ChainBalance {
   chain: string;
@@ -47,8 +49,13 @@ export interface RemovalCheck {
   /** Non-spam NFTs per the cached holdings scan. */
   heldNfts?: number;
   primaryEmbedded: boolean;
-  /** Empty everywhere we can check → may be deleted for real. */
+  /** Empty everywhere we can check (no confirmation needed). */
   canDelete: boolean;
+  /** Funds / NFTs present or a balance unreadable: removal needs the acknowledgement + typed wallet name. */
+  requiresConfirmation: boolean;
+  walletKind: "imported" | "created" | "primary" | "unknown";
+  /** Kind-specific consequences, shown prominently. */
+  warnings: string[];
   /** What "delete" will actually do. */
   deleteMode: "archive_and_delete" | "delete_local" | "hide_only";
   notes: string[];
@@ -64,7 +71,10 @@ export function decideRemoval(input: {
   privyAvailable: boolean;
   /** Non-spam NFTs from the cached holdings scan (NFTs page). */
   heldNfts?: { total: number; byChain: { chain: string; count: number }[] };
-}): Pick<RemovalCheck, "funded" | "unchecked" | "canDelete" | "deleteMode" | "notes" | "primaryEmbedded"> {
+}): Pick<
+  RemovalCheck,
+  "funded" | "unchecked" | "canDelete" | "deleteMode" | "notes" | "primaryEmbedded" | "requiresConfirmation" | "walletKind" | "warnings"
+> {
   const funded = input.balances.filter((b) => b.balanceWei !== null && BigInt(b.balanceWei) > 0n);
   const unchecked = input.balances.filter((b) => b.balanceWei === null);
   const held = input.heldNfts?.total ?? 0;
@@ -75,20 +85,43 @@ export function decideRemoval(input: {
   let deleteMode: RemovalCheck["deleteMode"];
   if (input.privy.primaryEmbedded) {
     deleteMode = "hide_only";
-    notes.push("This is your main Privy embedded wallet. Privy doesn't allow removing it, so SkyBOT can only hide it.");
+    notes.push(
+      "This is your primary Privy wallet: Privy derives your other created wallets from it, so SkyBOT only hides it (it stays usable, and you can restore it here).",
+    );
   } else if (input.privy.id && input.privyAvailable) deleteMode = "archive_and_delete";
   else {
     deleteMode = "delete_local";
     notes.push("Privy wallet id unknown, so the wallet is removed from SkyBOT only and stays in your Privy account.");
   }
-  if (unchecked.length) notes.push(`Couldn't read the balance on ${unchecked.map((u) => u.chainName).join(", ")}. Try again later.`);
+  if (unchecked.length) notes.push(`Couldn't read the balance on ${unchecked.map((u) => u.chainName).join(", ")}. Treat it as possibly funded.`);
   if (held)
     notes.push(
-      `The last holdings scan shows ${held} NFT(s) in this wallet (${input.heldNfts!.byChain.map((c) => `${c.count} on ${c.chain}`).join(", ")}). Send them out on the NFTs page before deleting.`,
+      `The last holdings scan shows ${held} NFT(s) in this wallet (${input.heldNfts!.byChain.map((c) => `${c.count} on ${c.chain}`).join(", ")}).`,
     );
-  if (input.mintedNfts) notes.push(`This wallet minted ${input.mintedNfts} NFT(s) with SkyBOT. Transfer them out before deleting.`);
-  return { funded, unchecked, canDelete, deleteMode, notes, primaryEmbedded: input.privy.primaryEmbedded };
+  if (input.mintedNfts) notes.push(`This wallet minted ${input.mintedNfts} NFT(s) with SkyBOT.`);
+  const walletKind: RemovalCheck["walletKind"] = input.privy.primaryEmbedded
+    ? "primary"
+    : input.privy.imported
+      ? "imported"
+      : input.privy.id
+        ? "created"
+        : "unknown";
+  const warnings: string[] = [];
+  if (deleteMode === "archive_and_delete") {
+    warnings.push(
+      "Removing archives the wallet in Privy: it can no longer sign, send or be exported, and SkyBOT will never show it again. Privy offers no full delete; the address keeps receiving funds, and only Privy support can restore an archived wallet.",
+    );
+    if (walletKind === "imported")
+      warnings.push("This wallet was imported, so you can keep using it anywhere (for example MetaMask) with your own copy of its private key.");
+    else
+      warnings.push(
+        "This wallet was created by Privy and its key exists nowhere else. Unless you export the private key first, anything left in it may be unrecoverable.",
+      );
+  }
+  const requiresConfirmation = !canDelete && deleteMode !== "hide_only";
+  return { funded, unchecked, canDelete, deleteMode, notes, primaryEmbedded: input.privy.primaryEmbedded, requiresConfirmation, walletKind, warnings };
 }
+
 
 async function nativeBalances(address: string): Promise<ChainBalance[]> {
   return Promise.all(
@@ -159,31 +192,67 @@ export async function checkWalletRemoval(user: AppUser, walletId: string): Promi
 export type RemovalResult = {
   result: "deleted" | "hidden";
   archivedInPrivy: boolean;
+  /** Label of the wallet that became Main, when the removed wallet was Main. */
+  newMain: string | null;
   cancelledJobs: number;
   trimmedJobs: number;
   message: string;
 };
 
-export async function removeWalletForUser(user: AppUser, walletId: string, mode: "delete" | "hide"): Promise<RemovalResult> {
+export interface RemovalOptions {
+  /** Ticked "I understand…" (required when the wallet holds funds / NFTs or a balance couldn't be read). */
+  acknowledge?: boolean;
+  /** The wallet's name typed by the member (required with `acknowledge`). */
+  confirmLabel?: string;
+  /** Removing the Main wallet: which wallet becomes Main (default: the oldest remaining). */
+  newMainId?: string;
+}
+
+const sameName = (a: string | null | undefined, b: string | null | undefined) =>
+  (a ?? "").trim().toLowerCase() === (b ?? "").trim().toLowerCase();
+
+/** The member's explicit go-ahead for removing a wallet that still holds something. Pure (tested). */
+export function confirmationProblem(chk: Pick<RemovalCheck, "requiresConfirmation" | "label">, o: RemovalOptions): string | null {
+  if (!chk.requiresConfirmation) return null;
+  if (!o.acknowledge) return "Tick the confirmation to remove a wallet that may still hold funds or NFTs.";
+  if (!sameName(o.confirmLabel, chk.label)) return `Type the wallet name "${chk.label}" exactly to confirm.`;
+  return null;
+}
+
+async function handOverMain(user: AppUser, walletId: string, newMainId?: string) {
+  const w = await getWallet(user.id, walletId, { includeRemoved: true });
+  if (!w.isMain) return null;
+  const rest = (await listWallets(user.id)).filter((x) => x.id !== walletId);
+  if (!rest.length) return null;
+  const pick = newMainId ? rest.find((x) => x.id === newMainId) : rest[0];
+  if (newMainId && !pick) throw Object.assign(new Error("Choose one of your other wallets as the new Main."), { statusCode: 400 });
+  await setMain(user.id, pick!.id);
+  return pick!.label;
+}
+
+export async function removeWalletForUser(
+  user: AppUser,
+  walletId: string,
+  mode: "delete" | "hide",
+  opts: RemovalOptions = {},
+): Promise<RemovalResult> {
   if (mode === "hide") {
+    const nm = await handOverMain(user, walletId, opts.newMainId);
     const j = await hideWallet(user.id, walletId);
-    return { result: "hidden", archivedInPrivy: false, ...j, message: hiddenMsg(j) };
+    return { result: "hidden", archivedInPrivy: false, newMain: nm, ...j, message: `${hiddenMsg(j)}${mainMsg(nm)}` };
   }
   const chk = await checkWalletRemoval(user, walletId);
-  if (!chk.canDelete) {
-    const where = chk.funded.map((f) => `${f.balance} ${f.symbol} on ${f.chainName}`).join(", ");
-    throw Object.assign(
-      new Error(
-        chk.funded.length
-          ? `This wallet still holds ${where}. Withdraw first, or hide it instead.`
-          : chk.notes.filter((n) => !n.startsWith("Tokens")).join(" ") || "This wallet can't be deleted right now.",
-      ),
-      { statusCode: 409, code: "WALLET_NOT_EMPTY", details: { funded: chk.funded, unchecked: chk.unchecked, mintedNfts: chk.mintedNfts } },
-    );
-  }
+  const problem = chk.deleteMode === "hide_only" ? null : confirmationProblem(chk, opts);
+  if (problem)
+    throw Object.assign(new Error(problem), {
+      statusCode: 409,
+      code: "CONFIRMATION_REQUIRED",
+      details: { funded: chk.funded, unchecked: chk.unchecked, mintedNfts: chk.mintedNfts, heldNfts: chk.heldNfts ?? 0 },
+    });
+  const nm = await handOverMain(user, walletId, opts.newMainId);
   if (chk.deleteMode === "hide_only") {
     const j = await hideWallet(user.id, walletId);
-    return { result: "hidden", archivedInPrivy: false, ...j, message: `${chk.notes[1]} ${hiddenMsg(j)}`.trim() };
+    return { result: "hidden", archivedInPrivy: false, newMain: nm, ...j, message: `${chk.notes[1]} ${hiddenMsg(j)}${mainMsg(nm)}`.trim() };
   }
   let archived = false;
   if (chk.deleteMode === "archive_and_delete" && chk.privy.id) {
@@ -201,8 +270,9 @@ export async function removeWalletForUser(user: AppUser, walletId: string, mode:
         return {
           result: "hidden",
           archivedInPrivy: false,
+          newMain: nm,
           ...j,
-          message: `Privy didn't allow deleting this wallet, so it was hidden from SkyBOT instead. ${hiddenMsg(j)}`.trim(),
+          message: `Privy didn't allow archiving this wallet, so it was hidden from SkyBOT instead. ${hiddenMsg(j)}${mainMsg(nm)}`.trim(),
         };
       }
     }
@@ -211,8 +281,9 @@ export async function removeWalletForUser(user: AppUser, walletId: string, mode:
   return {
     result: "deleted",
     archivedInPrivy: archived,
+    newMain: nm,
     ...j,
-    message: `${archived ? "Wallet deleted from SkyBOT and archived in Privy." : "Wallet deleted from SkyBOT."}${jobsMsg(j)}`,
+    message: `${archived ? "Wallet removed from SkyBOT and archived in Privy (it can no longer sign)." : "Wallet removed from SkyBOT."}${jobsMsg(j)}${mainMsg(nm)}`,
   };
 }
 
@@ -221,6 +292,9 @@ function jobsMsg(j: { cancelledJobs: number; trimmedJobs: number }) {
   if (j.cancelledJobs) parts.push(`${j.cancelledJobs} scheduled mint(s) cancelled`);
   if (j.trimmedJobs) parts.push(`removed from ${j.trimmedJobs} scheduled mint(s)`);
   return parts.length ? ` ${parts.join("; ")}.` : "";
+}
+function mainMsg(nm: string | null) {
+  return nm ? ` ${nm} is now your Main wallet.` : "";
 }
 function hiddenMsg(j: { cancelledJobs: number; trimmedJobs: number }) {
   return `Wallet hidden. Funds stay in the wallet; restore it any time under Removed wallets.${jobsMsg(j)}`;
