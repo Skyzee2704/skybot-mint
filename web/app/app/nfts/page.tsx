@@ -46,6 +46,18 @@ const shortId = (id: string) => (id.length > 12 ? `${id.slice(0, 6)}…${id.slic
 const collectionOf = (i: Item) => i.collection ?? short(i.contract);
 const label = (s: Status) => s[0].toUpperCase() + s.slice(1);
 
+/** Unknown contract errors keep their raw 4-byte selector as a small monospace detail. */
+function withSelector(text: string) {
+  const m = /^(.*?)\s*\(unknown error (0x[0-9a-fA-F]{8})\)(.*)$/.exec(text);
+  if (!m) return text;
+  return (
+    <>
+      {m[1]}
+      {m[3]} <span className="mono muted small">error {m[2]}</span>
+    </>
+  );
+}
+
 export default function NftsPage() {
   const api = useApi();
   const { tgOnly, connectPrivy } = useShell();
@@ -595,7 +607,7 @@ export default function NftsPage() {
               {w}
             </div>
           ))}
-          <table style={{ marginTop: 10 }}>
+          <table className="cards send-table" style={{ marginTop: 10 }}>
             <thead>
               <tr>
                 <th>NFT</th>
@@ -612,20 +624,25 @@ export default function NftsPage() {
                 const it = view?.items.find((x) => x.key === i.key);
                 return (
                   <tr key={i.key}>
-                    <td>
-                      {it?.name ?? `#${shortId(i.tokenId)}`}
+                    <td className="full wrap" data-label="NFT">
+                      <b>{it?.name ?? `#${shortId(i.tokenId)}`}</b>
+                      {it?.name && !it.name.includes(String(i.tokenId)) && <span className="mono muted"> #{shortId(i.tokenId)}</span>}
                       <div className="muted small">{it ? collectionOf(it) : short(i.contract)}</div>
                     </td>
-                    <td>
+                    <td className="full" data-label="From">
                       {i.label} <span className="mono muted">{short(i.address)}</span> <CopyAddress address={i.address} />
                     </td>
-                    <td>{i.chainName}</td>
-                    <td className="mono">{i.standard === "erc721" ? "1" : i.quantity}</td>
-                    <td className="mono">{i.tx ? `${fmtEth(i.feeWei, 8)} ${i.nativeSymbol}` : "—"}</td>
-                    <td>
+                    <td data-label="Chain">{i.chainName}</td>
+                    <td className="mono" data-label="Qty">
+                      {i.standard === "erc721" ? "1" : i.quantity}
+                    </td>
+                    <td className="mono" data-label="Network Fee">
+                      {i.tx ? `${fmtEth(i.feeWei, 8)} ${i.nativeSymbol}` : "—"}
+                    </td>
+                    <td className="full wrap" data-label="Status">
                       {!st ? (
                         i.skip ? (
-                          <span className="warn">Skipped: {i.skip}</span>
+                          <span className="warn">Skipped: {withSelector(i.skip)}</span>
                         ) : (
                           <span className="muted">Ready</span>
                         )
@@ -636,7 +653,7 @@ export default function NftsPage() {
                           }
                         >
                           {label(st.status)}
-                          {st.error ? `: ${st.error}` : ""}{" "}
+                          {st.error ? <>: {withSelector(st.error)}</> : ""}{" "}
                           {st.explorer && (
                             <a href={st.explorer} target="_blank" rel="noreferrer">
                               View

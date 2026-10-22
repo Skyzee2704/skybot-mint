@@ -8,6 +8,7 @@
 import { createHmac } from "node:crypto";
 import { Interface, Signature, Transaction, ZeroAddress, getAddress, keccak256 } from "ethers";
 import type { NftStandard } from "./indexer.js";
+import { gasShortfallMessage } from "../tx/revert.js";
 
 export const nftIface = new Interface([
   "function safeTransferFrom(address from, address to, uint256 tokenId)",
@@ -78,7 +79,7 @@ export interface PlanItem {
  * Gas check for one wallet on one chain (pure, unit-tested): include transfers in order while the wallet's native
  * balance covers their summed network fees; the rest are skipped with a clear reason instead of failing on-chain.
  */
-export function planWalletGas(balance: bigint, gasPrice: bigint, items: PlanItem[]) {
+export function planWalletGas(balance: bigint, gasPrice: bigint, items: PlanItem[], symbol = "ETH") {
   let spent = 0n;
   const out: { key: string; fee: bigint; ok: boolean; skip: string | null }[] = [];
   for (const it of items) {
@@ -86,7 +87,7 @@ export function planWalletGas(balance: bigint, gasPrice: bigint, items: PlanItem
     if (spent + fee <= balance) {
       spent += fee;
       out.push({ key: it.key, fee, ok: true, skip: null });
-    } else out.push({ key: it.key, fee, ok: false, skip: "not enough native token for gas" });
+    } else out.push({ key: it.key, fee, ok: false, skip: gasShortfallMessage(spent + fee, balance, symbol) });
   }
   return { items: out, totalFee: spent, needed: items.reduce((s, i) => s + i.gasLimit * gasPrice + i.l1Fee, 0n) };
 }

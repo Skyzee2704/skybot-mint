@@ -1110,3 +1110,27 @@ button.copy-toast-close:hover {
   -webkit-user-select: all;
   color: var(--cream);
 }
+
+/* Send NFT review table on phones: labelled stacked cells, names and reasons wrap instead of truncating */
+@media (max-width: 720px) {
+  table.cards td[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--muted, #8a8a8a);
+  }
+  table.cards td.full {
+    grid-column: 1 / -1;
+  }
+  table.cards td.wrap {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    white-space: normal;
+  }
+  table.send-table tr {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}

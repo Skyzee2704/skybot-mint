@@ -15,6 +15,7 @@ import { log, redactString } from "../util/log.js";
 import { nativeBalancesBatch } from "../core/rpc/multicall.js";
 import { invalidateBalances } from "../util/balanceCache.js";
 import { FUND_MAX_TARGETS, pickFundTargets, quoteFund } from "../core/fund.js";
+import { describeTxError } from "../core/tx/revert.js";
 
 const hex = z.string().regex(/^0x[0-9a-fA-F]*$/);
 const unsignedTx = z.object({
@@ -168,7 +169,7 @@ export function registerWithdrawRoutes(a: FastifyInstance) {
       await audit(req.user!.id, "withdraw.sent", chain.key, b.tx.to.toLowerCase(), { ...base, hash: r.hash });
       return { hash: r.hash, explorer: explorerTx(chain, r.hash) };
     } catch (e: any) {
-      const msg = redactString(String(e?.shortMessage ?? e?.message ?? e)).slice(0, 200);
+      const msg = (await describeTxError(e, { chain, contracts: [b.tx.to] })).message.slice(0, 200);
       await audit(req.user!.id, "withdraw.failed", chain.key, b.tx.to.toLowerCase(), { ...base, error: msg });
       throw Object.assign(new Error(`Broadcast failed: ${msg}`), { statusCode: 502 });
     }
@@ -251,7 +252,7 @@ export function registerWithdrawRoutes(a: FastifyInstance) {
       await audit(req.user!.id, "fund.sent", chain.key, dest.address.toLowerCase(), { ...base, hash: r.hash });
       return { hash: r.hash, explorer: explorerTx(chain, r.hash) };
     } catch (e: any) {
-      const msg = redactString(String(e?.shortMessage ?? e?.message ?? e)).slice(0, 200);
+      const msg = (await describeTxError(e, { chain, contracts: [b.tx.to] })).message.slice(0, 200);
       await audit(req.user!.id, "fund.failed", chain.key, dest.address.toLowerCase(), { ...base, error: msg });
       throw Object.assign(new Error(`Broadcast failed: ${msg}`), { statusCode: 502 });
     }

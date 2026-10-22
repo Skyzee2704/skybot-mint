@@ -30,6 +30,7 @@ import {
 } from "../core/nft/transfer.js";
 import { invalidateBalances } from "../util/balanceCache.js";
 import { log, redactString } from "../util/log.js";
+import { describeTxError, gasShortfallMessage, isInsufficientFunds, revertDataOf } from "../core/tx/revert.js";
 
 const hex = z.string().regex(/^0x[0-9a-fA-F]*$/);
 const addr = z.string().regex(/^0x[0-9a-fA-F]{40}$/);
@@ -96,9 +97,22 @@ function l1Sized(tx: { to: string; data: string; nonce: number; gasLimit: bigint
 }
 
 type Wallet = { id: string; label: string; address: string };
+
+/** Limit Break creator tokens route transfers through a validator contract whose ABI defines the revert. */
+async function transferValidatorOf(pool: RpcPool, contract: string): Promise<string[]> {
+  try {
+    const v = (await pool.read(
+      (p) => new Contract(contract, ["function getTransferValidator() view returns (address)"], p).getTransferValidator(),
+      "getTransferValidator",
+    )) as string;
+    return /^0x[0-9a-fA-F]{40}$/.test(v) && !/^0x0{40}$/i.test(v) ? [v] : [];
+  } catch {
+    return [];
+  }
+}
 type In = z.infer<typeof quoteItem> & { w: Wallet };
 
-async function quoteChain(chain: ChainConfig, pool: RpcPool, to: string, items: In[], userId: string, secret: Buffer) {
+export async function quoteChain(chain: ChainConfig, pool: RpcPool, to: string, items: In[], userId: string, secret: Buffer) {
   const wallets = [...new Map(items.map((i) => [i.w.id, i.w])).values()];
   // Fresh reads, batched: destination code, gas price, every source balance (1 multicall), ownership (1 multicall).
   const [code, gasPrice, balances, owned, nonces] = await Promise.all([
@@ -163,12 +177,16 @@ async function quoteChain(chain: ChainConfig, pool: RpcPool, to: string, items: 
           skip: null as string | null,
         };
       } catch (e: any) {
-        const m = String(e?.shortMessage ?? e?.reason ?? e?.message ?? e);
-        const why = /insufficient funds/i.test(m)
-          ? "not enough native token for gas"
-          : isContract
-            ? "transfer would fail: the destination contract may not accept NFTs"
-            : `transfer would fail: ${redactString(m).slice(0, 120)}`;
+        // Re-run as eth_call when the estimate error carries no revert data, so the real reason can be decoded.
+        let err = e;
+        if (!revertDataOf(e) && !isInsufficientFunds(e))
+          err = await pool.read((p) => p.call({ from: i.w.address, to: i.contract, data }), "eth_call").then(() => e, (x: any) => x);
+        const d = await describeTxError(err, { chain, contracts: async () => [i.contract, ...(await transferValidatorOf(pool, i.contract))] });
+        const why = isInsufficientFunds(err)
+          ? gasShortfallMessage(150_000n * gasPrice, balances.get(i.w.address.toLowerCase()) ?? 0n, chain.nativeSymbol)
+          : !d.selector && isContract && /without giving a reason/.test(d.message)
+            ? "The destination contract may not accept NFTs."
+            : d.message;
         return { ...base, quantity: want.toString(), held: held.toString(), gasLimit: 0n, data, skip: why };
       }
     },
@@ -200,6 +218,7 @@ async function quoteChain(chain: ChainConfig, pool: RpcPool, to: string, items: 
       bal,
       gasPrice,
       mine.filter((p) => !p.skip).map((p) => ({ key: p.key, gasLimit: p.gasLimit, l1Fee })),
+      chain.nativeSymbol,
     );
     if (plan.needed > bal) short.push({ walletId: w.id, label: w.label, needWei: plan.needed.toString(), haveWei: bal.toString() });
     let nonce = nonceOf.get(w.id)!;
@@ -401,7 +420,7 @@ export function registerNftRoutes(a: FastifyInstance) {
       }).catch((e) => log.warn("nft cache update failed", String(e?.message ?? e).slice(0, 120)));
       return { hash: r.hash, explorer: explorerTx(chain, r.hash) };
     } catch (e: any) {
-      const msg = redactString(String(e?.shortMessage ?? e?.message ?? e)).slice(0, 200);
+      const msg = (await describeTxError(e, { chain, contracts: [b.tx.to] })).message.slice(0, 200);
       await audit(req.user!.id, "nft.failed", chain.key, transfer.to.toLowerCase(), { ...detail, error: msg });
       throw Object.assign(new Error(`Broadcast failed: ${msg}`), { statusCode: 502 });
     }

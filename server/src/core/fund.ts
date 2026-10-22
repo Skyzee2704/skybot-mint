@@ -13,6 +13,7 @@ import { formatEther, toBeHex } from "ethers";
 import type { ChainConfig } from "../config/chains.js";
 import type { RpcPool } from "./rpc/pool.js";
 import { EOA_TRANSFER_GAS, L1_FEE_BUFFER_PCT, l1SizedTx, opL1Fee, signQuote, type Amount, type UnsignedWithdrawTx } from "./withdraw.js";
+import { describeTxError } from "./tx/revert.js";
 
 export const FUND_MAX_TARGETS = 50;
 const GAS_BUFFER_PCT = 110n;
@@ -124,9 +125,9 @@ export async function quoteFund(opts: {
       if (!isContract && chain.stack !== "arbitrum") return EOA_TRANSFER_GAS;
       const est = await pool
         .read((p) => p.estimateGas({ from: main.address, to: t.address, value: 1n }), "estimateGas")
-        .catch((e: any) => {
+        .catch(async (e: any) => {
           throw httpError(
-            `Gas estimate failed for ${t.label}: ${String(e?.shortMessage ?? e?.message ?? e).slice(0, 140)}`,
+            `Gas estimate failed for ${t.label}: ${(await describeTxError(e, { chain, contracts: [t.address] })).message}`,
             400,
             "ESTIMATE_FAILED",
           );

@@ -14,6 +14,7 @@ import type { RpcPool } from "../rpc/pool.js";
 import type { ChainConfig } from "../../config/chains.js";
 import { env } from "../../config/env.js";
 import { SEADROP_ADDRESS } from "../resolver/seadrop.js";
+import { decodeRevertData, explainRevert } from "../tx/revert.js";
 
 export type AllowStatus = "yes" | "no" | "unknown" | "public" | "n/a";
 export interface AccessResult {
@@ -75,7 +76,20 @@ export function decodeRevert(data: string | null | undefined): string | null {
   } catch {
     /* ignore */
   }
-  return `revert ${data.slice(0, 10)}`;
+  const d = decodeRevertData(data);
+  return d.via === "none" ? `revert ${data.slice(0, 10)}` : d.message;
+}
+
+/** Decoded mint revert: SeaDrop / common errors first, then the contract's verified ABI or the signature DB. */
+async function mintRevertReason(pool: RpcPool, to: string, data: string | null, e: any): Promise<string> {
+  const local = decodeRevert(data);
+  if (local && !local.startsWith("revert 0x")) return local;
+  if (data) {
+    const d = await explainRevert(data, { chain: pool.chain, contracts: [to] }).catch(() => null);
+    if (d && d.via !== "none") return d.name && !d.message.includes(d.name) ? `${d.message} (${d.name})` : d.message;
+    return local ?? d?.message ?? "execution reverted";
+  }
+  return String(e?.shortMessage ?? e?.reason ?? "execution reverted").slice(0, 200);
 }
 
 /** Which access verdict a revert implies. */
@@ -127,7 +141,7 @@ export async function simulateIgnoringBalance(
     if (data !== null || e?.code === "CALL_EXCEPTION") {
       return {
         ok: false,
-        reason: decodeRevert(data) ?? String(e?.shortMessage ?? e?.reason ?? "execution reverted").slice(0, 200),
+        reason: await mintRevertReason(pool, tx.to, data, e),
         source: "eth_call + stateOverride (fake balance)",
       };
     }

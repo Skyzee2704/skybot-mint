@@ -12,6 +12,7 @@ import { MintRequest } from "./types.js";
 import { createPlan } from "../plans.js";
 import { simulateIgnoringBalance } from "./access.js";
 import { getAddress, toQuantity } from "ethers";
+import { decodeRevertData, revertDataOf } from "../tx/revert.js";
 
 export interface SimRow {
   walletId: string;
@@ -79,6 +80,11 @@ export function fallbackGas(strategy: MintRequest["strategy"], qty: number): big
 }
 
 export function revertReason(e: any): string {
+  const data = revertDataOf(e);
+  if (data) {
+    const d = decodeRevertData(data);
+    if (d.via !== "none") return d.message.slice(0, 240);
+  }
   return String(e?.reason ?? e?.revert?.name ?? e?.info?.error?.message ?? e?.shortMessage ?? e?.message ?? e).slice(0, 240);
 }
 

@@ -20,6 +20,7 @@ import { Contract, Signature, Transaction, ZeroAddress, formatEther, getAddress,
 import type { ChainConfig } from "../config/chains.js";
 import type { RpcPool } from "./rpc/pool.js";
 import { getFees } from "./mint/fees.js";
+import { describeTxError } from "./tx/revert.js";
 
 export const OP_GAS_PRICE_ORACLE = "0x420000000000000000000000000000000000000F";
 const ORACLE_ABI = ["function getL1Fee(bytes _data) view returns (uint256)"];
@@ -180,9 +181,9 @@ export async function quoteWallet(
     const probe = amount.kind === "exact" ? amount.wei : balance > 0n ? 1n : 0n;
     const est = await pool
       .read((p) => p.estimateGas({ from: w.address, to, value: probe }), "estimateGas")
-      .catch((e: any) => {
+      .catch(async (e: any) => {
         throw httpError(
-          `Gas estimate failed for ${w.label}: ${String(e?.shortMessage ?? e?.message ?? e).slice(0, 140)}`,
+          `Gas estimate failed for ${w.label}: ${(await describeTxError(e, { chain, contracts: [to] })).message}`,
           400,
           "ESTIMATE_FAILED",
         );
