@@ -9,6 +9,8 @@ import { useApi, useShell } from "@/components/AppShell";
 import { formatDateTime, localTimeZone } from "@/lib/time";
 import { useNow } from "@/lib/useNow";
 import { assertSignableChain, withSignTimeout } from "@/lib/signing";
+import { NFTS_KEY, ago, mutate as mutateCache, nftsFetcher, useSWR } from "@/lib/swr";
+import { LazyImg, NftGrid, thumb } from "@/components/NftGrid";
 
 type Item = {
   key: string;
@@ -32,6 +34,8 @@ type View = {
   missing: number;
   lastRefreshAt: string | null;
   cooldownMs: number;
+  /** A webhook-queued re-scan is due at this time (the page re-reads the cache shortly after). */
+  rescanDueAt?: string | null;
 };
 type Status = "queued" | "signing" | "sent" | "confirmed" | "failed" | "skipped";
 type RunState = Record<string, { status: Status; hash?: string; explorer?: string; error?: string }>;
@@ -46,8 +50,10 @@ export default function NftsPage() {
   const { tgOnly, connectPrivy } = useShell();
   const { authenticated } = usePrivy();
   const { signTransaction } = useSignTransaction();
-  const [view, setView] = useState<View | null>(null);
-  const [loadedAt, setLoadedAt] = useState(0);
+  // Stale-while-revalidate: the last list renders instantly (per user, this device), refreshed in the background.
+  const cached = useSWR<View>(NFTS_KEY, nftsFetcher(api), { freshMs: 10_000 });
+  const view = cached.data ?? null;
+  const loadedAt = cached.at;
   const [scanning, setScanning] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [wallet, setWallet] = useState("");
@@ -69,10 +75,7 @@ export default function NftsPage() {
   const autoScanned = useRef(false);
   const stopRef = useRef<AbortController | null>(null);
 
-  const accept = (v: View) => {
-    setView(v);
-    setLoadedAt(Date.now());
-  };
+  const accept = useCallback((v: View) => mutateCache(NFTS_KEY, v), []);
 
   /** Indexer scan. "missing" = wallet/chain pairs never scanned; "all" = manual refresh (60 s cooldown). */
   const scan = useCallback(
@@ -93,21 +96,25 @@ export default function NftsPage() {
         setScanning(null);
       }
     },
-    [api],
+    [api, accept],
   );
 
-  // Opening the page reads the cache only; a scan runs automatically just for wallets never scanned before.
+  // Opening the page reads the DB cache only; a scan runs automatically just for wallets never scanned before
+  // (decided on the revalidated server view, never on the locally cached copy).
   useEffect(() => {
-    api<View>("/api/nfts")
-      .then((v) => {
-        accept(v);
-        if (v.missing > 0 && !autoScanned.current) {
-          autoScanned.current = true;
-          void scan("missing");
-        }
-      })
-      .catch((e) => setErr(e.message));
-  }, [api, scan]);
+    if (cached.validating || !view || cached.error) return;
+    if (view.missing > 0 && !autoScanned.current) {
+      autoScanned.current = true;
+      void scan("missing");
+    }
+  }, [cached.validating, view, cached.error, scan]);
+  // A webhook queued a re-scan (NFT moved on-chain): re-read the cache right after it is due.
+  const dueAt = view?.rescanDueAt ? Date.parse(view.rescanDueAt) : 0;
+  useEffect(() => {
+    if (!dueAt) return;
+    const t = setTimeout(() => void cached.revalidate(true), Math.max(2_000, dueAt - Date.now() + 8_000));
+    return () => clearTimeout(t);
+  }, [dueAt]); // eslint-disable-line
 
   const wallets = useMemo(() => view?.wallets ?? [], [view]);
   const walletById = useMemo(() => new Map(wallets.map((w) => [w.id, w])), [wallets]);
@@ -296,9 +303,7 @@ export default function NftsPage() {
       return n;
     });
     // The server already updated the cached holdings for the affected wallets; re-read the cache (no scan).
-    api<View>("/api/nfts")
-      .then(accept)
-      .catch(() => {});
+    void cached.revalidate(true);
     if (sent.length) await pollAll(sent);
   };
 
@@ -338,7 +343,9 @@ export default function NftsPage() {
           <h2 style={{ margin: 0 }}>NFTs</h2>
           <div className="row">
             <span className="muted small">
-              {view?.lastRefreshAt ? `Last refreshed ${fmt(view.lastRefreshAt)}` : "Not refreshed manually yet"}
+              {loadedAt ? `Updated ${ago(loadedAt, now)}` : ""}
+              {cached.validating && view ? " · checking…" : ""}
+              {view?.lastRefreshAt ? ` · last full refresh ${fmt(view.lastRefreshAt)}` : ""}
             </span>
             <button className="ghost" disabled={!!scanning || cooldownLeft > 0 || !wallets.length} onClick={() => scan("all")}>
               {cooldownLeft > 0 ? `Refresh in ${Math.ceil(cooldownLeft / 1000)}s` : "Refresh"}
@@ -357,7 +364,7 @@ export default function NftsPage() {
           </div>
         )}
         {scanning && <p className="muted">{scanning}</p>}
-        {err && <div className="err">{err}</div>}
+        {(err ?? (!view ? cached.error : null)) && <div className="err">{err ?? cached.error}</div>}
         {scanErrors.length > 0 && (
           <div className="notice small">
             Couldn&apos;t scan {scanErrors.length} wallet/chain pair{scanErrors.length === 1 ? "" : "s"} (
@@ -454,10 +461,11 @@ export default function NftsPage() {
           <p className="muted">{view.items.length ? "No NFTs match these filters." : "No NFTs found in your wallets yet."}</p>
         )}
 
-        {groups.map(([g, items]) => {
-          const all = items.every((i) => picked[i.key]);
-          return (
-            <div key={g} style={{ marginTop: 16 }}>
+        <NftGrid
+          groups={groups}
+          header={(g, items) => {
+            const all = items.every((i) => picked[i.key]);
+            return (
               <div className="row" style={{ justifyContent: "space-between" }}>
                 <b>
                   {groupTitle(g, items)} <span className="muted small">· {items.length}</span>
@@ -466,75 +474,69 @@ export default function NftsPage() {
                   {all ? "Clear" : "Select All"}
                 </button>
               </div>
-              <div className="nft-grid">
-                {items.map((i) => {
-                  const w = walletById.get(i.walletId);
-                  const on = Boolean(picked[i.key]);
-                  return (
-                    <label key={i.key} className={`nft-card${on ? " on" : ""}`}>
-                      <div className="nft-img">
-                        {i.image ? (
-                          <img src={i.image} alt="" loading="lazy" referrerPolicy="no-referrer" />
-                        ) : (
-                          <span className="muted small">No image</span>
-                        )}
-                        <input
-                          type="checkbox"
-                          checked={on}
-                          onChange={(e) => setMany([i], e.target.checked)}
-                          aria-label={`Select ${i.name ?? i.tokenId}`}
-                        />
-                      </div>
-                      <div className="nft-meta">
-                        <b title={i.name ?? ""}>{i.name ?? `#${shortId(i.tokenId)}`}</b>
-                        <span className="muted small" title={i.collection ?? i.contract}>
-                          {collectionOf(i)}
-                        </span>
-                        <span className="small mono" title={i.tokenId}>
-                          ID {shortId(i.tokenId)}
-                        </span>
-                        <span className="row small" style={{ gap: 4 }}>
-                          <span className="pill">{chainByKey.get(i.chain)?.name ?? i.chain}</span>
-                          <span className="tag">{i.standard === "erc721" ? "ERC-721" : `ERC-1155 × ${i.quantity ?? "?"}`}</span>
-                          {i.spam && <span className="tag warn">Spam?</span>}
-                        </span>
-                        {group !== "wallet" && <span className="small muted">{w?.label ?? short(w?.address)}</span>}
-                        {i.standard === "erc1155" && on && (
-                          <span className="row small" style={{ gap: 6 }} onClick={(e) => e.preventDefault()}>
-                            Qty
-                            <input
-                              inputMode="numeric"
-                              value={qty[i.key] ?? i.quantity ?? "1"}
-                              onChange={(e) => {
-                                setQty((m) => ({ ...m, [i.key]: e.target.value.replace(/[^0-9]/g, "") }));
-                                resetQuote();
-                              }}
-                              style={{ width: 80, padding: "4px 8px" }}
-                              aria-label="Quantity"
-                            />
-                            {i.quantity && (
-                              <button
-                                className="ghost"
-                                style={{ padding: "2px 8px", fontSize: 12 }}
-                                onClick={() => {
-                                  setQty((m) => ({ ...m, [i.key]: i.quantity! }));
-                                  resetQuote();
-                                }}
-                              >
-                                Max
-                              </button>
-                            )}
-                          </span>
-                        )}
-                        {!qtyValid(i) && on && <span className="bad small">Quantity must be 1 to {i.quantity ?? "your balance"}</span>}
-                      </div>
-                    </label>
-                  );
-                })}
-              </div>
-            </div>
-          );
-        })}
+            );
+          }}
+          card={(i) => {
+            const w = walletById.get(i.walletId);
+            const on = Boolean(picked[i.key]);
+            return (
+              <label key={i.key} className={`nft-card${on ? " on" : ""}`}>
+                <div className="nft-img">
+                  {i.image ? <LazyImg src={thumb(i.image) ?? i.image} /> : <span className="muted small">No image</span>}
+                  <input
+                    type="checkbox"
+                    checked={on}
+                    onChange={(e) => setMany([i], e.target.checked)}
+                    aria-label={`Select ${i.name ?? i.tokenId}`}
+                  />
+                </div>
+                <div className="nft-meta">
+                  <b title={i.name ?? ""}>{i.name ?? `#${shortId(i.tokenId)}`}</b>
+                  <span className="muted small" title={i.collection ?? i.contract}>
+                    {collectionOf(i)}
+                  </span>
+                  <span className="small mono" title={i.tokenId}>
+                    ID {shortId(i.tokenId)}
+                  </span>
+                  <span className="row small" style={{ gap: 4 }}>
+                    <span className="pill">{chainByKey.get(i.chain)?.name ?? i.chain}</span>
+                    <span className="tag">{i.standard === "erc721" ? "ERC-721" : `ERC-1155 × ${i.quantity ?? "?"}`}</span>
+                    {i.spam && <span className="tag warn">Spam?</span>}
+                  </span>
+                  {group !== "wallet" && <span className="small muted">{w?.label ?? short(w?.address)}</span>}
+                  {i.standard === "erc1155" && on && (
+                    <span className="row small" style={{ gap: 6 }} onClick={(e) => e.preventDefault()}>
+                      Qty
+                      <input
+                        inputMode="numeric"
+                        value={qty[i.key] ?? i.quantity ?? "1"}
+                        onChange={(e) => {
+                          setQty((m) => ({ ...m, [i.key]: e.target.value.replace(/[^0-9]/g, "") }));
+                          resetQuote();
+                        }}
+                        style={{ width: 80, padding: "4px 8px" }}
+                        aria-label="Quantity"
+                      />
+                      {i.quantity && (
+                        <button
+                          className="ghost"
+                          style={{ padding: "2px 8px", fontSize: 12 }}
+                          onClick={() => {
+                            setQty((m) => ({ ...m, [i.key]: i.quantity! }));
+                            resetQuote();
+                          }}
+                        >
+                          Max
+                        </button>
+                      )}
+                    </span>
+                  )}
+                  {!qtyValid(i) && on && <span className="bad small">Quantity must be 1 to {i.quantity ?? "your balance"}</span>}
+                </div>
+              </label>
+            );
+          }}
+        />
       </div>
 
       <div className="card">

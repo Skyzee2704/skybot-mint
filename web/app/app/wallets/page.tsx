@@ -4,6 +4,17 @@ import { CopyAddress } from "@/components/CopyAddress";
 import { short } from "@/lib/api";
 import { useEffect, useRef, useState } from "react";
 import { useWalletList } from "@/lib/wallets";
+import {
+  ago,
+  balancesAsOf,
+  balancesFetcher,
+  balancesKey,
+  preferredBalanceChain,
+  revalidate,
+  setPreferredBalanceChain,
+  useSWR,
+} from "@/lib/swr";
+import { useNow } from "@/lib/useNow";
 import { useCreateWallet, useImportWallet, useWallets, usePrivy } from "@privy-io/react-auth";
 import { useApi, useShell } from "@/components/AppShell";
 import { ChainSelect } from "@/components/ChainSelect";
@@ -30,31 +41,35 @@ export default function WalletsPage() {
   const [label, setLabel] = useState("");
   const [group, setGroup] = useState("");
   const [genN, setGenN] = useState(3);
-  const [chain, setChain] = useState("base");
-  const [balances, setBalances] = useState<Record<string, string>>({});
-  const [balLoading, setBalLoading] = useState(false);
+  const [chain, setChainState] = useState(() => (typeof window === "undefined" ? "base" : preferredBalanceChain()));
+  const setChain = (c: string) => {
+    setPreferredBalanceChain(c);
+    setChainState(c);
+  };
   const [busy, setBusy] = useState(false);
+  const now = useNow(5000);
 
-  // Balances load lazily (after the list is on screen), all wallets in parallel server-side, 15 s server cache.
-  const balKey = `${chain}:${data.wallets.map((w) => w.id).join(",")}`;
-  const lastBalKey = useRef("");
-  const loadBalances = async (force = false) => {
-    if (!data.wallets.length || (!force && lastBalKey.current === balKey)) return;
-    lastBalKey.current = balKey;
-    setBalLoading(true);
+  // Stale-while-revalidate: last balances render instantly (per user, this device), refreshed in the background.
+  // The server answers from its 30 s cache unless an Alchemy webhook reported a transfer for that wallet.
+  const bal = useSWR(list.loading ? null : balancesKey(chain), balancesFetcher(api, chain), { freshMs: 10_000, asOf: balancesAsOf });
+  const balances: Record<string, string> = Object.fromEntries(
+    (bal.data?.balances ?? []).map((b: any) => [b.walletId, b.balance ?? "error"]),
+  );
+  const [manual, setManual] = useState(false);
+  const refreshBalances = async () => {
+    setManual(true);
     try {
-      const r = await api("/api/wallets/balances", { body: { chain } });
-      setBalances(Object.fromEntries(r.balances.map((b: any) => [b.walletId, b.balance ?? "error"])));
-    } catch {
-      /* balances are best-effort */
+      await revalidate(balancesKey(chain), balancesFetcher(api, chain, true), { force: true, asOf: balancesAsOf });
     } finally {
-      setBalLoading(false);
+      setManual(false);
     }
   };
-  useEffect(() => setBalances({}), [chain]);
+  // A wallet the cached result doesn't know yet (just created / imported): fetch now.
+  const walletIdsKey = data.wallets.map((w) => w.id).join(",");
   useEffect(() => {
-    if (!list.refreshing) void loadBalances();
-  }, [balKey, list.refreshing]); // eslint-disable-line
+    if (bal.data && data.wallets.some((w) => !(w.id in balances))) void bal.revalidate(true);
+  }, [walletIdsKey, !!bal.data]); // eslint-disable-line
+  const balLoading = manual || (bal.validating && !bal.data);
 
   // Keep server DB in sync with Privy-linked wallets — only when Privy knows a wallet we don't (no reload otherwise).
   useEffect(() => {
@@ -148,9 +163,13 @@ export default function WalletsPage() {
         </p>
         <div className="row" style={{ marginBottom: 10 }}>
           <ChainSelect value={chain} onChange={setChain} />
-          <button className="ghost" disabled={balLoading} onClick={() => loadBalances(true)}>
-            {balLoading ? "Refreshing…" : "Refresh Balances"}
+          <button className="ghost" disabled={balLoading} onClick={refreshBalances}>
+            {manual ? "Refreshing…" : "Refresh Balances"}
           </button>
+          <span className="muted small" style={{ minWidth: 120 }}>
+            {bal.at ? `Updated ${ago(bal.at, now)}` : ""}
+            {bal.validating && bal.data ? " · checking…" : ""}
+          </span>
         </div>
         <table className="cards">
           <thead>

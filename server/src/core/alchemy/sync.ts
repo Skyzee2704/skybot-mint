@@ -173,7 +173,8 @@ async function doSync(opts: { mode?: "auto" | "full"; fetchImpl?: NotifyFetch; n
     const r = rows.get(net);
     if (!r) return true;
     const age = now - Date.parse(r.syncedAt);
-    if (r.error) return age > ERROR_RETRY_MS || r.addressHash !== hash;
+    // Plan limit (403 "maximum number of active webhooks"): retry rarely; it only clears when the plan changes.
+    if (r.error) return age > (/maximum number of active webhooks/i.test(r.error) ? RECHECK_MS : ERROR_RETRY_MS);
     return r.addressHash !== hash || age > RECHECK_MS || !r.signingKeyEnc;
   });
   const networks: NetworkStatus[] = Object.entries(ALCHEMY_WEBHOOK_NETWORK)

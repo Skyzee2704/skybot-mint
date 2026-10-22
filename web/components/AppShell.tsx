@@ -7,6 +7,7 @@ import { createContext, useCallback, useContext, useEffect, useState } from "rea
 import { api } from "@/lib/api";
 import { useTelegram } from "@/lib/telegram";
 import { clearWalletCache } from "@/lib/wallets";
+import { clearSwrCache, prefetchMenus, setCacheScope } from "@/lib/swr";
 import { ShellNav } from "./ShellNav";
 
 /** How long the Mini App waits for Privy's seamless Telegram login before using the verified-initData fallback. */
@@ -102,6 +103,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, [authenticated, sgKey, privyWallets?.length, user?.linkedAccounts?.length]);
   const connectPrivy = useCallback(() => login({ loginMethods: ["telegram"] } as any), [login]);
 
+  // Per-user client cache + warm Wallets / NFTs once per sign-in (deduped with the pages' own requests).
+  const shellApi = useApi();
+  const meId: string | null = me?.user?.id ?? null;
+  useEffect(() => {
+    if (!meId) return;
+    setCacheScope(meId);
+    prefetchMenus(shellApi);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [meId]);
+
   useEffect(() => {
     if (!ready) return;
     let cancelled = false;
@@ -171,8 +182,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     );
   }
 
-  const account =
-    me?.user?.email ?? user?.email?.address ?? (me?.user?.telegramUsername ? `@${me.user.telegramUsername}` : "Signed in");
+  const account = me?.user?.email ?? user?.email?.address ?? (me?.user?.telegramUsername ? `@${me.user.telegramUsername}` : "Signed in");
 
   return (
     <>
@@ -184,6 +194,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           !tgOnly && !isMiniApp
             ? () => {
                 clearWalletCache();
+                clearSwrCache();
                 logout().then(() => router.push("/"));
               }
             : undefined
