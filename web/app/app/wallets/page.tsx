@@ -217,7 +217,15 @@ export default function WalletsPage() {
                 </td>
                 <td className="row actions">
                   {!w.isMain && (
-                    <button className="ghost" onClick={() => run(() => api(`/api/wallets/${w.id}/main`, { body: {} }), "Main set")}>
+                    <button className="ghost" onClick={() =>
+                        run(async () => {
+                          list.setMainLocal(w.id);
+                          await api(`/api/wallets/${w.id}/main`, { body: {} }).catch(async (e) => {
+                            await load(); // undo the optimistic reorder
+                            throw e;
+                          });
+                        }, "Main set")
+                      }>
                       Set Main
                     </button>
                   )}

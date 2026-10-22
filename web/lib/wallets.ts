@@ -9,6 +9,7 @@ export type WalletItem = {
   source: string;
   isMain: boolean;
   privyWalletId: string | null;
+  createdAt?: string;
   removedAt?: string | null;
 };
 export type WalletData = {
@@ -16,6 +17,18 @@ export type WalletData = {
   /** Wallets hidden from SkyBOT (still in Privy custody). */
   removedWallets?: WalletItem[];
 };
+
+/** Same order as the server: Main first, then oldest added / imported first, then id (stable). */
+export function sortWallets<T extends { isMain: boolean; createdAt?: string; id: string }>(ws: readonly T[]): T[] {
+  return [...ws].sort((a, b) => {
+    if (a.isMain !== b.isMain) return a.isMain ? -1 : 1;
+    const x = a.createdAt ?? "";
+    const y = b.createdAt ?? "";
+    if (x !== y) return x < y ? -1 : 1;
+    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+  });
+}
+const ordered = (d: WalletData): WalletData => ({ ...d, wallets: sortWallets(d.wallets ?? []) });
 
 const PREFIX = "skybot:wallets:v1";
 let KEY = PREFIX;
@@ -77,13 +90,13 @@ export function useWalletList(
 
   useEffect(() => {
     const c = readCache();
-    if (c) setData(c);
+    if (c) setData(ordered(c));
   }, [userId]);
 
   const reload = useCallback(async () => {
     setRefreshing(true);
     try {
-      const d = await api<WalletData>("/api/wallets");
+      const d = ordered(await api<WalletData>("/api/wallets"));
       setData(d);
       writeCache(d);
       setErr(null);
@@ -103,11 +116,17 @@ export function useWalletList(
   /** Optimistic local update (also written to the cache so a reload never flashes stale rows). */
   const mutate = useCallback((fn: (d: WalletData) => WalletData) => {
     setData((d) => {
-      const next = fn(d ?? { wallets: [], removedWallets: [] });
+      const next = ordered(fn(d ?? { wallets: [], removedWallets: [] }));
       writeCache(next);
       return next;
     });
   }, []);
+
+  /** Make one wallet Main locally right away (it moves to the top); the caller then reloads from the server. */
+  const setMainLocal = useCallback(
+    (id: string) => mutate((d) => ({ ...d, wallets: d.wallets.map((w) => ({ ...w, isMain: w.id === id })) })),
+    [mutate],
+  );
 
   return {
     data,
@@ -118,5 +137,6 @@ export function useWalletList(
     err,
     reload,
     mutate,
+    setMainLocal,
   };
 }

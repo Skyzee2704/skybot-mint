@@ -234,17 +234,29 @@ export function walletView(w: WalletRow) {
   };
 }
 
-/** Active (not removed) wallets. Every feature — eligibility, /check, mint, withdraw, jobs — goes through this. */
+/** Canonical wallet order everywhere: the Main wallet first, then oldest added / imported first, then id. */
+export function compareWallets(
+  a: { isMain: boolean; createdAt: string; id: string },
+  b: { isMain: boolean; createdAt: string; id: string },
+): number {
+  if (a.isMain !== b.isMain) return a.isMain ? -1 : 1;
+  if (a.createdAt !== b.createdAt) return a.createdAt < b.createdAt ? -1 : 1;
+  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+}
+export const sortWallets = <T extends { isMain: boolean; createdAt: string; id: string }>(ws: readonly T[]): T[] =>
+  [...ws].sort(compareWallets);
+
+/** Active (not removed) wallets. Every feature — eligibility, /check, mint, withdraw, NFTs, jobs — goes through this. */
 export async function listWallets(userId: string) {
-  return (
+  return sortWallets(
     (
       await getDb()
         .select()
         .from(wallets)
         .where(and(eq(wallets.userId, userId), isNull(wallets.removedAt)))
-        // Chronological (first added at the top) everywhere: Wallets, Withdraw, NFTs, /check, mint.
-        .orderBy(asc(wallets.createdAt), asc(wallets.id))
-    ).map(walletView)
+        // Main wallet first, then chronological (first added at the top): Wallets, Withdraw, NFTs, /check, mint.
+        .orderBy(desc(wallets.isMain), asc(wallets.createdAt), asc(wallets.id))
+    ).map(walletView),
   );
 }
 
