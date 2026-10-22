@@ -7,6 +7,7 @@ import { formatEther } from "ethers";
 import { CHAINS, requireChain, rpcsForChain } from "../config/chains.js";
 import { configStatus, env, privyConfigured, privyServerSigningReady, privySiweSignerReady } from "../config/env.js";
 import { requireAuth, adminGate } from "../auth/middleware.js";
+import { importPreflight } from "../users/importCheck.js";
 import { getPool } from "../core/rpc/pool.js";
 import { getResolved, refresh, resolveCached } from "../core/resolver/cache.js";
 import { checkEligibility } from "../core/mint/eligibility.js";
@@ -374,6 +375,14 @@ export async function buildServer(): Promise<FastifyInstance> {
       for (const w of b.wallets) out.push(await syncPrivyWallet(req.user!.id, w));
       await walletSetChanged();
       return { wallets: out };
+    });
+    // Before a private-key import: the browser signs a check message with the key locally (never sent), and SkyBOT
+    // says what Privy has on record for that address (e.g. archived by an earlier Remove, which Privy won't re-import).
+    a.post("/api/wallets/import-check", async (req) => {
+      const b = z
+        .object({ address: addr, issuedAt: z.string().max(40), signature: z.string().regex(/^0x[0-9a-fA-F]{130}$/) })
+        .parse(req.body);
+      return importPreflight(req.user!.privyUserId, b);
     });
     a.post("/api/wallets/generate", async (req) => {
       const b = z

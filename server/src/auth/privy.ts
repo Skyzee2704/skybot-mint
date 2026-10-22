@@ -93,6 +93,32 @@ export async function privyWalletOriginByAddress(
   }
 }
 
+/**
+ * Privy's record for an address, archived wallets included (read-only lookup).
+ * Privy keeps an archived wallet's address reserved: the same key can't be imported again into any user of this app.
+ * Returns `{ found: false }` on 404, null when Privy isn't configured or the lookup fails (caller must not guess).
+ */
+export async function privyWalletByAddress(
+  address: string,
+): Promise<{ found: false } | { found: true; id: string; archived: boolean; ownerPrivyUserId: string | null } | null> {
+  if (!privyConfigured()) return null;
+  try {
+    const w: any = await (getPrivy().wallets() as any).getWalletByAddress({ address, include_archived: true });
+    if (!w?.address) return { found: false };
+    const entity = w?.entity?.type === "user" && w?.entity?.id ? String(w.entity.id) : null;
+    return {
+      found: true,
+      id: String(w.id),
+      archived: Boolean(w.archived_at),
+      ownerPrivyUserId: entity ? (entity.startsWith("did:privy:") ? entity : `did:privy:${entity}`) : null,
+    };
+  } catch (e: any) {
+    if (Number(e?.status ?? e?.statusCode) === 404) return { found: false };
+    log.warn("privy wallet lookup by address failed", String(e?.status ?? e?.message ?? e).slice(0, 120));
+    return null;
+  }
+}
+
 /** Create N ethereum wallets owned by a Privy user (server wallets API — keys stay in Privy). */
 export async function createPrivyWallets(privyUserId: string, count: number) {
   const privy = getPrivy();

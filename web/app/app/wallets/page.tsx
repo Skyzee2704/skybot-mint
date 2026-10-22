@@ -4,14 +4,7 @@ import { CopyAddress } from "@/components/CopyAddress";
 import { short } from "@/lib/api";
 import { useEffect, useRef, useState } from "react";
 import { useWalletList } from "@/lib/wallets";
-import {
-  ago,
-  balancesAsOf,
-  balancesFetcher,
-  balancesKey,
-  revalidate,
-  useSWR,
-} from "@/lib/swr";
+import { ago, balancesAsOf, balancesFetcher, balancesKey, revalidate, useSWR } from "@/lib/swr";
 import { useNow } from "@/lib/useNow";
 import { useCreateWallet, useExportWallet, useImportWallet, useWallets, usePrivy } from "@privy-io/react-auth";
 import { useApi, useShell } from "@/components/AppShell";
@@ -19,6 +12,7 @@ import { ChainSelect } from "@/components/ChainSelect";
 import Link from "next/link";
 import { FundWallets } from "@/components/FundWallets";
 import { usePersistedChain } from "@/lib/chainPref";
+import { explainImportError, normalizePrivateKey, signImportCheck } from "@/lib/importCheck";
 
 export default function WalletsPage() {
   const api = useApi();
@@ -140,8 +134,9 @@ export default function WalletsPage() {
     setMsg(null);
     setBusy(true);
     try {
-      await fn();
-      if (ok) setMsg(ok);
+      const r = await fn();
+      if (typeof r === "string") setMsg(r);
+      else if (ok) setMsg(ok);
       await load();
     } catch (e: any) {
       setErr(e.message);
@@ -217,7 +212,9 @@ export default function WalletsPage() {
                 </td>
                 <td className="row actions">
                   {!w.isMain && (
-                    <button className="ghost" onClick={() =>
+                    <button
+                      className="ghost"
+                      onClick={() =>
                         run(async () => {
                           list.setMainLocal(w.id);
                           await api(`/api/wallets/${w.id}/main`, { body: {} }).catch(async (e) => {
@@ -225,7 +222,8 @@ export default function WalletsPage() {
                             throw e;
                           });
                         }, "Main set")
-                      }>
+                      }
+                    >
                       Set Main
                     </button>
                   )}
@@ -349,7 +347,26 @@ export default function WalletsPage() {
                 onClick={() =>
                   run(async () => {
                     // Client-side only: Privy encrypts the key to Privy. Never POST raw keys to SkyBOT.
-                    const w = await importWallet({ privateKey: key });
+                    const pk = normalizePrivateKey(key);
+                    // Ask first what Privy has for this address; the key only signs a check message locally.
+                    const chk = await signImportCheck(pk)
+                      .then((proof) => api("/api/wallets/import-check", { body: proof }))
+                      .catch(() => ({ status: "unknown" }) as any);
+                    if (chk.message && chk.status !== "available" && chk.status !== "in_your_account") throw new Error(chk.message);
+                    if (chk.status === "in_your_account") {
+                      // Already this account's wallet in Privy (e.g. hidden in SkyBOT earlier): add it back, no import.
+                      await api("/api/wallets/sync", {
+                        body: { wallets: [{ privyWalletId: chk.privyWalletId ?? "", address: chk.address, label, restore: true }] },
+                      });
+                      setKey("");
+                      return "This wallet is already in your Privy account: added it back to SkyBOT Mint.";
+                    }
+                    let w: any;
+                    try {
+                      w = await importWallet({ privateKey: pk });
+                    } catch (e: any) {
+                      throw new Error(explainImportError(e));
+                    }
                     await api("/api/wallets/sync", {
                       body: {
                         wallets: [
@@ -371,7 +388,8 @@ export default function WalletsPage() {
                 Import via Privy
               </button>
               <p className="muted" style={{ fontSize: 12 }}>
-                Keys are exported only in Privy&apos;s own window (Export Private Key in the remove dialog, or home.privy.io); SkyBOT never sees them.
+                Keys are exported only in Privy&apos;s own window (Export Private Key in the remove dialog, or home.privy.io); SkyBOT never
+                sees them.
               </p>
               <p className="muted" style={{ fontSize: 12 }}>
                 Signed in as {user?.email?.address ?? "—"} · {privyWallets?.length ?? 0} Privy wallet(s) connected

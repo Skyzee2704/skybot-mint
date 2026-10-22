@@ -93,7 +93,8 @@ export function decideRemoval(input: {
     deleteMode = "delete_local";
     notes.push("Privy wallet id unknown, so the wallet is removed from SkyBOT only and stays in your Privy account.");
   }
-  if (unchecked.length) notes.push(`Couldn't read the balance on ${unchecked.map((u) => u.chainName).join(", ")}. Treat it as possibly funded.`);
+  if (unchecked.length)
+    notes.push(`Couldn't read the balance on ${unchecked.map((u) => u.chainName).join(", ")}. Treat it as possibly funded.`);
   if (held)
     notes.push(
       `The last holdings scan shows ${held} NFT(s) in this wallet (${input.heldNfts!.byChain.map((c) => `${c.count} on ${c.chain}`).join(", ")}).`,
@@ -109,19 +110,30 @@ export function decideRemoval(input: {
   const warnings: string[] = [];
   if (deleteMode === "archive_and_delete") {
     warnings.push(
-      "Removing archives the wallet in Privy: it can no longer sign, send or be exported, and SkyBOT will never show it again. Privy offers no full delete; the address keeps receiving funds, and only Privy support can restore an archived wallet.",
+      "Removing archives the wallet in Privy: it can no longer sign, send or be exported, and SkyBOT will never show it again. Privy offers no full delete; the address keeps receiving funds, the same private key can't be imported again into any SkyBOT Mint account, and only Privy support can restore an archived wallet (back to this account).",
     );
     if (walletKind === "imported")
-      warnings.push("This wallet was imported, so you can keep using it anywhere (for example MetaMask) with your own copy of its private key.");
+      warnings.push(
+        "This wallet was imported, so you can keep using it anywhere (for example MetaMask) with your own copy of its private key.",
+      );
     else
       warnings.push(
         "This wallet was created by Privy and its key exists nowhere else. Unless you export the private key first, anything left in it may be unrecoverable.",
       );
   }
   const requiresConfirmation = !canDelete && deleteMode !== "hide_only";
-  return { funded, unchecked, canDelete, deleteMode, notes, primaryEmbedded: input.privy.primaryEmbedded, requiresConfirmation, walletKind, warnings };
+  return {
+    funded,
+    unchecked,
+    canDelete,
+    deleteMode,
+    notes,
+    primaryEmbedded: input.privy.primaryEmbedded,
+    requiresConfirmation,
+    walletKind,
+    warnings,
+  };
 }
-
 
 async function nativeBalances(address: string): Promise<ChainBalance[]> {
   return Promise.all(
