@@ -102,6 +102,16 @@ textarea {
   font: inherit;
   width: 100%;
 }
+/* Radios and checkboxes must not inherit the text-field box (width:100% + padding): in a flex row that makes the
+   control claim the whole line and squeezes its label to zero width. */
+input[type="radio"],
+input[type="checkbox"] {
+  width: auto;
+  padding: 0;
+  margin: 0;
+  flex: none;
+  accent-color: var(--orange);
+}
 input:focus,
 select:focus,
 textarea:focus {
@@ -1148,25 +1158,42 @@ a.button:hover {
   border-color: var(--orange, #ff7a1a);
 }
 
-/* Mint · Timing: one radio per line, label text wraps under itself, never under the radio. */
+/* Mint · Timing: one full-width row per option; radio left, stage name bold with the time wrapping beneath. */
 .timing-options {
   display: flex;
   flex-direction: column;
   gap: 6px;
   margin-top: 8px;
+  width: 100%;
 }
 .timing-option {
   display: flex;
   align-items: flex-start;
-  gap: 8px;
+  gap: 10px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
   line-height: 1.35;
   cursor: pointer;
 }
-.timing-option input[type="radio"] {
-  flex: none;
-  margin-top: 3px;
+.timing-option.on {
+  border-color: var(--orange);
 }
-.timing-option span {
+.timing-option input[type="radio"] {
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+}
+.timing-option .timing-text {
+  flex: 1 1 auto;
   min-width: 0;
-  overflow-wrap: anywhere;
+  display: flex;
+  flex-direction: column;
+}
+.timing-option .timing-sub {
+  font-size: 13px;
+  color: var(--muted, inherit);
+  overflow-wrap: break-word;
 }

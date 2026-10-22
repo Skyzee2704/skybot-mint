@@ -11,6 +11,7 @@ import { assertOpenSeaSiwe } from "@nft-mint-bot/server/siwe";
 import { useWalletList } from "@/lib/wallets";
 import { ChainSelect } from "@/components/ChainSelect";
 import { ConfirmBox } from "@/components/Confirm";
+import { TimingOptions } from "@/components/TimingOptions";
 import { formatDateTime, localTimeZone, zoneLabel } from "@/lib/time";
 import { useNow } from "@/lib/useNow";
 import { clampQty } from "@nft-mint-bot/server/qty";
@@ -234,14 +235,6 @@ export default function MintPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [optionsKey, timing]);
   useEffect(() => setSim(null), [chosen?.key, chosen?.live]);
-  const optionLabel = (o: (typeof options)[number]) =>
-    o.kind === "now"
-      ? o.stage
-        ? `Now · ${o.name === "Public" ? "Public" : o.name} is live`
-        : "Now"
-      : o.live
-        ? `${o.name} · live now${o.stage?.end ? ` · ends ${fmt(o.stage.end)}` : ""}`
-        : `${o.name} · ${fmt(o.runAt)}`;
   const totalWei = selRows.reduce((a: bigint, r: any) => a + rowCostWei(r), 0n);
   const totalNfts = selRows.reduce((a: number, r: any) => a + qtyFor(r), 0);
   const forceIds = Object.keys(force).filter((k) => force[k]);
@@ -652,26 +645,15 @@ export default function MintPage() {
               </select>
             </label>
           </div>
-          {options.length ? (
-            <div className="timing-options" role="radiogroup" aria-label="When to mint">
-              {options.map((o) => (
-                <label key={o.key} className="timing-option">
-                  <input
-                    type="radio"
-                    name="timing"
-                    checked={chosen?.key === o.key}
-                    onChange={() => {
-                      setTiming(o.key);
-                      setTimingNote(null);
-                    }}
-                  />{" "}
-                  <span>{optionLabel(o)}</span>
-                </label>
-              ))}
-            </div>
-          ) : (
-            <div className="notice">No mint stage is live or scheduled for the selected wallets.</div>
-          )}
+          <TimingOptions
+            options={options}
+            chosenKey={chosen?.key ?? null}
+            fmt={fmt}
+            onPick={(k) => {
+              setTiming(k);
+              setTimingNote(null);
+            }}
+          />
           <div className="row" style={{ marginTop: 8 }}>
             {chosen && !chosen.live && (
               <label title="Send this many milliseconds before (negative) or after (positive) the stage start">
