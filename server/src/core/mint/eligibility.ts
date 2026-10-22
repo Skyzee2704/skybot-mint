@@ -181,6 +181,28 @@ export const sameStage = (a: string | null | undefined, b: string | null | undef
   return x !== null && x === stageKey(b);
 };
 
+const stageEndMs = (s: OsStage) => (s.end_time ? Date.parse(s.end_time) : NaN);
+const stageStartMs = (s: OsStage) => (s.start_time ? Date.parse(s.start_time) : NaN);
+
+/** Soonest stage that starts after `now` (used when OpenSea's next_stage is missing). */
+export function upcomingStage(stages: readonly OsStage[], active: OsStage | null, now: number): OsStage | null {
+  const later = stages
+    .filter((s) => !(active && sameStage(s.uuid, active.uuid)) && stageStartMs(s) > now)
+    .sort((a, b) => stageStartMs(a) - stageStartMs(b));
+  return later[0] ?? null;
+}
+
+/** Allowlist (non-public) stages other than the live one that haven't ended. */
+export function otherOpenAllowlistStages(stages: readonly OsStage[], active: OsStage | null, now: number): OsStage[] {
+  return stages.filter((s) => !isPublicStage(s) && !(active && sameStage(s.uuid, active.uuid)) && !(stageEndMs(s) <= now));
+}
+
+/**
+ * Whether a wallet needs OpenSea's eligibility API: always when the live stage is still undecided, and also when the
+ * mint API already decided the live stage but other allowlist stages are still open (their verdicts come only from here).
+ */
+export const wantsEligibilityApi = (liveDecided: boolean, otherOpen: readonly unknown[]) => !liveDecided || otherOpen.length > 0;
+
 /** Drop stages joined with OpenSea's per-stage verdicts (matched by canonical stage id), in stage order. */
 export function mapStageVerdicts(
   all: readonly OsStage[],
@@ -255,8 +277,12 @@ export async function checkEligibility(
   const drop = t.opensea?.drop;
   const activeOs = drop?.active_stage ?? null;
   const activeIsPublic = activeOs ? isPublicStage(activeOs) : false;
-  const nextOs = drop?.next_stage ?? null;
+  // OpenSea's next_stage can be null while later stages exist (seen on Votaries): fall back to the soonest one.
+  const nextOs = drop?.next_stage ?? upcomingStage(drop?.stages ?? [], activeOs, Date.now());
   const targetOs = activeOs ?? nextOs;
+  // Other allowlist stages that haven't ended: their per-wallet verdicts need the eligibility API too, even when the
+  // mint API already answered for the live stage (before, a "not eligible" live stage left every later stage Unknown).
+  const otherAllowlistStages = otherOpenAllowlistStages(drop?.stages ?? [], activeOs, Date.now());
   const proofs = new Map((opts.siwe ?? []).map((p) => [p.walletId, p]));
 
   // SeaDrop merkle allowlist (rare on current OpenSea drops; they use server-signed stages).
@@ -375,8 +401,10 @@ export async function checkEligibility(
           } else access = { status: "unknown", source: "OpenSea mint API", detail: `check failed: ${String(e.message).slice(0, 120)}` };
         }
       }
-      // Upcoming stage (or mint API inconclusive): OpenSea eligibility API with the wallet's own sign-in.
-      if (useOs && t.slug && access.status === "unknown" && targetOs) {
+      // Upcoming stage, other allowlist stages, or mint API inconclusive: OpenSea eligibility API (per stage).
+      // When the mint API already decided the live stage, that verdict stands; the API adds the other stages.
+      const decided = access.status !== "unknown";
+      if (useOs && t.slug && targetOs && wantsEligibilityApi(decided, otherAllowlistStages)) {
         const proof = proofs.get(w.id);
         try {
           // Valid JWT → stored PAT exchange → server sign-in (never asks the member to open the app).
@@ -414,7 +442,9 @@ export async function checkEligibility(
             stages = mapStageVerdicts(all, res);
             const target = stages.find((s) => sameStage(s.uuid, targetOs.uuid));
             const label = targetOs.label ?? targetOs.stage_type ?? "stage";
-            if (target?.eligible === true) {
+            if (decided) {
+              // keep the mint API's verdict for the live stage
+            } else if (target?.eligible === true) {
               access = {
                 status: isPublicStage(targetOs) ? "public" : "yes",
                 source: live ? "OpenSea eligibility API" : "OpenSea eligibility API (saved result)",
@@ -436,7 +466,8 @@ export async function checkEligibility(
           needsOpenSeaLogin = !cachedJwt(w.address);
           if (needsOpenSeaLogin && !unverifiedReason)
             unverifiedReason = e instanceof OpenSeaHttpError && e.status === 429 ? "rate_limited" : "error";
-          access = { status: "unknown", source: "OpenSea eligibility API", detail: `check failed: ${String(e.message).slice(0, 120)}` };
+          if (!decided)
+            access = { status: "unknown", source: "OpenSea eligibility API", detail: `check failed: ${String(e.message).slice(0, 120)}` };
         }
         if (needsOpenSeaLogin && access.status === "unknown")
           access = { status: "unknown", source: "OpenSea", detail: "verify with OpenSea sign-in to check this stage" };

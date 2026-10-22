@@ -67,7 +67,7 @@ describe("/check formatting", () => {
       timeZone: "Asia/Kolkata",
       now,
     });
-    expect(msg.split("\n")[0]).toBe("<b>GTD: 1/3</b> eligible");
+    expect(msg.split("\n")[0]).toBe("<b>GTD: 1/3 eligible, 1 unknown</b>");
     expect(msg).toContain("Kabuki &lt;Killers&gt;");
     expect(msg).toContain("<b>GTD</b> · 0.00075 ETH · max 2\n🕒 Thu, 22 Oct · 19:30 (UTC+5:30) · in 23h 20m\n✅ Main");
     expect(msg).toContain("<b>Kabuki &lt;Killers&gt;</b> · Ethereum\n<code>0x0399…bF97</code>");
@@ -137,7 +137,9 @@ describe("/check formatting", () => {
       now,
     });
     const msg = parts.join("\n");
-    expect(msg.split("\n")[0]).toBe("<b>Trenchettes Phase: 0/25 · Founders Phase: 5/25 · GTD Phase: 2/25 · FCFS Phase: 5/25</b> eligible");
+    expect(msg.split("\n")[0]).toBe(
+      "<b>Trenchettes Phase: 0/25 eligible, 1 unknown · Founders Phase: 5/25 eligible, 1 unknown · GTD Phase: 2/25 eligible, 1 unknown · FCFS Phase: 5/25 eligible, 1 unknown</b>",
+    );
     const pos = phases.map((p) => msg.indexOf(`<b>${p}</b> · `));
     expect(pos.every((p, i) => p > 0 && (i === 0 || p > pos[i - 1]!))).toBe(true);
     const gtd = msg.slice(pos[2], pos[3]);

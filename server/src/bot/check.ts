@@ -39,7 +39,7 @@ export function parseCheckArgs(text: string): { input: string; chain?: string } 
 }
 
 function verdict(r: EligibilityRow): { label: "Eligible" | "Not eligible" | "Unknown"; why: string } {
-  if (r.needsOpenSeaLogin) return { label: "Unknown", why: "not verified yet" };
+  if (r.needsOpenSeaLogin && r.access.status === "unknown") return { label: "Unknown", why: "not verified yet" };
   const a = r.access;
   const other = r.reasons.filter((x) => !x.startsWith("insufficient balance") && !x.startsWith("not allowlisted"));
   if (a.status === "no") return { label: "Not eligible", why: "" };
@@ -57,6 +57,13 @@ export interface CheckView {
   targetStage: { label: string | null; type?: string | null; start: string | null; active: boolean } | null;
   timeZone: string | null;
   now?: number;
+}
+
+/** Headline per phase: unknown wallets never count as "0 eligible" ("Whitelist: 8 unknown", "GTD: 1/3 eligible, 2 unknown"). */
+export function headCount(g: { stage: { name: string }; wallets: { state: string }[]; eligible: number; total: number }): string {
+  const unknown = g.wallets.filter((w) => w.state === "unknown" || w.state === "unverified").length;
+  if (unknown === g.total) return `${g.stage.name}: ${unknown} unknown`;
+  return `${g.stage.name}: ${g.eligible}/${g.total} eligible${unknown ? `, ${unknown} unknown` : ""}`;
 }
 
 const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
@@ -77,7 +84,7 @@ export function formatCheck(v: CheckView): string[] {
 
   const head: string[] = [];
   if (!v.rows.length) head.push("<b>No wallets yet</b> — add wallets in SkyBOT to check eligibility.");
-  else if (groups.length) head.push(`<b>${groups.map((g) => `${esc(g.stage.name)}: ${g.eligible}/${g.total}`).join(" · ")}</b> eligible`);
+  else if (groups.length) head.push(`<b>${groups.map((g) => esc(headCount(g))).join(" · ")}</b>`);
   else {
     const ok = v.rows.filter((r) => verdict(r).label === "Eligible").length;
     head.push(`<b>${ok} of ${plural(v.rows.length, "wallet")} eligible</b>`);
@@ -99,7 +106,11 @@ export function formatCheck(v: CheckView): string[] {
       else b.push(`❌ ${sum.notEligible.length} not eligible${esc(nameList(sum.notEligible))}`);
     }
     if (sum.unknown.length) {
-      const what = sum.unknown.every((w) => w.state === "unverified") ? "not verified yet" : "unknown";
+      const what = sum.unknown.every((w) => w.state === "unverified")
+        ? "not verified yet"
+        : sum.unknown.every((w) => w.state === "unknown")
+          ? "unknown (OpenSea gave no verdict for this stage)"
+          : "unknown";
       b.push(`❔ ${sum.unknown.length} ${what}${esc(nameList(sum.unknown))}`);
     }
     blocks.push(b);
@@ -123,7 +134,7 @@ export function formatCheck(v: CheckView): string[] {
 
   const foot: string[] = [];
   const unverified = new Set(groups.flatMap((g) => g.wallets.filter((w) => w.state === "unverified").map((w) => w.walletId)));
-  for (const r of v.rows) if (r.needsOpenSeaLogin) unverified.add(r.walletId);
+  for (const r of v.rows) if (r.needsOpenSeaLogin && (!groups.length || r.access.status === "unknown")) unverified.add(r.walletId);
   if (unverified.size) foot.push(...unverifiedNotes(v.rows.filter((r) => unverified.has(r.walletId))));
   foot.push(
     "",

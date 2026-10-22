@@ -475,7 +475,9 @@ export default function MintPage() {
                       </span>
                       <span className="spacer" />
                       <span className={g.eligible ? "ok small" : "muted small"}>
-                        {g.eligible}/{g.total} eligible
+                        {sum.unknown.length === g.total
+                          ? `${g.total} unknown`
+                          : `${g.eligible}/${g.total} eligible${sum.unknown.length ? `, ${sum.unknown.length} unknown` : ""}`}
                       </span>
                     </div>
                     {sum.eligible.length > 0 && (
@@ -661,14 +663,21 @@ export default function MintPage() {
                 <input type="number" value={offsetMs} onChange={(e) => setOffsetMs(Number(e.target.value))} style={{ width: 90 }} />
               </label>
             )}
-            <button disabled={!selRows.length || !chosen || (chosen.stage !== null && !chosen.walletIds.length) || !!busy} onClick={() => simulate()}>
+            <button
+              disabled={!selRows.length || !chosen || (chosen.stage !== null && !chosen.walletIds.length) || !!busy}
+              onClick={() => simulate()}
+            >
               Simulate
             </button>
           </div>
           {timingNote && <div className="notice">{timingNote}</div>}
           <p className="muted small" style={{ marginTop: 8 }}>
             {tz ? `Times use your timezone: ${zoneLabel(tz)}.` : ""}
-            {chosen ? (chosen.live || !chosen.runAt ? " Runs immediately." : ` Runs at ${fmt(chosen.runAt)}${offsetMs ? ` (${offsetMs > 0 ? "+" : ""}${offsetMs} ms)` : ""}.`) : ""}
+            {chosen
+              ? chosen.live || !chosen.runAt
+                ? " Runs immediately."
+                : ` Runs at ${fmt(chosen.runAt)}${offsetMs ? ` (${offsetMs > 0 ? "+" : ""}${offsetMs} ms)` : ""}.`
+              : ""}
             {chosen?.stage && chosen.walletIds.length ? ` Mints in ${chosen.name} with ${chosen.walletIds.length} wallet(s).` : ""}
             {chosen?.skipped.length
               ? ` Skipped ${chosen.skipped.length} selected wallet(s) not eligible for ${chosen.name}: ${chosen.skipped
@@ -816,7 +825,7 @@ const STATE_CLASS = { eligible: "ok", not_eligible: "bad", unverified: "muted", 
 function Access({ r }: { r: any }) {
   const a = r?.access;
   if (!a) return <span className="muted">—</span>;
-  if (r.needsOpenSeaLogin) return <span className="muted">Not verified yet</span>;
+  if (r.needsOpenSeaLogin && r.access?.status === "unknown") return <span className="muted">Not verified yet</span>;
   const label =
     a.status === "yes"
       ? "Eligible"
