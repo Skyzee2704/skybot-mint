@@ -402,7 +402,6 @@ function RemovalPanel({
   const { w, chk, loading } = removal;
   const { exportWallet } = useExportWallet();
   const [ack, setAck] = useState(false);
-  const [typed, setTyped] = useState("");
   const [newMain, setNewMain] = useState<string>(others[0]?.id ?? "");
   const [exportErr, setExportErr] = useState<string | null>(null);
   const funded: any[] = chk?.funded ?? [];
@@ -415,8 +414,7 @@ function RemovalPanel({
   const archive = chk?.deleteMode === "archive_and_delete";
   const hideOnly = chk?.deleteMode === "hide_only";
   const needsConfirm = Boolean(chk?.requiresConfirmation);
-  const nameOk = typed.trim().toLowerCase() === String(w.label ?? "").trim().toLowerCase();
-  const confirmed = !needsConfirm || (ack && nameOk);
+  const confirmed = !needsConfirm || ack;
   const mainOpts = w.isMain && others.length ? { newMainId: newMain || undefined } : {};
   return (
     <div className="notice removal" role="dialog" aria-label={`Remove ${w.label}`} style={{ marginTop: 12 }}>
@@ -506,17 +504,10 @@ function RemovalPanel({
           )}
           {needsConfirm && !hideOnly && (
             <div style={{ margin: "8px 0" }}>
-              <label className="row" style={{ gap: 8, alignItems: "flex-start" }}>
-                <input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} style={{ width: "auto" }} />
+              <label className="confirm-check">
+                <input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} />
                 <span>I understand funds and NFTs left in this wallet will no longer be accessible from SkyBOT.</span>
               </label>
-              <input
-                value={typed}
-                onChange={(e) => setTyped(e.target.value)}
-                placeholder={`Type "${w.label}" to confirm`}
-                aria-label="Type the wallet name to confirm"
-                style={{ marginTop: 6 }}
-              />
             </div>
           )}
           <div className="row">
@@ -526,7 +517,7 @@ function RemovalPanel({
                 disabled={busy || !confirmed}
                 onClick={() => {
                   if (needsConfirm || confirm(`Remove ${w.label || "this wallet"} permanently? This can't be undone in SkyBOT.`))
-                    onRemove("delete", { ...(needsConfirm ? { acknowledge: ack, confirmLabel: typed } : {}), ...mainOpts });
+                    onRemove("delete", { ...(needsConfirm ? { acknowledge: ack } : {}), ...mainOpts });
                 }}
               >
                 {archive ? "Remove and Archive in Privy" : "Remove from SkyBOT"}

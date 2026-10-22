@@ -5,7 +5,7 @@
  *   POST /v1/wallets/{id}/archive (no DELETE endpoint exists; embedded and imported wallets can't be unlinked from
  *   the Privy user — unlink returns 400 linked_account_not_found), then our row is deleted and a tombstone stops
  *   Privy sync from re-adding it. A wallet that still holds funds / NFTs needs explicit confirmation (the member
- *   ticks the acknowledgement and types the wallet name).
+ *   ticks the acknowledgement checkbox).
  *   The user's primary embedded wallet (wallet_index 0, not imported) anchors Privy's HD wallets: never archived.
  * - "hide": soft delete (removed_at). Funds stay in Privy custody; restorable from the Wallets page.
  */
@@ -51,7 +51,7 @@ export interface RemovalCheck {
   primaryEmbedded: boolean;
   /** Empty everywhere we can check (no confirmation needed). */
   canDelete: boolean;
-  /** Funds / NFTs present or a balance unreadable: removal needs the acknowledgement + typed wallet name. */
+  /** Funds / NFTs present or a balance unreadable: removal needs the acknowledgement checkbox. */
   requiresConfirmation: boolean;
   walletKind: "imported" | "created" | "primary" | "unknown";
   /** Kind-specific consequences, shown prominently. */
@@ -202,20 +202,16 @@ export type RemovalResult = {
 export interface RemovalOptions {
   /** Ticked "I understand…" (required when the wallet holds funds / NFTs or a balance couldn't be read). */
   acknowledge?: boolean;
-  /** The wallet's name typed by the member (required with `acknowledge`). */
+  /** Legacy: the wallet's name typed by older clients. Accepted and ignored; the checkbox alone confirms. */
   confirmLabel?: string;
   /** Removing the Main wallet: which wallet becomes Main (default: the oldest remaining). */
   newMainId?: string;
 }
 
-const sameName = (a: string | null | undefined, b: string | null | undefined) =>
-  (a ?? "").trim().toLowerCase() === (b ?? "").trim().toLowerCase();
-
 /** The member's explicit go-ahead for removing a wallet that still holds something. Pure (tested). */
 export function confirmationProblem(chk: Pick<RemovalCheck, "requiresConfirmation" | "label">, o: RemovalOptions): string | null {
   if (!chk.requiresConfirmation) return null;
-  if (!o.acknowledge) return "Tick the confirmation to remove a wallet that may still hold funds or NFTs.";
-  if (!sameName(o.confirmLabel, chk.label)) return `Type the wallet name "${chk.label}" exactly to confirm.`;
+  if (o.acknowledge !== true) return "Tick the confirmation to remove a wallet that may still hold funds or NFTs.";
   return null;
 }
 

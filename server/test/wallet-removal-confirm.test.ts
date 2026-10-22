@@ -11,15 +11,19 @@ const bal = (chain: string, wei: string | null) => ({ chain, chainName: chain, s
 const privy = { id: "abcdefghijklmnopqrstuvwx", primaryEmbedded: false, imported: false };
 
 describe("removing a wallet that still holds funds", () => {
-  it("is allowed, but only with the acknowledgement and the typed wallet name", async () => {
+  it("is allowed, but only with the acknowledgement checkbox (typed name no longer needed)", async () => {
     const { decideRemoval, confirmationProblem } = await import("../src/users/walletRemoval.js");
     const d = decideRemoval({ balances: [bal("base", "5"), bal("ink", null)], mintedNfts: 0, privy, privyAvailable: true });
     expect(d).toMatchObject({ canDelete: false, requiresConfirmation: true, deleteMode: "archive_and_delete", walletKind: "created" });
     const chk = { ...d, label: "wallet-3" };
     expect(confirmationProblem(chk, {})).toMatch(/Tick/);
-    expect(confirmationProblem(chk, { acknowledge: true, confirmLabel: "wallet 3" })).toMatch(/Type the wallet name/);
-    expect(confirmationProblem(chk, { acknowledge: true, confirmLabel: "  Wallet-3 " })).toBeNull();
-    // Empty wallets need no typed confirmation.
+    expect(confirmationProblem(chk, { acknowledge: false })).toMatch(/Tick/);
+    expect(confirmationProblem(chk, { acknowledge: "true" as any })).toMatch(/Tick/);
+    expect(confirmationProblem(chk, { acknowledge: true })).toBeNull();
+    // Old clients still sending a typed name are accepted harmlessly, whatever they typed.
+    expect(confirmationProblem(chk, { acknowledge: true, confirmLabel: "wallet 3" })).toBeNull();
+    expect(confirmationProblem(chk, { confirmLabel: "wallet-3" })).toMatch(/Tick/);
+    // Empty wallets need no confirmation.
     const empty = decideRemoval({ balances: [bal("base", "0")], mintedNfts: 0, privy, privyAvailable: true });
     expect(confirmationProblem({ ...empty, label: "x" }, {})).toBeNull();
     // Cached NFTs also require confirmation.

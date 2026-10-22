@@ -371,8 +371,8 @@ export default function WithdrawPage() {
           )}
           {!Object.keys(run).length && (
             <>
-              <label className="row" style={{ marginTop: 12 }}>
-                <input type="checkbox" checked={checked} onChange={(e) => setChecked(e.target.checked)} style={{ width: "auto" }} />
+              <label className="confirm-check" style={{ marginTop: 12 }}>
+                <input type="checkbox" checked={checked} onChange={(e) => setChecked(e.target.checked)} />
                 <span>I checked the full destination address above. Transfers cannot be reversed.</span>
               </label>
               <div className="row" style={{ marginTop: 8 }}>

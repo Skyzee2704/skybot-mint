@@ -392,8 +392,8 @@ export function FundWallets({ api, wallets, onDone }: { api: ReturnType<typeof u
           )}
           {!Object.keys(run).length && (
             <>
-              <label className="row" style={{ marginTop: 12 }}>
-                <input type="checkbox" checked={checked} onChange={(e) => setChecked(e.target.checked)} style={{ width: "auto" }} />
+              <label className="confirm-check" style={{ marginTop: 12 }}>
+                <input type="checkbox" checked={checked} onChange={(e) => setChecked(e.target.checked)} />
                 <span>I reviewed the amounts above. Transfers cannot be reversed.</span>
               </label>
               {!authenticated && <p className="muted">Transfers are signed with your Privy wallet. Connect with Privy to send.</p>}
