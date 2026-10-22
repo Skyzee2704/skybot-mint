@@ -31,7 +31,7 @@ export async function cachedBalances(
   chain: string,
   addresses: string[],
   loadMany: (missing: string[]) => Promise<Map<string, bigint>>,
-  opts: { ttlMs?: number; fresh?: boolean } = {},
+  opts: { ttlMs?: number; fresh?: boolean; changedAt?: Map<string, number> } = {},
 ): Promise<Map<string, bigint | Error>> {
   const ttlMs = opts.ttlMs ?? BALANCE_TTL_MS;
   const now = Date.now();
@@ -39,7 +39,9 @@ export async function cachedBalances(
   const pending = new Map<string, Promise<bigint>>();
   for (const a of new Set(addresses.map((x) => x.toLowerCase()))) {
     const hit = cache.get(k(chain, a));
-    if (!opts.fresh && hit && now - hit.at < ttlMs) pending.set(a, hit.p);
+    // A webhook-reported transfer newer than the cached value makes it stale on every instance.
+    const changed = opts.changedAt?.get(a) ?? 0;
+    if (!opts.fresh && hit && now - hit.at < ttlMs && hit.at > changed) pending.set(a, hit.p);
     else missing.push(a);
   }
   if (missing.length) {
@@ -67,6 +69,16 @@ export async function cachedBalances(
     }),
   );
   return out;
+}
+
+/** Oldest cache time among these addresses (what the UI shows as "Updated … ago"). */
+export function balancesAsOf(chain: string, addresses: string[]): number {
+  let at = Date.now();
+  for (const a of addresses) {
+    const hit = cache.get(k(chain, a));
+    if (hit) at = Math.min(at, hit.at);
+  }
+  return at;
 }
 
 /** Drop cached balances after a transfer so the next read is fresh. */

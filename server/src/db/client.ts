@@ -164,6 +164,12 @@ const DDL = [
   `CREATE TABLE IF NOT EXISTS nft_scan_state (user_id TEXT PRIMARY KEY, last_refresh_at BIGINT NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS rate_buckets (
     key TEXT PRIMARY KEY, count INTEGER NOT NULL DEFAULT 0, window_start INTEGER NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS alchemy_webhooks (network TEXT PRIMARY KEY, webhook_id TEXT, signing_key_enc TEXT,
+    address_hash TEXT, address_count INTEGER NOT NULL DEFAULT 0, synced_at TEXT NOT NULL, error TEXT)`,
+  `CREATE TABLE IF NOT EXISTS wallet_activity (id TEXT PRIMARY KEY, chain TEXT NOT NULL, address TEXT NOT NULL,
+    at BIGINT NOT NULL, kinds TEXT NOT NULL DEFAULT '')`,
+  `CREATE TABLE IF NOT EXISTS nft_rescan_queue (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, wallet_id TEXT NOT NULL,
+    chain TEXT NOT NULL, address TEXT NOT NULL, due_at BIGINT NOT NULL, pass INTEGER NOT NULL DEFAULT 1)`,
   `CREATE TABLE IF NOT EXISTS siwe_signers (wallet_id TEXT PRIMARY KEY, attached_at TEXT, checked_at TEXT NOT NULL, note TEXT)`,
 ];
 

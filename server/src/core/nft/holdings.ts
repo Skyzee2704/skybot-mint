@@ -204,6 +204,55 @@ export async function refreshHoldings(
 }
 
 /**
+ * Re-scan ONE wallet × chain from the indexer (webhook-driven). Keeps previous items when the indexer fails.
+ * Skips silently when the wallet is gone or its address changed.
+ */
+export async function rescanPair(
+  userId: string,
+  walletId: string,
+  chainKey: string,
+  opts: { fetchImpl?: Fetch; scan?: typeof scanHoldings } = {},
+): Promise<"scanned" | "failed" | "skipped"> {
+  const c = getChain(chainKey);
+  const w = (await listWallets(userId)).find((x) => x.id === walletId);
+  if (!c || !w) return "skipped";
+  const at = new Date().toISOString();
+  try {
+    const r = await (opts.scan ?? scanHoldings)(c, w.address, opts.fetchImpl ?? (globalThis.fetch as any));
+    await saveRow(userId, w.id, c.key, w.address, { items: r.items, source: r.source, truncated: r.truncated, error: null, scannedAt: at });
+    return "scanned";
+  } catch (e: any) {
+    const had = (await loadRows(userId)).some((r) => r.walletId === w.id && r.chain === c.key);
+    await saveRow(userId, w.id, c.key, w.address, {
+      error: redactString(String(e?.message ?? e)).slice(0, 160),
+      scannedAt: at,
+      ...(had ? {} : { items: [] }),
+    });
+    return "failed";
+  }
+}
+
+/** Idempotent removal of ERC-721 tokens that left a wallet (seen in a webhook), before the debounced re-scan. */
+export async function removeErc721FromCache(
+  userId: string,
+  walletId: string,
+  chain: string,
+  tokens: { contract: string; tokenId: string }[],
+) {
+  if (!tokens.length) return 0;
+  const row = (await loadRows(userId)).find((r) => r.walletId === walletId && r.chain === chain);
+  if (!row) return 0;
+  const gone = new Set(tokens.map((t) => `${t.contract.toLowerCase()}:${t.tokenId}`));
+  const items = row.items.filter((i) => !(i.standard === "erc721" && gone.has(`${i.contract.toLowerCase()}:${i.tokenId}`)));
+  if (items.length === row.items.length) return 0;
+  await getDb()
+    .update(nftHoldings)
+    .set({ itemsJson: JSON.stringify(items) })
+    .where(and(eq(nftHoldings.id, rowId(walletId, chain)), eq(nftHoldings.userId, userId)));
+  return row.items.length - items.length;
+}
+
+/**
  * Optimistic cache update after a broadcast transfer: remove (ERC-721) or decrement (ERC-1155) the token from the
  * source wallet and, when the destination is one of the user's own wallets, add it there.
  */

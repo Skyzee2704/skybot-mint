@@ -10,7 +10,7 @@ import { requireAuth, adminGate } from "../auth/middleware.js";
 import { getPool } from "../core/rpc/pool.js";
 import { getResolved, refresh, resolveCached } from "../core/resolver/cache.js";
 import { checkEligibility } from "../core/mint/eligibility.js";
-import { cachedBalances } from "../util/balanceCache.js";
+import { balancesAsOf, cachedBalances } from "../util/balanceCache.js";
 import { nativeBalancesBatch } from "../core/rpc/multicall.js";
 import { registerWithdrawRoutes } from "./withdrawRoutes.js";
 import { registerNftRoutes } from "./nftRoutes.js";
@@ -82,6 +82,16 @@ async function siweSignerStatus(user: { id: string; privyUserId: string | null }
     }),
     new Promise((r) => setTimeout(() => r(null), 5_000)),
   ])) as Awaited<ReturnType<typeof ensureSiweSigners>> | null;
+}
+
+/** Wallet added / removed / restored: update the Alchemy webhook address lists (time-boxed, best effort). */
+async function walletSetChanged() {
+  try {
+    const { syncAfterWalletChange } = await import("../core/alchemy/sync.js");
+    await syncAfterWalletChange();
+  } catch (e: any) {
+    log.warn("alchemy sync after wallet change", String(e?.message ?? e).slice(0, 160));
+  }
 }
 
 export async function buildServer(): Promise<FastifyInstance> {
@@ -363,6 +373,7 @@ export async function buildServer(): Promise<FastifyInstance> {
         .parse(req.body);
       const out = [];
       for (const w of b.wallets) out.push(await syncPrivyWallet(req.user!.id, w));
+      await walletSetChanged();
       return { wallets: out };
     });
     a.post("/api/wallets/generate", async (req) => {
@@ -373,7 +384,9 @@ export async function buildServer(): Promise<FastifyInstance> {
           labelPrefix: z.string().max(32).optional(),
         })
         .parse(req.body);
-      return { wallets: await generateWallets(req.user!, b.count, b.group ?? null, b.labelPrefix) };
+      const created = await generateWallets(req.user!, b.count, b.group ?? null, b.labelPrefix);
+      await walletSetChanged();
+      return { wallets: created };
     });
     // Raw private keys are NEVER accepted by the API. Client must use Privy importWallet, then POST /api/wallets/sync.
     a.post("/api/wallets/import", async (_req, reply) => {
@@ -396,11 +409,15 @@ export async function buildServer(): Promise<FastifyInstance> {
     a.delete("/api/wallets/:id", async (req) => {
       const b = z.object({ confirm: z.literal("DELETE"), mode: z.enum(["delete", "hide"]).default("hide") }).parse(req.body ?? {});
       const { removeWalletForUser } = await import("../users/walletRemoval.js");
-      return { ok: true, ...(await removeWalletForUser(req.user!, (req.params as any).id, b.mode)) };
+      const r = await removeWalletForUser(req.user!, (req.params as any).id, b.mode);
+      await walletSetChanged();
+      return { ok: true, ...r };
     });
     a.post("/api/wallets/:id/restore", async (req) => {
       const { restoreWallet } = await import("../users/service.js");
-      return { wallet: await restoreWallet(req.user!.id, (req.params as any).id) };
+      const wallet = await restoreWallet(req.user!.id, (req.params as any).id);
+      await walletSetChanged();
+      return { wallet };
     });
     a.post("/api/wallets/:id/main", async (req) => {
       await setMain(req.user!.id, (req.params as any).id);
@@ -412,24 +429,39 @@ export async function buildServer(): Promise<FastifyInstance> {
     a.delete("/api/groups/:name", async (req) => ({
       groups: await deleteGroup(req.user!.id, decodeURIComponent((req.params as any).name)),
     }));
-    a.post("/api/wallets/balances", async (req) => {
-      const b = z.object({ chain: z.string(), walletIds: z.array(z.string()).optional() }).parse(req.body);
+    a.post("/api/wallets/balances", async (req, reply) => {
+      const b = z.object({ chain: z.string(), walletIds: z.array(z.string()).optional(), fresh: z.boolean().optional() }).parse(req.body);
       const c = requireChain(b.chain);
       const pool = getPool(c);
       const list = (await listWallets(req.user!.id)).filter((w: { id: string }) => !b.walletIds || b.walletIds.includes(w.id));
+      // Manual "Refresh Balances" skips the cache (rate limited); normal loads use it.
+      if (b.fresh) await checkRateLimit(req.user!.id, "balances:fresh", 12);
+      const { activitySince } = await import("../core/alchemy/activity.js");
+      const changedAt = await activitySince(
+        c.key,
+        list.map((w) => w.address),
+      );
       // One multicall for every uncached wallet (30 s cache, concurrent requests share the in-flight call).
       const bals = await cachedBalances(
         c.key,
         list.map((w) => w.address),
         (missing) => nativeBalancesBatch(pool, missing),
+        { fresh: b.fresh, changedAt },
       );
+      const asOf = new Date(
+        balancesAsOf(
+          c.key,
+          list.map((w) => w.address),
+        ),
+      ).toISOString();
       const out = list.map((w: { id: string; address: string }) => {
         const bal = bals.get(w.address.toLowerCase());
         if (bal === undefined || bal instanceof Error)
           return { walletId: w.id, balance: null, error: redactString(String(bal?.message ?? "unavailable")) };
         return { walletId: w.id, balance: formatEther(bal), balanceWei: bal.toString() };
       });
-      return { chain: c.key, nativeSymbol: c.nativeSymbol, balances: out };
+      reply.header("cache-control", "private, no-store");
+      return { chain: c.key, nativeSymbol: c.nativeSymbol, asOf, balances: out };
     });
 
     // Resolve / eligibility / simulate / execute
@@ -520,6 +552,15 @@ export async function buildServer(): Promise<FastifyInstance> {
       ad.post("/api/admin/telegram/setup", async () => {
         const { ensureHousekeepingSchedule } = await import("../jobs/scheduler.js");
         return { ...(await setupTelegramWebhook()), ...(await ensureHousekeepingSchedule()) };
+      });
+      /** Alchemy Address Activity webhooks: status (GET) or full re-sync (POST). Never returns signing keys. */
+      ad.get("/api/admin/alchemy/webhooks", async () => {
+        const { webhookStatus } = await import("../core/alchemy/sync.js");
+        return webhookStatus();
+      });
+      ad.post("/api/admin/alchemy/sync", async () => {
+        const { syncAlchemyWebhooks } = await import("../core/alchemy/sync.js");
+        return syncAlchemyWebhooks({ mode: "full" });
       });
       ad.post("/api/admin/users/:id/disable", async (req) => {
         const { disabled } = z.object({ disabled: z.boolean() }).parse(req.body);

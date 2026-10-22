@@ -249,7 +249,9 @@ export function registerNftRoutes(a: FastifyInstance) {
   /** Cached holdings only (DB). Never calls an indexer or RPC. */
   a.get("/api/nfts", async (req, reply) => {
     reply.header("cache-control", "private, no-store");
-    return holdingsView(req.user!.id);
+    const { pendingRescans } = await import("../core/nft/rescan.js");
+    const [view, pending] = await Promise.all([holdingsView(req.user!.id), pendingRescans(req.user!.id).catch(() => null)]);
+    return { ...view, rescanDueAt: pending ? new Date(pending).toISOString() : null };
   });
 
   a.post("/api/nfts/refresh", async (req, reply) => {

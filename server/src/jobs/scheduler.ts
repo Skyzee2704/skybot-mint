@@ -198,6 +198,20 @@ export async function housekeeping() {
   } catch (e: any) {
     log.warn("siwe signer backfill", String(e?.message ?? e).slice(0, 160));
   }
+  // Webhook-driven NFT re-scans still due (backstop + second pass), then keep Alchemy webhooks in sync.
+  try {
+    const { processRescanQueue } = await import("../core/nft/rescan.js");
+    (out as any).nftRescans = await processRescanQueue({ limit: 20 });
+  } catch (e: any) {
+    log.warn("nft rescan queue", String(e?.message ?? e).slice(0, 160));
+  }
+  try {
+    const { syncAlchemyWebhooks } = await import("../core/alchemy/sync.js");
+    const r = await syncAlchemyWebhooks({ mode: "auto" });
+    (out as any).alchemyWebhooks = r.status;
+  } catch (e: any) {
+    log.warn("alchemy webhook sync", String(e?.message ?? e).slice(0, 160));
+  }
   return out;
 }
 

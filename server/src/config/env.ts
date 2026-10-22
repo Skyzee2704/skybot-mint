@@ -136,6 +136,10 @@ export const env = {
   get upstashRedisToken() {
     return str("UPSTASH_REDIS_REST_TOKEN");
   },
+  /** Alchemy Notify API auth token (dashboard → Webhooks → Auth Token). Optional: webhooks sync is a no-op without it. */
+  get alchemyAuthToken() {
+    return str("ALCHEMY_AUTH_TOKEN");
+  },
   get qstashToken() {
     return str("QSTASH_TOKEN");
   },

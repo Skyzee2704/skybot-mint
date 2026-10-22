@@ -6,3 +6,6 @@ export { runJob, housekeeping, qstashEnabled } from "./jobs/scheduler.js";
 export { verifyQStash } from "./jobs/qstash.js";
 export { env } from "./config/env.js";
 export { log, redactString } from "./util/log.js";
+export { handleAlchemyWebhook } from "./core/alchemy/webhook.js";
+export { syncAlchemyWebhooks, webhookStatus } from "./core/alchemy/sync.js";
+export { processRescanQueue } from "./core/nft/rescan.js";

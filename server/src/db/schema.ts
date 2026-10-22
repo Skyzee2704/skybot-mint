@@ -219,3 +219,34 @@ export const siweSigners = sqliteTable("siwe_signers", {
   /** Short reason when not attached (e.g. "owner authorization needed"). */
   note: text("note"),
 });
+
+/** One Alchemy Address Activity webhook per network (signing key AES-GCM encrypted, never returned by the API). */
+export const alchemyWebhooks = sqliteTable("alchemy_webhooks", {
+  network: text("network").primaryKey(), // e.g. BASE_MAINNET
+  webhookId: text("webhook_id"),
+  signingKeyEnc: text("signing_key_enc"),
+  addressHash: text("address_hash"),
+  addressCount: integer("address_count").notNull().default(0),
+  syncedAt: text("synced_at").notNull(),
+  error: text("error"),
+});
+
+/** Last on-chain activity seen (Alchemy webhook) per chain × address; newer than a cached balance = refetch. */
+export const walletActivity = sqliteTable("wallet_activity", {
+  id: text("id").primaryKey(), // `${chain}:${lower-case address}`
+  chain: text("chain").notNull(),
+  address: text("address").notNull(),
+  at: integer("at").notNull(), // ms
+  kinds: text("kinds").notNull().default(""),
+});
+
+/** Debounced NFT holdings re-scans (one row per wallet × chain) queued by webhooks. */
+export const nftRescanQueue = sqliteTable("nft_rescan_queue", {
+  id: text("id").primaryKey(), // `${walletId}:${chain}`
+  userId: text("user_id").notNull(),
+  walletId: text("wallet_id").notNull(),
+  chain: text("chain").notNull(),
+  address: text("address").notNull(),
+  dueAt: integer("due_at").notNull(), // ms
+  pass: integer("pass").notNull().default(1),
+});
