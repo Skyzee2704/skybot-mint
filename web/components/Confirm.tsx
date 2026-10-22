@@ -1,52 +1,46 @@
 "use client";
 // SPDX-License-Identifier: AGPL-3.0-only
 import { useCallback, useState } from "react";
-import { useTelegram, useTelegramMainButton } from "@/lib/telegram";
+import { useTelegram } from "@/lib/telegram";
 
-/** Typed-phrase confirm. Inside Telegram the native MainButton becomes the confirm button. */
+/**
+ * Checkbox confirm with an inline action button at the end of the card (web and Mini App alike).
+ * Telegram's native MainButton is not used: Telegram draws it outside the page, below our fixed tab bar.
+ */
 export function ConfirmBox({
-  phrase,
+  statement,
   label,
   onConfirm,
 }: {
-  phrase: string;
+  /** What the member confirms, e.g. "I confirm this will broadcast real transactions (2 mints, est. cost up to 0.01 ETH)". */
+  statement: string;
   label: string;
-  onConfirm: (typed: string) => Promise<void> | void;
+  onConfirm: () => Promise<void> | void;
 }) {
-  const [typed, setTyped] = useState("");
+  const [checked, setChecked] = useState(false);
   const [busy, setBusy] = useState(false);
-  const { isMiniApp, haptic } = useTelegram();
+  const { haptic } = useTelegram();
   const go = useCallback(async () => {
-    if (typed !== phrase || busy) return;
+    if (!checked || busy) return;
     setBusy(true);
     try {
-      await onConfirm(typed);
+      await onConfirm();
       haptic("success");
     } catch {
       haptic("error");
     } finally {
       setBusy(false);
     }
-  }, [typed, phrase, busy, onConfirm, haptic]);
-  useTelegramMainButton({ text: busy ? "Sending…" : label, visible: isMiniApp, enabled: typed === phrase && !busy, onClick: go });
+  }, [checked, busy, onConfirm, haptic]);
   return (
-    <div className="notice">
-      <div>
-        Type <b className="mono">{phrase}</b> to confirm. This broadcasts real transactions.
-      </div>
-      <div className="row" style={{ marginTop: 8 }}>
-        <input value={typed} onChange={(e) => setTyped(e.target.value)} placeholder={phrase} style={{ minWidth: 200, maxWidth: 320 }} />
-        {!isMiniApp && (
-          <button className="danger" disabled={typed !== phrase || busy} onClick={go}>
-            {busy ? "Sending…" : label}
-          </button>
-        )}
-      </div>
-      {isMiniApp && (
-        <p className="muted" style={{ fontSize: 12 }}>
-          Use the orange button at the bottom to confirm.
-        </p>
-      )}
+    <div className="notice confirm-box">
+      <label className="confirm-check">
+        <input type="checkbox" checked={checked} onChange={(e) => setChecked(e.target.checked)} />
+        <span>{statement}</span>
+      </label>
+      <button className="danger confirm-action" disabled={!checked || busy} onClick={go}>
+        {busy ? "Sending…" : label}
+      </button>
     </div>
   );
 }

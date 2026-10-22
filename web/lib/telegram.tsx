@@ -36,6 +36,7 @@ type TgWebApp = {
   };
   setHeaderColor: (c: string) => void;
   setBackgroundColor: (c: string) => void;
+  setBottomBarColor?: (c: string) => void;
 };
 
 declare global {
@@ -65,7 +66,10 @@ export function TelegramProvider({ children }: { children: ReactNode }) {
       try {
         wa.setHeaderColor("#070707");
         wa.setBackgroundColor("#070707");
-        wa.MainButton.setParams({ color: "#ff6b1a", text_color: "#120800" });
+        // The app never uses Telegram's bottom MainButton (it sits below our own tab bar); keep it hidden and the
+        // bottom bar dark so no light strip appears under the page.
+        wa.MainButton.hide();
+        wa.setBottomBarColor?.("#070707");
       } catch {
         /* older clients */
       }
@@ -104,28 +108,4 @@ export function TelegramProvider({ children }: { children: ReactNode }) {
 
 export function useTelegram() {
   return useContext(TelegramCtx);
-}
-
-/** Wire Telegram MainButton to a confirm action (e.g. mint). */
-export function useTelegramMainButton(opts: { text: string; visible: boolean; enabled: boolean; onClick: () => void }) {
-  const { webApp, haptic } = useTelegram();
-  const { text, visible, enabled, onClick } = opts;
-  useEffect(() => {
-    if (!webApp) return;
-    const mb = webApp.MainButton;
-    const handler = () => {
-      haptic("medium");
-      onClick();
-    };
-    mb.setText(text);
-    if (visible) mb.show();
-    else mb.hide();
-    if (enabled) mb.enable();
-    else mb.disable();
-    mb.onClick(handler);
-    return () => {
-      mb.offClick(handler);
-      mb.hide();
-    };
-  }, [webApp, text, visible, enabled, onClick, haptic]);
 }

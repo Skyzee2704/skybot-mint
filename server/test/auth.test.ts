@@ -23,3 +23,16 @@ describe("telegram link code format", () => {
     expect(payload.slice(5)).toBe(code);
   });
 });
+
+describe("mint checkbox confirmation", () => {
+  it("requires confirmed:true and the plan's mint count", async () => {
+    const { createPlan, consumePlan, mintConfirmation } = await import("../src/core/plans.js");
+    expect(() => mintConfirmation({})).toThrow(/Tick the confirmation/);
+    expect(() => mintConfirmation({ confirmed: false as any, nfts: 2 })).toThrow(/Tick/);
+    expect(() => mintConfirmation({ confirmed: true })).toThrow(/Tick/);
+    const p = createPlan("u", "mint", { n: 2 }, "MINT 2");
+    expect(() => consumePlan("u", p.id, "mint", mintConfirmation({ confirmed: true, nfts: 3 }))).toThrow(/doesn't match/);
+    expect(consumePlan("u", p.id, "mint", mintConfirmation({ confirmed: true, nfts: 2 })).data).toEqual({ n: 2 });
+    expect(mintConfirmation({ confirmPhrase: "MINT 4" })).toBe("MINT 4");
+  });
+});

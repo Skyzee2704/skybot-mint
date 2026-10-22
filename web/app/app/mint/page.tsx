@@ -775,14 +775,16 @@ export default function MintPage() {
           ))}
           {sim.planId && !job && (
             <ConfirmBox
-              phrase={sim.confirmPhrase}
+              key={sim.planId}
+              statement={`I confirm this will broadcast real transactions (${sim.summary.totalNfts} mint${sim.summary.totalNfts === 1 ? "" : "s"}, est. cost up to ${sim.summary.totalMax} ${sym}${sim.summary.runAt ? `, at ${fmt(sim.summary.runAt, false)}` : ""}).`}
               label={sim.summary.runAt ? "Schedule Mint" : "Mint Now"}
-              onConfirm={async (p) => {
+              onConfirm={async () => {
                 try {
-                  const r = await api("/api/mint/execute", { body: { planId: sim.planId, confirmPhrase: p } });
+                  const r = await api("/api/mint/execute", { body: { planId: sim.planId, confirmed: true, nfts: sim.summary.totalNfts } });
                   setJob(r.job);
                 } catch (e: any) {
                   setErr(e.message);
+                  throw e;
                 }
               }}
             />

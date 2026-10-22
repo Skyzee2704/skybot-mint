@@ -15,7 +15,7 @@ import { nativeBalancesBatch } from "../core/rpc/multicall.js";
 import { registerWithdrawRoutes } from "./withdrawRoutes.js";
 import { registerNftRoutes } from "./nftRoutes.js";
 import { simulateMint } from "../core/mint/simulate.js";
-import { consumePlan } from "../core/plans.js";
+import { consumePlan, mintConfirmation } from "../core/plans.js";
 import { cancelJob, enqueueMint } from "../jobs/scheduler.js";
 import { listJobs, getJob, listMinted } from "../core/jobs/repo.js";
 import {
@@ -526,8 +526,20 @@ export async function buildServer(): Promise<FastifyInstance> {
       return simulateMint(t, r, req.user!.id);
     });
     a.post("/api/mint/execute", async (req) => {
-      const b = z.object({ planId: z.string(), confirmPhrase: z.string() }).parse(req.body);
-      const plan = consumePlan<{ request: MintRequest; gasHints: Record<string, string> }>(req.user!.id, b.planId, "mint", b.confirmPhrase);
+      const b = z
+        .object({
+          planId: z.string(),
+          confirmed: z.literal(true).optional(),
+          nfts: z.number().int().min(1).max(100000).optional(),
+          confirmPhrase: z.string().optional(),
+        })
+        .parse(req.body);
+      const plan = consumePlan<{ request: MintRequest; gasHints: Record<string, string> }>(
+        req.user!.id,
+        b.planId,
+        "mint",
+        mintConfirmation(b),
+      );
       return { job: await enqueueMint(req.user!.id, plan.data.request, plan.data.gasHints) };
     });
     a.get("/api/jobs", async (req) => ({ jobs: await listJobs(req.user!.id) }));

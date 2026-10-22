@@ -27,7 +27,19 @@ export function consumePlan<T>(userId: string, id: string, kind: Plan["kind"], p
     throw Object.assign(new Error("Plan expired — simulate again"), { statusCode: 410 });
   }
   if ((phrase ?? "").trim() !== p.confirmPhrase)
-    throw Object.assign(new Error(`Confirmation phrase mismatch. Type exactly: ${p.confirmPhrase}`), { statusCode: 400 });
+    throw Object.assign(new Error("Confirmation doesn't match this mint plan. Simulate again and confirm."), { statusCode: 400 });
   plans.delete(id);
   return p as Plan<T>;
+}
+
+/**
+ * Checkbox confirmation (web + Mini App Mint confirm): the member ticked "I confirm this will broadcast real
+ * transactions (N mints …)". The client must send confirmed: true plus the mint count it showed; the server only
+ * accepts it when that count matches the plan, so a stale or different confirmation can't execute another plan.
+ */
+export function mintConfirmation(b: { confirmed?: boolean; nfts?: number; confirmPhrase?: string }): string {
+  if (b.confirmPhrase !== undefined) return b.confirmPhrase; // legacy typed phrase (older clients)
+  if (b.confirmed !== true || !Number.isInteger(b.nfts))
+    throw Object.assign(new Error("Tick the confirmation box to broadcast the mint."), { statusCode: 400 });
+  return `MINT ${b.nfts}`;
 }
