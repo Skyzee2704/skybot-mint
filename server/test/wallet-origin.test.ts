@@ -59,14 +59,52 @@ describe("wallet origin and order", () => {
     });
     const seen: string[] = [];
     const r = await svc.reconcileWalletSources({
-      origin: async (id) => {
+      origin: async (_u, id) => {
         seen.push(String(id));
-        return { source: id === "pw-b" ? "imported" : "created", createdAt: null };
+        return /^0x/.test(String(id)) ? null : { id: String(id), source: id === "pw-b" ? "imported" : "created", createdAt: null };
       },
     });
-    expect(seen).not.toContain(A(5));
     expect(r.fixed).toBe(3);
     const by = Object.fromEntries((await svc.listWallets("ou")).map((w) => [w.id, w.source]));
     expect(by).toMatchObject({ "w-a": "created", "w-b": "imported", "w-c": "created", "w-addr": "privy" });
+  });
+
+  it("fresh import race (2026-10-22 wallet-6): address-only background sync, then the import form — ends Imported", async () => {
+    // 1) The Wallets page's background sync sees the new Privy wallet first. Privy's connected-wallet object has no
+    //    wallet id, so it sends the address; before the fix the row was stored as unverified "privy" → shown "Created".
+    const bg = await svc.syncPrivyWallet("ou", { privyWalletId: A(20), address: A(20), source: "privy", imported: true });
+    expect(bg.source).toBe("imported"); // the browser's `imported` flag is honoured
+    // 2) Without the flag (older client), the import form's own save still upgrades it, and keeps the auto label
+    //    instead of blanking it with an empty Label field.
+    const bg2 = await svc.syncPrivyWallet("ou", { privyWalletId: A(21), address: A(21), source: "privy" });
+    expect(bg2.source).toBe("privy");
+    const imp = await svc.syncPrivyWallet("ou", { privyWalletId: "", address: A(21), label: "", source: "imported", restore: true });
+    expect(imp.source).toBe("imported");
+    expect(imp.label).toBe(bg2.label);
+    // 3) Never downgraded by a later sync.
+    expect((await svc.syncPrivyWallet("ou", { privyWalletId: A(21), address: A(21), source: "privy", imported: false })).source).toBe(
+      "imported",
+    );
+  });
+
+  it("healing re-checks recent 'created' rows and fixes address-only ids from Privy's user record", async () => {
+    const t = new Date().toISOString();
+    await db.insert(schema.wallets).values({
+      id: "w-late",
+      userId: "ou",
+      privyWalletId: A(30),
+      address: A(30),
+      label: "late",
+      source: "created",
+      isMain: false,
+      createdAt: t,
+    });
+    await svc.reconcileWalletSources({
+      limit: 100,
+      origin: async (_u, id, address) =>
+        address.toLowerCase() === A(30) ? { id: "privy-late", source: "imported", createdAt: null } : null,
+    });
+    const w = (await svc.listWallets("ou")).find((x) => x.id === "w-late")!;
+    expect(w).toMatchObject({ source: "imported", privyWalletId: "privy-late" });
   });
 });

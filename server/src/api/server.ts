@@ -361,6 +361,7 @@ export async function buildServer(): Promise<FastifyInstance> {
                 address: addr,
                 label: z.string().max(64).optional(),
                 source: z.string().optional(),
+                imported: z.boolean().optional(),
                 hdIndex: z.number().int().nullable().optional(),
                 restore: z.boolean().optional(),
               }),

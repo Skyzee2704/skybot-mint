@@ -63,6 +63,36 @@ export async function privyWalletOrigin(
   }
 }
 
+/**
+ * Same as privyWalletOrigin for rows that only know the address (the browser's connected-wallet objects carry no
+ * Privy wallet id): reads the member's Privy user once and matches the embedded wallet by address. Linked wallet
+ * accounts carry `imported` and the real wallet `id`.
+ */
+export async function privyWalletOriginByAddress(
+  privyUserId: string | null | undefined,
+  address: string,
+): Promise<{ id: string; source: "imported" | "created"; createdAt: string | null } | null> {
+  if (!privyUserId || privyUserId.startsWith("tg:") || !privyConfigured()) return null;
+  try {
+    const pu: any = await (getPrivy().users() as any)._get(privyUserId);
+    const a = (pu?.linked_accounts ?? []).find(
+      (x: any) =>
+        x?.type === "wallet" && x?.wallet_client_type === "privy" && String(x?.address ?? "").toLowerCase() === address.toLowerCase(),
+    );
+    if (!a?.id) return null;
+    const byId = await privyWalletOrigin(String(a.id));
+    if (byId) return { id: String(a.id), ...byId };
+    const t = Number(a.first_verified_at);
+    return {
+      id: String(a.id),
+      source: a.imported ? "imported" : "created",
+      createdAt: Number.isFinite(t) && t > 0 ? new Date(t < 1e12 ? t * 1000 : t).toISOString() : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
 /** Create N ethereum wallets owned by a Privy user (server wallets API — keys stay in Privy). */
 export async function createPrivyWallets(privyUserId: string, count: number) {
   const privy = getPrivy();

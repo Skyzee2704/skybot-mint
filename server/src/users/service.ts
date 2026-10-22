@@ -5,7 +5,7 @@ import { getAddress } from "ethers";
 import { getDb } from "../db/client.js";
 import { users, wallets, settings, telegramLinks, jobs, walletTombstones } from "../db/schema.js";
 import { env } from "../config/env.js";
-import { createPrivyWallets, getPrivy, privyWalletOrigin } from "../auth/privy.js";
+import { createPrivyWallets, getPrivy, privyWalletOrigin, privyWalletOriginByAddress } from "../auth/privy.js";
 import { privyConfigured } from "../config/env.js";
 import { log } from "../util/log.js";
 
@@ -289,6 +289,8 @@ export async function syncPrivyWallet(
     address: string;
     label?: string;
     source?: string;
+    /** The browser's Privy wallet object says it was imported (ConnectedWallet.imported). */
+    imported?: boolean;
     hdIndex?: number | null;
     /** Explicit user action (import / restore) — allowed to bring back a removed wallet. */
     restore?: boolean;
@@ -317,16 +319,28 @@ export async function syncPrivyWallet(
     if (tomb) await db.delete(walletTombstones).where(eq(walletTombstones.id, tomb.id));
   }
   if (existing) {
-    // Source from Privy's record when ours is still unverified ("privy"), else an explicit client import wins.
-    const origin = existing.source === "privy" ? await privyWalletOrigin(input.privyWalletId || existing.privyWalletId) : null;
-    const source = origin?.source ?? (input.source === "imported" ? "imported" : existing.source);
+    // Imported is final (never downgraded). Otherwise Privy's record decides; an explicit client import also counts.
+    const origin =
+      existing.source === "imported" || existing.source === "generated"
+        ? null
+        : await walletOrigin(userId, input.privyWalletId || existing.privyWalletId, address);
+    const source =
+      existing.source === "imported" || clientSaysImported(input) || origin?.source === "imported"
+        ? "imported"
+        : (origin?.source ?? existing.source);
+    const keepId = existing.privyWalletId && looksLikeRealPrivyId(existing.privyWalletId) ? existing.privyWalletId : null;
     await db
       .update(wallets)
       .set({
         source,
         // Clients without the Privy wallet id send the address: never overwrite a real id with it.
-        privyWalletId: /^0x/i.test(input.privyWalletId) && existing.privyWalletId ? existing.privyWalletId : input.privyWalletId,
-        label: input.label ?? existing.label,
+        privyWalletId:
+          keepId && !looksLikeRealPrivyId(input.privyWalletId)
+            ? keepId
+            : looksLikeRealPrivyId(input.privyWalletId)
+              ? input.privyWalletId
+              : (origin?.id ?? keepId ?? input.privyWalletId),
+        label: input.label || existing.label,
         removedAt: null,
       })
       .where(eq(wallets.id, existing.id));
@@ -334,8 +348,8 @@ export async function syncPrivyWallet(
   }
   const id = randomUUID();
   const count = (await listWallets(userId)).length;
-  // The client's background sync and the import form can race; Privy's record decides imported vs created.
-  const origin = await privyWalletOrigin(input.privyWalletId);
+  // The client's background sync and the import form race; Privy's record (or the client's own import flag) decides.
+  const origin = await walletOrigin(userId, input.privyWalletId, address);
   const t = now();
   await db
     .insert(wallets)
@@ -346,7 +360,7 @@ export async function syncPrivyWallet(
       address,
       label: input.label ?? `wallet-${count + 1}`,
       groupName: null,
-      source: origin?.source ?? input.source ?? "privy",
+      source: clientSaysImported(input) || origin?.source === "imported" ? "imported" : (origin?.source ?? input.source ?? "privy"),
       hdIndex: input.hdIndex ?? null,
       isMain: count === 0,
       // When the wallet was added to Privy (an import done elsewhere may sync later); never in the future.
@@ -371,6 +385,20 @@ export async function syncPrivyWallet(
 }
 
 const looksLikeRealPrivyId = (s: string | null | undefined) => Boolean(s && !/^0x/i.test(s));
+const clientSaysImported = (i: { source?: string; imported?: boolean }) => i.source === "imported" || i.imported === true;
+
+/**
+ * Privy's record for a wallet: by wallet id when we have it, else by address through the member's Privy user
+ * (the browser's connected-wallet objects only expose the address). Null when Privy can't answer.
+ */
+async function walletOrigin(userId: string, privyWalletId: string | null | undefined, address: string) {
+  if (looksLikeRealPrivyId(privyWalletId)) {
+    const o = await privyWalletOrigin(privyWalletId);
+    return o ? { id: privyWalletId!, ...o } : null;
+  }
+  const u = (await getDb().select({ p: users.privyUserId }).from(users).where(eq(users.id, userId)).limit(1))[0];
+  return privyWalletOriginByAddress(u?.p ?? null, address);
+}
 
 export async function generateWallets(user: AppUser, count: number, labelPrefix = "gen") {
   if (count < 1 || count > 50) throw Object.assign(new Error("count must be 1..50"), { statusCode: 400 });
@@ -778,22 +806,36 @@ export async function attachPrivyToUser(userId: string, privyUserId: string, pro
  * Data fix / backstop (housekeeping): wallets whose source is still the unverified "privy" get "imported" or
  * "created" from Privy's record. Bounded per run; rows Privy can't answer for stay "privy" and are retried.
  */
-export async function reconcileWalletSources(opts: { limit?: number; origin?: typeof privyWalletOrigin } = {}) {
+export async function reconcileWalletSources(
+  opts: {
+    limit?: number;
+    origin?: (userId: string, privyWalletId: string | null, address: string) => ReturnType<typeof walletOrigin>;
+    now?: number;
+  } = {},
+) {
+  // Unverified rows, plus rows marked "created" in the last 24 h (re-checked in case Privy recorded the import late).
+  const since = new Date((opts.now ?? Date.now()) - 24 * 3_600_000).toISOString();
   const rows = await getDb()
-    .select({ id: wallets.id, privyWalletId: wallets.privyWalletId })
+    .select({
+      id: wallets.id,
+      userId: wallets.userId,
+      privyWalletId: wallets.privyWalletId,
+      address: wallets.address,
+      source: wallets.source,
+    })
     .from(wallets)
-    // Address-only ids can't be looked up; random order so a row Privy can't answer never starves the rest.
-    .where(and(eq(wallets.source, "privy"), sql`${wallets.privyWalletId} NOT LIKE '0x%'`))
+    .where(sql`(${wallets.source} = 'privy' OR (${wallets.source} = 'created' AND ${wallets.createdAt} > ${since}))`)
+    // Random order so a row Privy can't answer never starves the rest.
     .orderBy(sql`random()`)
     .limit(opts.limit ?? 10);
   let fixed = 0;
   for (const r of rows) {
-    const o = await (opts.origin ?? privyWalletOrigin)(r.privyWalletId);
-    if (!o) continue;
+    const o = await (opts.origin ?? walletOrigin)(r.userId, r.privyWalletId, r.address);
+    if (!o || o.source === r.source) continue;
     await getDb()
       .update(wallets)
-      .set({ source: o.source })
-      .where(and(eq(wallets.id, r.id), eq(wallets.source, "privy")));
+      .set({ source: o.source, ...(o.id && !looksLikeRealPrivyId(r.privyWalletId) ? { privyWalletId: o.id } : {}) })
+      .where(and(eq(wallets.id, r.id), eq(wallets.source, r.source)));
     fixed++;
   }
   return { checked: rows.length, fixed };

@@ -78,11 +78,18 @@ export default function WalletsPage() {
     const known = new Set([...list.wallets, ...removedList].map((w: any) => w.address.toLowerCase()).concat([...goneAddrs.current]));
     const missing = (privyWallets ?? [])
       .filter((w) => w.walletClientType === "privy" && !known.has(w.address.toLowerCase()))
-      .map((w) => ({
-        privyWalletId: (w as any).id ?? w.address,
-        address: w.address,
-        source: "privy",
-      }));
+      .map((w) => {
+        // Connected-wallet objects carry no Privy wallet id; the linked account does (and the server also asks Privy).
+        const acct = ((user?.linkedAccounts ?? []) as any[]).find(
+          (a) => a?.type === "wallet" && String(a?.address ?? "").toLowerCase() === w.address.toLowerCase(),
+        );
+        return {
+          privyWalletId: acct?.id ?? (w as any).id ?? w.address,
+          address: w.address,
+          source: "privy",
+          imported: Boolean((w as any).imported || acct?.imported),
+        };
+      });
     if (!missing.length) return;
     api("/api/wallets/sync", { body: { wallets: missing } })
       .then((r: any) => {
@@ -338,6 +345,7 @@ export default function WalletsPage() {
                         wallets: [
                           {
                             privyWalletId: (w as any).id ?? (w as any).walletId ?? "",
+                            imported: true,
                             address: (w as any).address ?? (w as any).walletClient?.account?.address,
                             label,
                             source: "imported",
