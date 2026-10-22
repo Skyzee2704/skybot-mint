@@ -116,3 +116,106 @@ export function summarizeGroup(g: StageGroup): GroupSummary {
 export function nameList(ws: { label: string }[], max = 3): string {
   return ws.length && ws.length <= max ? `: ${ws.map((w) => w.label).join(", ")}` : "";
 }
+
+/* ---------- Mint timing options (web + Mini App "Timing" step; the server re-derives the same plan) ---------- */
+
+const ms = (iso: string | null | undefined) => {
+  const v = iso ? Date.parse(iso) : NaN;
+  return Number.isFinite(v) ? v : null;
+};
+
+/** Live at `now`: started and not yet ended. Undated stages fall back to their resolved status. */
+export function stageLiveAt(s: StageLike, now: number): boolean {
+  const start = ms(s.start);
+  const end = ms(s.end);
+  if (start === null) return s.status === "active" && (end === null || now < end);
+  return start <= now && (end === null || now < end);
+}
+
+/** Over at `now` (past its end time, or resolved as ended without dates). */
+export function stageEndedAt(s: StageLike, now: number): boolean {
+  const end = ms(s.end);
+  if (end !== null) return now >= end;
+  return s.status === "ended";
+}
+
+/** A stage with a known start, or one that is live: something a mint can be scheduled into. */
+const schedulable = (s: StageLike, now: number) => ms(s.start) !== null || stageLiveAt(s, now);
+
+export interface TimingOption<S extends StageLike = StageLike> {
+  /** "now", or the stage name (unique per drop). */
+  key: string;
+  kind: "now" | "stage";
+  /** Stage the mint runs in; null only for drops without stage data (generic contracts), where "Now" is the only choice. */
+  stage: S | null;
+  /** Display name: the stage name, or "Public" for the public stage. */
+  name: string;
+  live: boolean;
+  /** Broadcast time: null = immediately (stage is live), else the stage start. */
+  runAt: string | null;
+  /** Selected wallets that mint in this option. */
+  walletIds: string[];
+  /** Selected wallets left out (not eligible / not verified for this stage). */
+  skipped: WalletStageVerdict[];
+}
+
+/**
+ * Timing choices for the selected wallets, soonest first:
+ *  - one option per upcoming or live allowlist stage at least one selected wallet is eligible for;
+ *  - the public stage (always, if the drop has one that hasn't ended), labelled "Public", using every selected wallet;
+ *  - "Now" first, only while one of those stages is live, minting within that live stage.
+ * Ended stages are hidden. Drops without dated stages (e.g. plain contracts) offer only "Now".
+ */
+export function timingOptions<S extends StageLike>(
+  stages: readonly S[],
+  rows: readonly RowLike[],
+  selectedIds: readonly string[],
+  targetStage: { label: string | null; type?: string | null } | null,
+  now: number,
+): TimingOption<S>[] {
+  const sel = new Set(selectedIds);
+  const selRows = rows.filter((r) => sel.has(r.walletId));
+  const allIds = selRows.map((r) => r.walletId);
+  const open = stages.filter((s) => !stageEndedAt(s, now) && schedulable(s, now));
+  if (!stages.some((s) => schedulable(s, now) || stageEndedAt(s, now)))
+    return [{ key: "now", kind: "now", stage: null, name: "Now", live: true, runAt: null, walletIds: allIds, skipped: [] }];
+  const opts: TimingOption<S>[] = [];
+  for (const s of open) {
+    const live = stageLiveAt(s, now);
+    const runAt = live ? null : (s.start ?? null);
+    if (isPublicStage(s)) {
+      opts.push({ key: s.name, kind: "stage", stage: s, name: "Public", live, runAt, walletIds: allIds, skipped: [] });
+      continue;
+    }
+    const verdicts = selRows.map((r) => walletStageVerdict(r, s, targetStage));
+    const ok = verdicts.filter((v) => v.state === "eligible");
+    if (!ok.length) continue;
+    opts.push({
+      key: s.name,
+      kind: "stage",
+      stage: s,
+      name: s.name,
+      live,
+      runAt,
+      walletIds: ok.map((v) => v.walletId),
+      skipped: verdicts.filter((v) => v.state !== "eligible"),
+    });
+  }
+  opts.sort((a, b) => (a.live === b.live ? (ms(a.runAt) ?? 0) - (ms(b.runAt) ?? 0) : a.live ? -1 : 1));
+  const liveOpt = opts.find((o) => o.live);
+  if (liveOpt) opts.unshift({ ...liveOpt, key: "now", kind: "now" });
+  return opts;
+}
+
+/** Keep the member's choice while it is still offered; if it disappears fall back to Public (then the first option). */
+export function pickTimingOption<S extends StageLike>(
+  opts: readonly TimingOption<S>[],
+  wanted: string | null,
+): { option: TimingOption<S> | null; fellBack: boolean } {
+  if (!wanted) return { option: opts[0] ?? null, fellBack: false }; // default: Now while live, else the soonest stage
+  const hit = opts.find((o) => o.key === wanted);
+  if (hit) return { option: hit, fellBack: false };
+  const pub = opts.find((o) => o.kind === "stage" && o.stage && isPublicStage(o.stage));
+  const option = pub ?? opts[0] ?? null;
+  return { option, fellBack: Boolean(option) };
+}

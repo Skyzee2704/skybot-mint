@@ -20,6 +20,11 @@ export interface MintRequest {
   offsetMs?: number; // broadcast offset relative to runAt (can be negative, >= -5000)
   /** Public stage only: include these wallets even though their simulation failed (explicit user override). */
   forceWalletIds?: string[];
+  /**
+   * Mint stage chosen on the Timing step (stage name as resolved). The server derives the run time (stage start, or
+   * now while it is live) and the wallets (eligible ones only; every wallet for Public) from it.
+   */
+  stage?: string | null;
 }
 export interface BuiltTx {
   to: string;

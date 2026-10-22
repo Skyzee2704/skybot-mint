@@ -11,10 +11,10 @@ import { assertOpenSeaSiwe } from "@nft-mint-bot/server/siwe";
 import { useWalletList } from "@/lib/wallets";
 import { ChainSelect } from "@/components/ChainSelect";
 import { ConfirmBox } from "@/components/Confirm";
-import { formatDateTime, localTimeZone, zoneLabel, zonedWallTimeToDate } from "@/lib/time";
+import { formatDateTime, localTimeZone, zoneLabel } from "@/lib/time";
 import { useNow } from "@/lib/useNow";
 import { clampQty } from "@nft-mint-bot/server/qty";
-import { groupByStage, summarizeGroup, verdictText } from "@nft-mint-bot/server/stage-eligibility";
+import { groupByStage, pickTimingOption, summarizeGroup, timingOptions, verdictText } from "@nft-mint-bot/server/stage-eligibility";
 
 type Strategy = "seadrop_public" | "opensea_api" | "generic";
 const STRAT = STRATEGY_LABELS as Record<Strategy, string>;
@@ -43,9 +43,9 @@ export default function MintPage() {
   const [sel, setSel] = useState<Record<string, boolean>>({});
   const [verifyNote, setVerifyNote] = useState<string | null>(null);
   const [gasMode, setGasMode] = useState("normal");
-  const [when, setWhen] = useState<"now" | "stage" | "custom">("now");
-  const [stageStart, setStageStart] = useState("");
-  const [custom, setCustom] = useState("");
+  /** Timing choice: "now" or a stage name (see timingOptions). null = default (Now if live, else Public). */
+  const [timing, setTiming] = useState<string | null>(null);
+  const [timingNote, setTimingNote] = useState<string | null>(null);
   const [offsetMs, setOffsetMs] = useState(0);
   const [sim, setSim] = useState<any>(null);
   const [job, setJob] = useState<any>(null);
@@ -70,8 +70,8 @@ export default function MintPage() {
       setStrategy(r.recommendedStrategy === "none" ? "" : r.recommendedStrategy);
       setSig(r.generic?.selected?.signature ?? "");
       setPriceEth(r.generic?.values?.priceWei ? fmtEth(r.generic.values.priceWei, 18) : "0");
-      const up = r.stages.find((x: any) => x.status === "upcoming" && x.start);
-      setStageStart(up?.start ?? "");
+      setTiming(null);
+      setTimingNote(null);
     } catch (e: any) {
       setErr(e.message);
     } finally {
@@ -165,8 +165,6 @@ export default function MintPage() {
   const qtyFor = (r: any) => clampQty(qtys[r.walletId] ?? 1, maxFor(r));
   const setQtyFor = (r: any, q: number) => setQtys((m) => ({ ...m, [r.walletId]: clampQty(q, maxFor(r)) }));
   const rowCostWei = (r: any) => BigInt(r.unitPriceWei ?? "0") * BigInt(qtyFor(r)) + BigInt(r.gasCostWei ?? "0");
-  const customDate = when === "custom" && custom ? zonedWallTimeToDate(custom, tz ?? "UTC") : null;
-  const runAt = when === "now" ? null : when === "stage" ? stageStart || null : customDate ? customDate.toISOString() : null;
   const simulate = async (forceIds: string[] = []) => {
     setErr(null);
     setSim(null);
@@ -181,12 +179,14 @@ export default function MintPage() {
             strategy,
             slug: t.slug,
             wallets: rows
-              .filter((r: any) => sel[r.walletId] && qtyFor(r) > 0)
+              .filter((r: any) => sel[r.walletId] && qtyFor(r) > 0 && (!chosen?.stage || chosenIds.has(r.walletId)))
               .map((r: any) => ({ walletId: r.walletId, quantity: qtyFor(r) })),
             generic: genericPayload(),
             gasMode,
-            runAt,
-            offsetMs,
+            // The server derives the run time from the stage; runAt is sent only for display consistency checks.
+            stage: chosen?.stage?.name ?? null,
+            runAt: chosen?.runAt ?? null,
+            offsetMs: chosen && !chosen.live ? offsetMs : 0,
             forceWalletIds: forceIds.length ? forceIds : undefined,
           },
         }),
@@ -215,6 +215,33 @@ export default function MintPage() {
           : "";
   const sym = t?.chain?.nativeSymbol ?? "";
   const selRows = rows.filter((r: any) => sel[r.walletId]);
+  // Timing options: re-derived every second (useNow), so "Now" appears and a stage flips to live on its own.
+  const selKey = selRows.map((r: any) => r.walletId).join(",");
+  const options = useMemo(
+    () => (t ? timingOptions(t.stages ?? [], rows, selKey ? selKey.split(",") : [], elig?.targetStage ?? null, now) : []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [t, elig, selKey, now],
+  );
+  const { option: chosen, fellBack } = pickTimingOption(options, timing);
+  const chosenIds = new Set(chosen?.walletIds ?? []);
+  const optionsKey = options.map((o) => `${o.key}:${o.live}`).join("|");
+  useEffect(() => {
+    if (timing && fellBack && chosen) {
+      const gone = timing === "now" ? "No eligible stage is live any more" : `${timing} is no longer available for the selected wallets`;
+      setTimingNote(`${gone}, so timing switched to ${chosen.kind === "now" ? "Now" : chosen.name}.`);
+      setTiming(chosen.key);
+    } else if (timing && !chosen) setTiming(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [optionsKey, timing]);
+  useEffect(() => setSim(null), [chosen?.key, chosen?.live]);
+  const optionLabel = (o: (typeof options)[number]) =>
+    o.kind === "now"
+      ? o.stage
+        ? `Now · ${o.name === "Public" ? "Public" : o.name} is live`
+        : "Now"
+      : o.live
+        ? `${o.name} · live now${o.stage?.end ? ` · ends ${fmt(o.stage.end)}` : ""}`
+        : `${o.name} · ${fmt(o.runAt)}`;
   const totalWei = selRows.reduce((a: bigint, r: any) => a + rowCostWei(r), 0n);
   const totalNfts = selRows.reduce((a: number, r: any) => a + qtyFor(r), 0);
   const forceIds = Object.keys(force).filter((k) => force[k]);
@@ -624,40 +651,49 @@ export default function MintPage() {
                 <option value="aggressive">Aggressive</option>
               </select>
             </label>
-            <label>
-              <input type="radio" checked={when === "now"} onChange={() => setWhen("now")} /> Now
-            </label>
-            <label>
-              <input type="radio" checked={when === "stage"} disabled={!stageStart} onChange={() => setWhen("stage")} /> At stage start
-            </label>
-            <label>
-              <input type="radio" checked={when === "custom"} onChange={() => setWhen("custom")} /> Custom
-            </label>
-            <input
-              type="datetime-local"
-              value={custom}
-              onChange={(e) => {
-                setCustom(e.target.value);
-                setWhen("custom");
-              }}
-              style={{ width: "auto" }}
-            />
-            {when !== "now" && (
-              <label title="Send this many milliseconds before (negative) or after (positive) the chosen time">
+          </div>
+          {options.length ? (
+            <div className="timing-options" role="radiogroup" aria-label="When to mint">
+              {options.map((o) => (
+                <label key={o.key} className="timing-option">
+                  <input
+                    type="radio"
+                    name="timing"
+                    checked={chosen?.key === o.key}
+                    onChange={() => {
+                      setTiming(o.key);
+                      setTimingNote(null);
+                    }}
+                  />{" "}
+                  <span>{optionLabel(o)}</span>
+                </label>
+              ))}
+            </div>
+          ) : (
+            <div className="notice">No mint stage is live or scheduled for the selected wallets.</div>
+          )}
+          <div className="row" style={{ marginTop: 8 }}>
+            {chosen && !chosen.live && (
+              <label title="Send this many milliseconds before (negative) or after (positive) the stage start">
                 Offset (ms){" "}
                 <input type="number" value={offsetMs} onChange={(e) => setOffsetMs(Number(e.target.value))} style={{ width: 90 }} />
               </label>
             )}
-            <button disabled={!selRows.length || !!busy || (when === "custom" && !customDate)} onClick={() => simulate()}>
+            <button disabled={!selRows.length || !chosen || (chosen.stage !== null && !chosen.walletIds.length) || !!busy} onClick={() => simulate()}>
               Simulate
             </button>
           </div>
+          {timingNote && <div className="notice">{timingNote}</div>}
           <p className="muted small" style={{ marginTop: 8 }}>
             {tz ? `Times use your timezone: ${zoneLabel(tz)}.` : ""}
-            {when === "stage" && stageStart ? ` Runs at ${fmt(stageStart)}.` : ""}
-            {when === "custom" && customDate ? ` Runs at ${fmt(customDate)}.` : ""}
-            {when === "custom" && custom && !customDate ? " That local time doesn't exist in your timezone (clock change)." : ""}
-            {when === "custom" && customDate && customDate.getTime() < now ? " This time is in the past, so it runs immediately." : ""}
+            {chosen ? (chosen.live || !chosen.runAt ? " Runs immediately." : ` Runs at ${fmt(chosen.runAt)}${offsetMs ? ` (${offsetMs > 0 ? "+" : ""}${offsetMs} ms)` : ""}.`) : ""}
+            {chosen?.stage && chosen.walletIds.length ? ` Mints in ${chosen.name} with ${chosen.walletIds.length} wallet(s).` : ""}
+            {chosen?.skipped.length
+              ? ` Skipped ${chosen.skipped.length} selected wallet(s) not eligible for ${chosen.name}: ${chosen.skipped
+                  .slice(0, 3)
+                  .map((v) => v.label)
+                  .join(", ")}${chosen.skipped.length > 3 ? ", …" : ""}.`
+              : ""}
           </p>
         </div>
       )}
@@ -687,7 +723,15 @@ export default function MintPage() {
               {sim.summary.dailySpent} / {sim.summary.dailyCap}
             </div>
           </div>
-          {sim.summary.runAt && <p className="muted">Scheduled for {fmt(sim.summary.runAt)}</p>}
+          {sim.summary.stage && (
+            <p className="muted">
+              Stage: {sim.summary.stage.name}
+              {sim.summary.runAt ? ` · scheduled for ${fmt(sim.summary.runAt)}` : " · runs immediately"}
+              {sim.summary.runAt && sim.summary.offsetMs ? ` (${sim.summary.offsetMs > 0 ? "+" : ""}${sim.summary.offsetMs} ms)` : ""}
+              {sim.summary.skipped ? ` · ${sim.summary.skipped} wallet(s) skipped (not eligible)` : ""}
+            </p>
+          )}
+          {!sim.summary.stage && sim.summary.runAt && <p className="muted">Scheduled for {fmt(sim.summary.runAt)}</p>}
           <table style={{ marginTop: 8 }}>
             <thead>
               <tr>

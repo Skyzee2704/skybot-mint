@@ -1147,3 +1147,26 @@ a.button {
 a.button:hover {
   border-color: var(--orange, #ff7a1a);
 }
+
+/* Mint · Timing: one radio per line, label text wraps under itself, never under the radio. */
+.timing-options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+.timing-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  line-height: 1.35;
+  cursor: pointer;
+}
+.timing-option input[type="radio"] {
+  flex: none;
+  margin-top: 3px;
+}
+.timing-option span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}

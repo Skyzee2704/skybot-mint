@@ -13,6 +13,9 @@ import { createPlan } from "../plans.js";
 import { simulateIgnoringBalance } from "./access.js";
 import { getAddress, toQuantity } from "ethers";
 import { decodeRevertData, revertDataOf } from "../tx/revert.js";
+import { applyStageChoice, type StageChoice } from "./stagePlan.js";
+import { isPublicStage } from "./stageEligibility.js";
+import { savedStageRows } from "./eligibility.js";
 
 export interface SimRow {
   walletId: string;
@@ -40,6 +43,8 @@ export interface SimRow {
   mintable: boolean;
   /** Excluded only because of a failed simulation on a public stage — user may include it explicitly. */
   overridable: boolean;
+  /** Left out because the wallet isn't eligible for the chosen stage. */
+  skipped?: boolean;
 }
 
 /** Turn API / revert errors into a short plain-English reason. */
@@ -88,7 +93,16 @@ export function revertReason(e: any): string {
   return String(e?.reason ?? e?.revert?.name ?? e?.info?.error?.message ?? e?.shortMessage ?? e?.message ?? e).slice(0, 240);
 }
 
-export async function simulateMint(t: ResolvedTarget, req: MintRequest, userId: string) {
+export async function simulateMint(t: ResolvedTarget, reqIn: MintRequest, userId: string) {
+  let req = reqIn;
+  let choice: StageChoice | null = null;
+  if (req.stage) {
+    // The chosen stage decides run time and wallets (from saved OpenSea verdicts), never the client's clock.
+    const ws = await Promise.all(req.wallets.map((wq) => getWallet(userId, wq.walletId)));
+    choice = applyStageChoice(t.stages, await savedStageRows(userId, t, ws), req);
+    req = choice.req;
+  }
+  const stagePriceWei = choice?.option.stage?.priceWei ? BigInt(choice.option.stage.priceWei) : null;
   const chain = requireChain(t.chain.key);
   const pool = getPool(chain);
   await pool.checkChainId();
@@ -96,8 +110,9 @@ export async function simulateMint(t: ResolvedTarget, req: MintRequest, userId: 
   const runAtMs = req.runAt ? new Date(req.runAt).getTime() : Date.now();
   const beforeStart = runAtMs > Date.now() + 2000;
 
-  const publicStage =
-    req.strategy === "seadrop_public" ||
+  const publicStage = choice?.option.stage
+    ? isPublicStage(choice.option.stage)
+    : req.strategy === "seadrop_public" ||
     (req.strategy === "opensea_api" && /public/i.test((t.opensea?.drop?.active_stage ?? t.opensea?.drop?.next_stage)?.stage_type ?? ""));
   const force = new Set(req.forceWalletIds ?? []);
 
@@ -120,6 +135,8 @@ export async function simulateMint(t: ResolvedTarget, req: MintRequest, userId: 
         const unfundedOnly = e.code === "INSUFFICIENT_FUNDS"; // OpenSea checked the allowlist first and only balance failed
         const gl = BigInt(req.gasLimit ?? fallbackGas(req.strategy, wq.quantity));
         const expected = notActive && beforeStart;
+        // Before the start OpenSea can't build the tx yet; cost uses the chosen stage's price.
+        const estValue = expected && stagePriceWei !== null ? stagePriceWei * BigInt(wq.quantity) : 0n;
         const overridable = publicStage && !unfundedOnly && !notActive;
         return {
           ...base,
@@ -127,9 +144,9 @@ export async function simulateMint(t: ResolvedTarget, req: MintRequest, userId: 
           expectedRevertBeforeStart: expected,
           gasEstimate: null,
           gasLimit: gl.toString(),
-          valueWei: "0",
+          valueWei: estValue.toString(),
           maxGasCostWei: (gl * fees.maxFeePerGas).toString(),
-          totalMaxWei: (gl * fees.maxFeePerGas).toString(),
+          totalMaxWei: (gl * fees.maxFeePerGas + estValue).toString(),
           to: null,
           selector: null,
           error: e.message,
@@ -187,6 +204,23 @@ export async function simulateMint(t: ResolvedTarget, req: MintRequest, userId: 
     }),
   );
 
+  for (const c of choice?.capped ?? []) {
+    const r = rows.find((x) => x.walletId === c.walletId);
+    if (r) r.reason = [`Quantity set to ${c.quantity} (${choice!.option.name} limit per wallet).`, r.reason].filter(Boolean).join(" ");
+  }
+  if (choice?.skipped.length) {
+    const skippedWallets = await Promise.all(choice.skipped.map((s) => getWallet(userId, s.walletId)));
+    choice.skipped.forEach((s, i) => {
+      const w = skippedWallets[i];
+      const q = reqIn.wallets.find((x) => x.walletId === s.walletId)?.quantity ?? 0;
+      rows.push({
+        walletId: w.id, label: w.label, address: w.address, quantity: q, ok: false, expectedRevertBeforeStart: false,
+        gasEstimate: null, gasLimit: "0", valueWei: "0", maxGasCostWei: "0", totalMaxWei: "0", to: null, selector: null,
+        error: null, reason: s.reason, passesIgnoringBalance: null, balanceWei: "0", funded: false, mintable: false,
+        overridable: false, skipped: true,
+      });
+    });
+  }
   const totalValue = rows.filter((r) => r.mintable).reduce((a, r) => a + BigInt(r.valueWei), 0n);
   const totalGas = rows.filter((r) => r.mintable).reduce((a, r) => a + BigInt(r.maxGasCostWei), 0n);
   const totalNfts = rows.filter((r) => r.mintable).reduce((a, r) => a + r.quantity, 0);
@@ -215,7 +249,10 @@ export async function simulateMint(t: ResolvedTarget, req: MintRequest, userId: 
     dailyCap: fmtCap(caps.maxDailySpendWei),
     maxPricePerNft: fmtCap(caps.maxPricePerNftWei),
     runAt: req.runAt ?? null,
+    offsetMs: req.offsetMs ?? 0,
     scheduled: beforeStart,
+    stage: choice ? { name: choice.option.name, live: choice.option.live, start: choice.option.stage?.start ?? null } : null,
+    skipped: choice?.skipped.length ?? 0,
   };
   const okRows = rows.filter((r) => r.mintable);
   const plan =

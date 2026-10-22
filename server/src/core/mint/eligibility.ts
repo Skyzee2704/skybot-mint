@@ -526,3 +526,21 @@ export async function seadropMintedBatch(pool: ReturnType<typeof getPool>, nft: 
   }
   return out;
 }
+
+/**
+ * Per-stage verdict rows for the given wallets from saved OpenSea checks (no network), shaped for timingOptions().
+ * Wallets with no saved check get no stage verdicts, so they only qualify for the public stage.
+ */
+export async function savedStageRows(
+  userId: string,
+  t: ResolvedTarget,
+  wallets: readonly { id: string; label: string; address: string }[],
+): Promise<{ walletId: string; label: string; address: string; stages: StageVerdict[] | null }[]> {
+  const slug = t.slug;
+  const drop = t.opensea?.drop;
+  const saved = slug && drop?.stages?.length ? await loadVerdicts(userId, slug) : new Map<string, CachedVerdict>();
+  return wallets.map((w) => {
+    const c = saved.get(w.id);
+    return { walletId: w.id, label: w.label, address: w.address, stages: c && drop?.stages ? mapStageVerdicts(drop.stages, c.stages) : null };
+  });
+}

@@ -64,6 +64,7 @@ const mintReq = z.object({
   runAt: z.string().datetime().nullable().optional(),
   offsetMs: z.number().int().min(-5000).max(60000).optional(),
   forceWalletIds: z.array(z.string().max(100)).max(500).optional(),
+  stage: z.string().max(200).nullable().optional(),
 });
 
 /**

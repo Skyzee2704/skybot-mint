@@ -6,6 +6,7 @@ import { ResolvedTarget } from "../resolver/resolver.js";
 import { SEADROP_ADDRESS, encodeMintPublic } from "../resolver/seadrop.js";
 import { isDangerousFunctionName, assertSafeMintTx } from "../safety/safety.js";
 import { osStage } from "./stage.js";
+import { stageEndedAt } from "./stageEligibility.js";
 import { BuiltTx, MintRequest } from "./types.js";
 
 /** Map official mint-API errors. 422 is also returned for an unfunded minter, which says nothing about allowlist status. */
@@ -42,6 +43,8 @@ export async function buildMintTx(
   userId = "system",
 ): Promise<BuiltTx> {
   const chain = requireChain(t.chain.key);
+  const chosen = req.stage ? (t.stages.find((s) => s.name === req.stage) ?? null) : null;
+  if (chosen && stageEndedAt(chosen, Date.now())) throw new MintBuildError(`The ${chosen.name} stage has ended`, "STAGE_ENDED");
   let tx: BuiltTx;
   switch (req.strategy) {
     case "seadrop_public": {
@@ -110,7 +113,8 @@ export async function buildMintTx(
     default:
       throw new MintBuildError(`Unknown strategy ${(req as any).strategy}`);
   }
-  const osPrice = req.strategy === "opensea_api" ? osStage(t).priceWei : null;
+  // Price guard: the chosen stage's price when the member picked one, else the stage OpenSea mints into now.
+  const osPrice = req.strategy === "opensea_api" ? (chosen?.priceWei ?? osStage(t).priceWei) : null;
   await assertSafeMintTx(
     { ...tx, chainId: chain.chainId },
     {
