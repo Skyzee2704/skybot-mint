@@ -168,27 +168,47 @@ export async function broadcastAndTrack(
 ) {
   const chain = requireChain(req.chain);
   const pool = getPool(chain);
-  await Promise.all(
-    prepared.map(async (p) => {
-      const r = results.find((x) => x.walletId === p.walletId)!;
-      await recordSpend(job.userId, chain, p.reserveWei, p.reserveRef);
-      const b = await pool.broadcast(p.raw);
-      r.txHash = b.hash;
-      r.explorer = explorerTx(chain, b.hash);
-      r.acceptedBy = b.accepted.length;
-      if (!b.accepted.length) {
-        r.status = "failed";
-        r.error = broadcastRejectedMessage(
-          b.errors.map((e) => e.error),
-          chain.nativeSymbol,
-        );
-        await settleSpend(p.reserveRef, 0n);
-        return;
-      }
-      r.status = "broadcast";
-    }),
-  );
-  await setResults(job, results);
+  // Per-wallet isolation: one spend/broadcast failure must not drop other wallets' tx hashes.
+  try {
+    await Promise.all(
+      prepared.map(async (p) => {
+        const r = results.find((x) => x.walletId === p.walletId)!;
+        try {
+          try {
+            await recordSpend(job.userId, chain, p.reserveWei, p.reserveRef);
+          } catch (e: any) {
+            // Budget row is best-effort; never block the send on a DB blip (hash must still be recorded).
+            log.warn(`recordSpend ${p.reserveRef}`, String(e?.message ?? e).slice(0, 160));
+          }
+          const b = await pool.broadcast(p.raw);
+          r.txHash = b.hash;
+          r.explorer = explorerTx(chain, b.hash);
+          r.acceptedBy = b.accepted.length;
+          if (!b.accepted.length) {
+            r.status = "failed";
+            r.error = broadcastRejectedMessage(
+              b.errors.map((e) => e.error),
+              chain.nativeSymbol,
+            );
+            await settleSpend(p.reserveRef, 0n).catch(() => {});
+            return;
+          }
+          r.status = "broadcast";
+        } catch (e: any) {
+          if (r.txHash) {
+            if (r.status !== "broadcast") r.status = "broadcast";
+            r.error = `Broadcasted but follow-up failed: ${String(e?.message ?? e).slice(0, 160)}`;
+            log.warn(`post-broadcast ${p.walletId}`, String(e?.message ?? e).slice(0, 160));
+          } else {
+            r.status = "failed";
+            r.error = broadcastRejectedMessage([String(e?.message ?? e)], chain.nativeSymbol);
+          }
+        }
+      }),
+    );
+  } finally {
+    await setResults(job, results);
+  }
   await jobLog(job, `broadcast ${results.filter((r) => r.status === "broadcast").length} txs`);
 
   await trackReceipts(job, req, results, receiptTimeoutMs);
