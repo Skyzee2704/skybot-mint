@@ -136,3 +136,22 @@ export function telegramBotLinkProps(username: string, webApp: TgWebApp | null) 
 export function useTelegram() {
   return useContext(TelegramCtx);
 }
+
+/** Synchronous Mini App check: Telegram puts tgWebAppData in the launch URL hash before telegram-web-app.js loads. */
+function looksLikeMiniApp(): boolean {
+  if (typeof window === "undefined") return false;
+  if (window.Telegram?.WebApp?.initData) return true;
+  const h = window.location.hash + window.location.search;
+  return /tgWebApp(Data|Platform|Version)=/.test(h) || document.documentElement.classList.contains("tg-mini-app");
+}
+
+/**
+ * True only in a normal web browser, after client mount (false during SSR / first render, so web-only UI never
+ * flashes inside the Telegram Mini App).
+ */
+export function useIsWebBrowser(): boolean {
+  const { isMiniApp } = useTelegram();
+  const [web, setWeb] = useState(false);
+  useEffect(() => setWeb(!looksLikeMiniApp()), []);
+  return web && !isMiniApp;
+}

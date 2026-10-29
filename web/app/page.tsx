@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import Link from "next/link";
 import { usePrivy } from "@privy-io/react-auth";
-import { useTelegram } from "@/lib/telegram";
+import { Send } from "lucide-react";
+import { telegramBotUsername, useIsWebBrowser, useTelegram } from "@/lib/telegram";
 
 /** Public landing page. Always reachable, signed in or not (no redirect); signed-in users get "Open Dashboard". */
 export default function Landing() {
@@ -10,6 +11,15 @@ export default function Landing() {
   const { isMiniApp } = useTelegram();
   // Inside Telegram the dashboard signs in with Telegram automatically, so the landing just links to it.
   const signedIn = ready && (authenticated || isMiniApp);
+  // Telegram bot link: web browser only (hidden in the Mini App and until mounted, so it never flashes there).
+  const isWeb = useIsWebBrowser();
+  const bot = telegramBotUsername();
+  const botLink =
+    isWeb && bot ? (
+      <a className="btn ghost" href={`https://t.me/${bot}`} target="_blank" rel="noopener noreferrer" title={`Open @${bot} in Telegram`}>
+        <Send size={16} aria-hidden style={{ marginRight: 6, verticalAlign: "-3px" }} /> Open Telegram Bot
+      </a>
+    ) : null;
 
   return (
     <div className="hero">
@@ -34,12 +44,15 @@ export default function Landing() {
             <Link className="btn" href="/app/mint">
               Open Dashboard
             </Link>
-          ) : (
+          ) : null}
+          {ready && signedIn && botLink}
+          {ready && !signedIn && (
             <>
               <button onClick={login}>Sign In with Email or Google</button>
               <Link className="btn ghost" href="/app/mint">
                 Enter App
               </Link>
+              {botLink}
             </>
           )}
         </div>

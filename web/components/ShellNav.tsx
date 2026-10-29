@@ -7,7 +7,7 @@
  */
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { telegramBotLinkProps, telegramBotUsername, useTelegram } from "@/lib/telegram";
+import { telegramBotLinkProps, telegramBotUsername, useIsWebBrowser, useTelegram } from "@/lib/telegram";
 import {
   ArrowUpRight,
   ImageIcon,
@@ -55,7 +55,9 @@ export function ShellNav(props: {
   const initial = (account.replace(/^@/, "")[0] ?? "?").toUpperCase();
   const { webApp } = useTelegram();
   const bot = props.botUsername === undefined ? telegramBotUsername() : telegramBotUsername(props.botUsername ?? "");
-  const botLink = bot ? telegramBotLinkProps(bot, webApp) : null;
+  const isWeb = useIsWebBrowser();
+  // Bot link is web-only: inside the Mini App the user is already in Telegram.
+  const botLink = bot && isWeb ? telegramBotLinkProps(bot, webApp) : null;
 
   // Close the sheet on navigation and on Escape.
   useEffect(() => setSheet(false), [path]);
