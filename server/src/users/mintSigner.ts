@@ -18,6 +18,11 @@ import { looksLikePrivyWalletId, privyWalletIds, resolvePrivyWalletId } from "./
 export const SIGNING_OFF_MESSAGE =
   "Automatic minting is switched off on the server (Privy signing key not configured), so nothing was signed or sent and no gas was spent.";
 
+export const KEY_UNREADABLE_MESSAGE =
+  "Automatic minting is misconfigured on the server: PRIVY_AUTH_PRIVATE_KEY isn't a readable Privy authorization (P-256) private key, so Privy can't sign. Nothing was sent; no gas was spent.";
+export const KEY_NOT_IN_QUORUM_MESSAGE =
+  "Automatic minting is misconfigured on the server: PRIVY_AUTH_PRIVATE_KEY doesn't belong to the key quorum in PRIVY_AUTH_KEY_QUORUM_ID, so Privy would refuse to sign. Nothing was sent; no gas was spent.";
+
 export const signerMissingMessage = (address: string) =>
   `Automatic minting isn't enabled yet for wallet ${address}: Privy only lets SkyBOT sign for it after the wallet ` +
   `owner adds the SkyBOT mint signer. Open the SkyBOT app once while signed in (it adds it automatically), then ` +
@@ -108,6 +113,9 @@ export async function mintSigningProblem(
   privyUserId?: string | null,
 ): Promise<{ message: string; missing: string[] } | null> {
   if (!privyServerSigningReady()) return { message: SIGNING_OFF_MESSAGE, missing: [] };
+  const diag = await mintSignerDiag().catch(() => null);
+  if (diag && !diag.keyReadable) return { message: KEY_UNREADABLE_MESSAGE, missing: [] };
+  if (diag && diag.keyInQuorum === false) return { message: KEY_NOT_IN_QUORUM_MESSAGE, missing: [] };
   if (!mintSignerReady()) return null;
   const missing: string[] = [];
   for (const w of ws) if ((await checkMintSigner(w, privyUserId)) === "missing") missing.push(w.address);
@@ -140,10 +148,12 @@ export function privySigningRefusal(e: any, address: string): string | null {
   return null;
 }
 
-let diagCache: { at: number; v: MintSignerDiag } | null = null;
+let diagCache: { at: number; k: string; v: MintSignerDiag } | null = null;
 export interface MintSignerDiag {
   /** PRIVY_AUTH_PRIVATE_KEY parses as a P-256 key. */
   keyReadable: boolean;
+  /** Kind of value configured (never the value): "ok", "public_key", "not_p256", … */
+  keyShape: string;
   quorumConfigured: boolean;
   /** The key's public half is a member of PRIVY_AUTH_KEY_QUORUM_ID (null = couldn't ask Privy). */
   keyInQuorum: boolean | null;
@@ -152,10 +162,17 @@ export interface MintSignerDiag {
 /** Booleans only (no ids or keys) for /api/status; cached 10 min. */
 export async function mintSignerDiag(): Promise<MintSignerDiag | null> {
   if (!privyServerSigningReady()) return null;
-  if (diagCache && Date.now() - diagCache.at < 600_000) return diagCache.v;
-  const { authPublicKey, samePublicKey } = await import("../auth/authKey.js");
-  const pub = authPublicKey(env.privyAuthPrivateKey);
-  const v: MintSignerDiag = { keyReadable: Boolean(pub), quorumConfigured: Boolean(env.privyAuthKeyQuorumId), keyInQuorum: null };
+  const ck = `${env.privyAuthPrivateKey}|${env.privyAuthKeyQuorumId}`;
+  if (diagCache && diagCache.k === ck && Date.now() - diagCache.at < 600_000) return diagCache.v;
+  const { authKeyShape, authPublicKey, samePublicKey } = await import("../auth/authKey.js");
+  const shape = authKeyShape(env.privyAuthPrivateKey);
+  const pub = shape === "ok" ? authPublicKey(env.privyAuthPrivateKey) : null;
+  const v: MintSignerDiag = {
+    keyReadable: Boolean(pub),
+    keyShape: shape,
+    quorumConfigured: Boolean(env.privyAuthKeyQuorumId),
+    keyInQuorum: null,
+  };
   if (pub && env.privyAuthKeyQuorumId) {
     try {
       const { getPrivy } = await import("../auth/privy.js");
@@ -165,6 +182,6 @@ export async function mintSignerDiag(): Promise<MintSignerDiag | null> {
       log.warn("mint signer diag", redactString(String(e?.message ?? e)).slice(0, 160));
     }
   }
-  diagCache = { at: Date.now(), v };
+  diagCache = { at: Date.now(), k: ck, v };
   return v;
 }

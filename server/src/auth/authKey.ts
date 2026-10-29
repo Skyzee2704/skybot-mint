@@ -65,3 +65,31 @@ export function samePublicKey(a: string | null | undefined, b: string | null | u
   const x = norm(a);
   return Boolean(x && x === norm(b));
 }
+
+/**
+ * What kind of value was configured, without revealing any of it (for /api/status when the key can't be read):
+ * e.g. a public key pasted where the private key belongs, or a key on the wrong curve.
+ */
+export type AuthKeyShape = "ok" | "missing" | "public_key" | "not_p256" | "pem_unreadable" | "base64_not_a_key" | "not_base64";
+export function authKeyShape(raw: string | null | undefined): AuthKeyShape {
+  if (!raw || !raw.trim()) return "missing";
+  if (authPublicKey(raw)) {
+    const k = createPrivateKey({ key: Buffer.from(normalizeAuthKey(raw)!, "base64"), format: "der", type: "pkcs8" });
+    return k.asymmetricKeyDetails?.namedCurve === "prime256v1" ? "ok" : "not_p256";
+  }
+  let v = raw
+    .trim()
+    .replace(/^["']|["']$/g, "")
+    .replace(/\\n/g, "\n")
+    .replace(PREFIXES, "");
+  if (/-----BEGIN PUBLIC KEY-----/.test(v)) return "public_key";
+  if (/-----BEGIN/.test(v)) return "pem_unreadable";
+  v = v.replace(/\s/g, "");
+  if (!/^[A-Za-z0-9+/=_-]+$/.test(v)) return "not_base64";
+  try {
+    createPublicKey({ key: Buffer.from(v, "base64"), format: "der", type: "spki" });
+    return "public_key";
+  } catch {
+    return "base64_not_a_key";
+  }
+}

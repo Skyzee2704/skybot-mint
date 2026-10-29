@@ -10,6 +10,10 @@ process.env.SESSION_SECRET = "s".repeat(48);
 process.env.PRIVY_APP_ID = "app";
 process.env.PRIVY_APP_SECRET = "secret-for-tests";
 
+const appKey = generateKeyPairSync("ec", { namedCurve: "P-256" });
+const APP_KEY = appKey.privateKey.export({ type: "pkcs8", format: "der" }).toString("base64");
+const APP_PUB = appKey.publicKey.export({ type: "spki", format: "der" }).toString("base64");
+const quorums: Record<string, any> = { mintquorum: { authorization_keys: [{ public_key: APP_PUB }] } };
 const privyWallets: Record<string, any> = {};
 const failGet = new Set<string>();
 vi.mock("../src/auth/privy.js", () => ({
@@ -21,6 +25,7 @@ vi.mock("../src/auth/privy.js", () => ({
       },
     }),
     users: () => ({ _get: async () => ({ linked_accounts: [] }) }),
+    keyQuorums: () => ({ get: async (q: string) => quorums[q] ?? { authorization_keys: [] } }),
   }),
 }));
 
@@ -37,7 +42,7 @@ describe("mint signer readiness", () => {
     getDb();
   });
   beforeEach(() => {
-    process.env.PRIVY_AUTH_PRIVATE_KEY = "appkey";
+    process.env.PRIVY_AUTH_PRIVATE_KEY = `wallet-auth:${APP_KEY}`;
     process.env.PRIVY_AUTH_KEY_QUORUM_ID = "mintquorum";
     failGet.clear();
   });
@@ -71,6 +76,20 @@ describe("mint signer readiness", () => {
     expect(
       await mintSigningProblem([W(3, "pw3aaaaaaaaaaaaaaaaaaaa"), W(4, "pw4aaaaaaaaaaaaaaaaaaaa"), W(5, "pw5aaaaaaaaaaaaaaaaaaaa")]),
     ).toBeNull();
+  });
+
+  it("signing key unreadable / not in the quorum: refused before any wallet is checked", async () => {
+    const { mintSigningProblem, mintSignerDiag, KEY_UNREADABLE_MESSAGE, KEY_NOT_IN_QUORUM_MESSAGE } =
+      await import("../src/users/mintSigner.js");
+    const pub = appKey.publicKey.export({ type: "spki", format: "pem" }).toString();
+    process.env.PRIVY_AUTH_PRIVATE_KEY = pub; // public key pasted by mistake
+    expect((await mintSigningProblem([W(8, "pw8aaaaaaaaaaaaaaaaaaaa")]))?.message).toBe(KEY_UNREADABLE_MESSAGE);
+    expect((await mintSignerDiag())?.keyShape).toBe("public_key");
+    const other = generateKeyPairSync("ec", { namedCurve: "P-256" }).privateKey.export({ type: "pkcs8", format: "der" }).toString("base64");
+    process.env.PRIVY_AUTH_PRIVATE_KEY = other;
+    expect((await mintSigningProblem([W(8, "pw8aaaaaaaaaaaaaaaaaaaa")]))?.message).toBe(KEY_NOT_IN_QUORUM_MESSAGE);
+    process.env.PRIVY_AUTH_PRIVATE_KEY = `wallet-auth:${APP_KEY}`;
+    expect(await mintSignerDiag()).toEqual({ keyReadable: true, keyShape: "ok", quorumConfigured: true, keyInQuorum: true });
   });
 
   it("several wallets missing: one message listing them", async () => {

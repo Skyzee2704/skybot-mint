@@ -132,6 +132,17 @@ export async function runJob(id: string, budgetMs = env.jobMaxDurationSec * 1000
       await notifyJobDone(id);
       return { status: "failed", reason: "signing not configured" };
     }
+    // Signing key unreadable / not in the quorum: fail now with the reason instead of per-wallet Privy errors.
+    {
+      const { mintSignerDiag, KEY_UNREADABLE_MESSAGE, KEY_NOT_IN_QUORUM_MESSAGE } = await import("../users/mintSigner.js");
+      const diag = await mintSignerDiag().catch(() => null);
+      const bad = diag && !diag.keyReadable ? KEY_UNREADABLE_MESSAGE : diag?.keyInQuorum === false ? KEY_NOT_IN_QUORUM_MESSAGE : null;
+      if (bad) {
+        await patchJob(id, { status: "failed", error: bad });
+        await notifyJobDone(id);
+        return { status: "failed", reason: "signing key misconfigured" };
+      }
+    }
     const buildDeadline = Math.min(Math.max(fireAt + 30_000, Date.now() + 30_000), deadline - 5_000);
     const presignAt = req.strategy === "opensea_api" ? fireAt : fireAt - PRESIGN_LEAD_MS;
     while (Date.now() < presignAt) await sleep(Math.min(200, presignAt - Date.now()));
