@@ -19,6 +19,8 @@ type Mode = "sqlite" | "postgres" | "pglite";
 let db: AppDb | null = null;
 let mode: Mode = "sqlite";
 let exec: ((sql: string) => Promise<unknown>) | null = null;
+/** Postgres (Neon HTTP): run many statements in ONE round trip (a single HTTP transaction). */
+let execBatch: ((sqls: string[]) => Promise<unknown>) | null = null;
 let ready: Promise<void> | null = null;
 let initP: Promise<AppDb> | null = null;
 
@@ -37,6 +39,7 @@ async function init(): Promise<AppDb> {
     const { drizzle } = await import("drizzle-orm/neon-http");
     const sql = neon(url);
     exec = (s) => sql.query(s);
+    execBatch = (list) => sql.transaction(list.map((s) => sql.query(s)));
     db = drizzle(sql, { schema }) as unknown as AppDb;
   } else if (mode === "pglite") {
     const { PGlite } = await import("@electric-sql/pglite");
@@ -182,6 +185,14 @@ const DDL = [
   `CREATE INDEX IF NOT EXISTS plans_expires_idx ON plans(expires_at)`,
 ];
 
+const PG_ALTERS = [
+  `ALTER TABLE telegram_links ADD COLUMN IF NOT EXISTS meta_json TEXT NOT NULL DEFAULT '{}'`,
+  `ALTER TABLE users ADD COLUMN IF NOT EXISTS timezone TEXT`,
+  `ALTER TABLE wallets ADD COLUMN IF NOT EXISTS removed_at TEXT`,
+  `ALTER TABLE jobs ADD COLUMN IF NOT EXISTS started_at TEXT`,
+  `ALTER TABLE jobs ADD COLUMN IF NOT EXISTS broadcast_at TEXT`,
+];
+
 async function migrate() {
   if (mode === "sqlite") {
     await exec!(DDL.join(";\n") + ";");
@@ -204,12 +215,10 @@ DROP TABLE telegram_links; ALTER TABLE telegram_links_v2 RENAME TO telegram_link
     if (!jcols.rows.some((r: any) => r.name === "broadcast_at")) await c.execute("ALTER TABLE jobs ADD COLUMN broadcast_at TEXT");
     c.close();
   } else {
-    for (const s of DDL) await exec!(s);
-    await exec!(`ALTER TABLE telegram_links ADD COLUMN IF NOT EXISTS meta_json TEXT NOT NULL DEFAULT '{}'`);
-    await exec!(`ALTER TABLE users ADD COLUMN IF NOT EXISTS timezone TEXT`);
-    await exec!(`ALTER TABLE wallets ADD COLUMN IF NOT EXISTS removed_at TEXT`);
-    await exec!(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS started_at TEXT`);
-    await exec!(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS broadcast_at TEXT`);
+    const all = [...DDL, ...PG_ALTERS];
+    // Neon HTTP: one round trip instead of ~45 serial ones (each a full API↔DB RTT on every cold start).
+    if (execBatch) await execBatch(all);
+    else for (const s of all) await exec!(s);
   }
 }
 

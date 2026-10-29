@@ -3,6 +3,7 @@
   "framework": "nextjs",
   "installCommand": "cd .. && npm ci",
   "buildCommand": "npm run build",
+  "regions": ["sin1"],
   "functions": {
     "app/api/jobs/run/route.ts": { "maxDuration": 300 },
     "app/api/cron/housekeeping/route.ts": { "maxDuration": 60 },
