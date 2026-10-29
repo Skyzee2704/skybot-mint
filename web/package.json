@@ -6,7 +6,8 @@
     "dev": "next dev -p 3000",
     "build": "npm --prefix ../server run build && next build",
     "start": "next start -p 3000",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "og": "node scripts/og-image.mjs"
   },
   "devDependencies": {
     "@types/node": "^20.19.43",
