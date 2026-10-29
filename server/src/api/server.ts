@@ -15,6 +15,7 @@ import { balancesAsOf, cachedBalances } from "../util/balanceCache.js";
 import { nativeBalancesBatch } from "../core/rpc/multicall.js";
 import { registerWithdrawRoutes } from "./withdrawRoutes.js";
 import { registerNftRoutes } from "./nftRoutes.js";
+import { registerGalleryRoutes } from "./galleryRoutes.js";
 import { simulateMint } from "../core/mint/simulate.js";
 import { consumePlan, mintConfirmation } from "../core/plans.js";
 import { cancelJob, enqueueMint } from "../jobs/scheduler.js";
@@ -640,6 +641,8 @@ export async function buildServer(): Promise<FastifyInstance> {
         await setUserDisabled(req.user!.id, (req.params as any).id, disabled);
         return { ok: true };
       });
+      /** Gallery: private promo clips (admin-only; not in web/public). */
+      registerGalleryRoutes(ad);
     });
   });
 

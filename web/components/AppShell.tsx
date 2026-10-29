@@ -4,7 +4,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { getIdentityToken, usePrivy, useSigners, useWallets } from "@privy-io/react-auth";
 import { localTimeZone } from "@/lib/time";
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
-import { api } from "@/lib/api";
+import { api, apiBlob } from "@/lib/api";
 import { telegramBotUsername, useTelegram } from "@/lib/telegram";
 import { clearWalletCache } from "@/lib/wallets";
 import { clearSwrCache, prefetchMenus, setCacheScope } from "@/lib/swr";
@@ -299,6 +299,20 @@ export function useApi() {
       const r = await api<T>(path, { ...opts, token, idToken, telegramInitData: token ? null : initData });
       if (typeof window !== "undefined") window.dispatchEvent(new Event(API_OK_EVENT));
       return r;
+    },
+    [authenticated, getAccessToken, initData],
+  );
+}
+
+/** Like useApi, but returns a Blob (authenticated media such as the admin Gallery clips). */
+export function useApiBlob() {
+  const { getAccessToken, authenticated } = usePrivy();
+  const { initData } = useTelegram();
+  return useCallback(
+    async (path: string) => {
+      const token = authenticated ? await getAccessToken() : null;
+      const idToken = token ? await idTokenOrNull() : null;
+      return apiBlob(path, { token, idToken, telegramInitData: token ? null : initData });
     },
     [authenticated, getAccessToken, initData],
   );

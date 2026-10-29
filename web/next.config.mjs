@@ -32,6 +32,10 @@ const nextConfig = {
     "@fastify/cors",
   ],
   outputFileTracingRoot: root,
+  // Admin-only Gallery media (served by /api/admin/gallery/media/:name, never from web/public).
+  outputFileTracingIncludes: {
+    "/api/\\[...path\\]": ["../server/assets/promo/**"],
+  },
   outputFileTracingExcludes: {
     // Test-only / local-only DB drivers are never used on Vercel (Neon HTTP driver is used in production).
     "*": [
@@ -61,6 +65,7 @@ const nextConfig = {
               "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
               "font-src 'self' https://fonts.gstatic.com data:",
               "img-src 'self' data: blob: https:",
+              "media-src 'self' blob:",
               "connect-src 'self' https: wss:",
               "frame-src https://telegram.org https://oauth.telegram.org https://*.privy.io https://auth.privy.io https://challenges.cloudflare.com",
               "frame-ancestors 'self' https://web.telegram.org https://*.telegram.org",

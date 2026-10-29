@@ -35,6 +35,23 @@ export async function api<T = any>(
   return json as T;
 }
 
+/** Authenticated binary fetch (e.g. admin Gallery media) → Blob. Same auth headers as api(). */
+export async function apiBlob(
+  path: string,
+  opts: { token?: string | null; idToken?: string | null; telegramInitData?: string | null } = {},
+): Promise<Blob> {
+  const headers: Record<string, string> = { "x-skybot-csrf": "1" };
+  if (opts.token) headers.authorization = `Bearer ${opts.token}`;
+  if (opts.idToken) headers["privy-id-token"] = opts.idToken;
+  if (opts.telegramInitData) headers["x-telegram-init-data"] = opts.telegramInitData;
+  const res = await fetch(url(path), { headers, credentials: "include" });
+  if (!res.ok) {
+    const json = await res.json().catch(() => ({}));
+    throw new Error(json.error ?? `HTTP ${res.status}`);
+  }
+  return res.blob();
+}
+
 export function fmtEth(wei: string | null | undefined, digits = 6) {
   if (wei === null || wei === undefined) return "?";
   const n = BigInt(wei);

@@ -83,6 +83,9 @@ describe("admin allow-list", () => {
       ["GET", "/api/admin/users"],
       ["POST", "/api/admin/telegram/setup"],
       ["POST", "/api/admin/users/stale/disable"],
+      ["GET", "/api/admin/gallery"],
+      ["GET", "/api/admin/gallery/media/skybot_mint_1x1.mp4"],
+      ["GET", "/api/admin/gallery/media/skybot_mint_16x9.mp4?download=1"],
     ] as const) {
       const r = await app.inject({ method, url, headers: h, payload: method === "POST" ? { disabled: true } : undefined });
       expect(r.statusCode, `${method} ${url}`).toBe(403);
@@ -97,5 +100,40 @@ describe("admin allow-list", () => {
     expect(r.statusCode).toBe(200);
     const me = await app.inject({ method: "GET", url: "/api/me", headers: cookie("owner2") });
     expect(me.json().user.role).toBe("admin");
+  });
+
+  it("gallery media requires auth (401) and is served to admins only, with ranges", async () => {
+    const anon = await app.inject({ method: "GET", url: "/api/admin/gallery/media/skybot_mint_1x1.mp4" });
+    expect(anon.statusCode).toBe(401);
+    expect(anon.headers["content-type"]).not.toMatch(/video/);
+
+    const list = await app.inject({ method: "GET", url: "/api/admin/gallery", headers: cookie("owner2") });
+    expect(list.statusCode).toBe(200);
+    expect(list.json().items.map((i: any) => i.name)).toEqual(["skybot_mint_16x9.mp4", "skybot_mint_1x1.mp4"]);
+    expect(list.json().items.every((i: any) => i.size > 0)).toBe(true);
+
+    const full = await app.inject({
+      method: "GET",
+      url: "/api/admin/gallery/media/skybot_mint_1x1.mp4?download=1",
+      headers: cookie("owner2"),
+    });
+    expect(full.statusCode).toBe(200);
+    expect(full.headers["content-type"]).toBe("video/mp4");
+    expect(full.headers["content-disposition"]).toMatch(/^attachment; filename="skybot_mint_1x1.mp4"/);
+    expect(full.rawPayload.length).toBeGreaterThan(100_000);
+
+    const part = await app.inject({
+      method: "GET",
+      url: "/api/admin/gallery/media/skybot_mint_1x1.mp4",
+      headers: { ...cookie("owner2"), range: "bytes=0-99" },
+    });
+    expect(part.statusCode).toBe(206);
+    expect(part.rawPayload.length).toBe(100);
+    expect(part.headers["content-range"]).toBe(`bytes 0-99/${full.rawPayload.length}`);
+
+    for (const bad of ["../../package.json", "..%2F..%2Fpackage.json", "nope.mp4"]) {
+      const r = await app.inject({ method: "GET", url: `/api/admin/gallery/media/${bad}`, headers: cookie("owner2") });
+      expect(r.statusCode, bad).toBe(404);
+    }
   });
 });
