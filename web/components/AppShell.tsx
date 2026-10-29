@@ -61,7 +61,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   // so the signer list is never rewritten concurrently), then the server re-verifies with Privy. Never blocks or
   // shows errors.
   const sgKey = [me?.siweSigner, me?.mintSigner]
-    .map((sg: any) => (sg ? `${sg.signerId}:${sg.policyId ?? ""}:${sg.attached?.length ?? "?"}` : ""))
+    .map((sg: any) =>
+      sg
+        ? `${sg.signerId}:${sg.policyId ?? ""}:a${sg.attached?.length ?? "?"}:m${sg.missing?.length ?? "?"}:u${(sg as any).upgrade?.length ?? 0}`
+        : "",
+    )
     .join("|");
   useEffect(() => {
     const cfgs = (
@@ -83,13 +87,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       .map((address) => ({
         address,
         signers: cfgs
-          // "upgrade" = signer already there (it can sign) but without a newer policy: not re-added from here.
-          .filter(
-            ([sg]) =>
-              ![...((sg.attached as string[] | null) ?? []), ...(((sg as any).upgrade as string[] | undefined) ?? [])].some(
-                (x) => x.toLowerCase() === address.toLowerCase(),
-              ),
-          )
+          // Skip wallets already attached with the right policy. Re-add "upgrade" (signer present, wrong/missing
+          // policy) and "missing" so PRIVY_MINT_POLICY_ID gets applied. After verify moves them to attached,
+          // sgKey changes and this effect won't re-add them (no loop).
+          .filter(([sg]) => {
+            const lc = address.toLowerCase();
+            const attached = ((sg.attached as string[] | null) ?? []).some((x) => x.toLowerCase() === lc);
+            if (attached) return false;
+            const upgrade = (((sg as any).upgrade as string[] | undefined) ?? []).some((x) => x.toLowerCase() === lc);
+            // Upgrade only when a policy id is configured to apply; otherwise treat as already usable.
+            if (upgrade && !sg.policyId) return false;
+            return true; // missing, or upgrade with policyId
+          })
           .map(([sg, verify]) => ({ signerId: String(sg.signerId), policyIds: sg.policyId ? [String(sg.policyId)] : [], verify })),
       }))
       .filter((p) => p.signers.length);
