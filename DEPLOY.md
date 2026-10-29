@@ -28,7 +28,7 @@ git push -u origin main
 
 1. Create a Neon project and a database, for example `skybot`.
 2. Copy the **pooled** connection string (`postgresql://…-pooler…/skybot?sslmode=require`). This is your `DATABASE_URL`.
-3. Migrations run automatically on the first request. To run them ahead of time:
+3. Migrations run automatically on the first request (`ensureDb()`: idempotent `CREATE TABLE IF NOT EXISTS` / `ADD COLUMN IF NOT EXISTS`, additive only). This creates the `plans` table (single-use simulate plans, 10-minute TTL) and the `jobs.started_at` / `jobs.broadcast_at` columns on existing databases. To run them ahead of time:
    ```bash
    DATABASE_URL="postgresql://…" npm run migrate
    ```
@@ -49,11 +49,12 @@ git push -u origin main
 
 ### Function durations
 
-| Route                    | `maxDuration` | Why                                                                 |
-| ------------------------ | ------------- | ------------------------------------------------------------------- |
-| `/api/jobs/run`          | 300 s         | Pre-signs, waits until stage start, broadcasts, and tracks receipts |
-| `/api/cron/housekeeping` | 60 s          | Finishes receipts, expires stuck or missed jobs, purges link codes  |
-| `/api/*`                 | 60 s          | Regular API                                                         |
+| Route                    | `maxDuration` | Why                                                                                                                                                       |
+| ------------------------ | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/api/jobs/run`          | 300 s         | Pre-signs, waits until stage start, broadcasts, and tracks receipts                                                                                       |
+| `/api/cron/housekeeping` | 60 s          | Finishes receipts, expires stuck (15 min, Mint Now included) or missed (5 min) jobs, purges link codes, signer/NFT/Alchemy upkeep; ignores cancelled jobs |
+| `/api/webhooks/alchemy`  | 60 s          | Alchemy Address Activity webhooks (NFT holdings refresh; set in the route file)                                                                           |
+| `/api/*`                 | 60 s          | Regular API                                                                                                                                               |
 
 With Fluid compute, both **Hobby and Pro allow up to 300 s**, and Pro can go up to 800 s. Keep `JOB_MAX_DURATION_SEC` equal to the `/api/jobs/run` value.
 
@@ -61,28 +62,32 @@ With Fluid compute, both **Hobby and Pro allow up to 300 s**, and Pro can go up 
 
 Set these in **Vercel → Project → Settings → Environment Variables** for Production, and for Preview if you use it. See [`.env.example`](.env.example) for the full list.
 
-| Variable                                                                | Where to get it                                                                     |
-| ----------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| `NEXT_PUBLIC_PRIVY_APP_ID`                                              | Privy Dashboard → App settings → App ID                                             |
-| `PRIVY_APP_SECRET`                                                      | Privy Dashboard → App settings → App secret                                         |
-| `PRIVY_AUTH_PRIVATE_KEY`                                                | Privy Dashboard → Wallet infrastructure → Authorization keys → New key (shown once) |
-| `PRIVY_AUTH_KEY_QUORUM_ID`                                              | Privy Dashboard → the key quorum containing that authorization key                  |
-| `PUBLIC_URL`                                                            | Your Vercel production URL (`https://…`, no trailing slash)                         |
-| `SESSION_SECRET`                                                        | `openssl rand -hex 32`                                                              |
-| `DATABASE_URL`                                                          | Neon pooled connection string                                                       |
-| `QSTASH_TOKEN`, `QSTASH_CURRENT_SIGNING_KEY`, `QSTASH_NEXT_SIGNING_KEY` | Upstash Console → QStash                                                            |
-| `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`                    | Upstash Console → Redis → REST API (optional)                                       |
-| `TELEGRAM_BOT_TOKEN`                                                    | @BotFather → `/mybots` → API Token                                                  |
-| `TELEGRAM_BOT_USERNAME`                                                 | Your bot's username without `@`, for example `SkymintsBOT`                        |
-| `TELEGRAM_WEBHOOK_SECRET`                                               | `openssl rand -hex 24` (letters, digits, `_` and `-` only)                          |
-| `TELEGRAM_USER_ID`, `ADMIN_TELEGRAM_IDS`                                | Your numeric Telegram ID (for example from @userinfobot)                            |
-| `ADMIN_EMAILS`                                                          | Emails that receive the admin role                                                  |
-| `OPENSEA_API_KEY`                                                       | OpenSea developer portal                                                            |
-| `ETHERSCAN_API_KEY`                                                     | etherscan.io → API Keys (V2 works across chains)                                    |
-| `RPC_ETHEREUM`, `RPC_BASE`, …                                           | Your RPC provider (Alchemy, QuickNode, …). Public RPCs are used as fallbacks        |
-| `NEXT_PUBLIC_SOURCE_URL`                                                | Your public GitHub repository URL (AGPL "Source" link)                              |
-| `JOB_LEAD_MS`                                                           | Optional, default `20000`                                                           |
-| `MAX_PRICE_PER_NFT`, `MAX_DAILY_SPEND`, `MAX_GAS_PRICE_GWEI`            | Optional global safety limits                                                       |
+| Variable                                                                | Where to get it                                                                                                                                      |
+| ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `NEXT_PUBLIC_PRIVY_APP_ID`                                              | Privy Dashboard → App settings → App ID                                                                                                              |
+| `PRIVY_APP_SECRET`                                                      | Privy Dashboard → App settings → App secret                                                                                                          |
+| `PRIVY_AUTH_PRIVATE_KEY`                                                | Privy Dashboard → Wallet infrastructure → Authorization keys → New key (shown once)                                                                  |
+| `PRIVY_AUTH_KEY_QUORUM_ID`                                              | Privy Dashboard → the key quorum containing that authorization key                                                                                   |
+| `PRIVY_MINT_POLICY_ID`                                                  | Optional. Privy Dashboard → Policies → the policy for the mint signer (see step 7.6)                                                                 |
+| `PRIVY_SIWE_*`                                                          | Optional. Sign-in-only signer for Telegram `/check` (see step 7.5)                                                                                   |
+| `PUBLIC_URL`                                                            | Your Vercel production URL (`https://…`, no trailing slash)                                                                                          |
+| `SESSION_SECRET`                                                        | `openssl rand -hex 32`                                                                                                                               |
+| `DATABASE_URL`                                                          | Neon pooled connection string                                                                                                                        |
+| `QSTASH_TOKEN`, `QSTASH_CURRENT_SIGNING_KEY`, `QSTASH_NEXT_SIGNING_KEY` | Upstash Console → QStash                                                                                                                             |
+| `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`                    | Upstash Console → Redis → REST API (optional)                                                                                                        |
+| `TELEGRAM_BOT_TOKEN`                                                    | @BotFather → `/mybots` → API Token                                                                                                                   |
+| `TELEGRAM_BOT_USERNAME`                                                 | Your bot's username without `@`, for example `SkymintsBOT`. Also used for the nav **Telegram Bot** link (or set `NEXT_PUBLIC_TELEGRAM_BOT_USERNAME`) |
+| `TELEGRAM_WEBHOOK_SECRET`                                               | `openssl rand -hex 24` (letters, digits, `_` and `-` only)                                                                                           |
+| `TELEGRAM_USER_ID`, `ADMIN_TELEGRAM_IDS`                                | Your numeric Telegram ID (for example from @userinfobot)                                                                                             |
+| `ADMIN_EMAILS`                                                          | Emails that receive the admin role                                                                                                                   |
+| `OPENSEA_API_KEY`                                                       | OpenSea developer portal                                                                                                                             |
+| `ETHERSCAN_API_KEY`                                                     | etherscan.io → API Keys (V2 works across chains)                                                                                                     |
+| `RPC_ETHEREUM`, `RPC_BASE`, …                                           | Your RPC provider (Alchemy, QuickNode, …). Public RPCs are used as fallbacks                                                                         |
+| `NEXT_PUBLIC_SOURCE_URL`                                                | Your public GitHub repository URL (AGPL "Source" link)                                                                                               |
+| `NEXT_PUBLIC_SITE_URL`                                                  | Optional origin for link-preview URLs (default `PUBLIC_URL`, then the Vercel production URL)                                                         |
+| `ALCHEMY_AUTH_TOKEN`                                                    | Optional. Alchemy dashboard → Webhooks → Auth Token (NFT holdings webhooks)                                                                          |
+| `JOB_LEAD_MS`                                                           | Optional, default `20000`                                                                                                                            |
+| `MAX_PRICE_PER_NFT`, `MAX_DAILY_SPEND`, `MAX_GAS_PRICE_GWEI`            | Optional global safety limits                                                                                                                        |
 
 > `NEXT_PUBLIC_*` values are inlined into the browser bundle when you build, so redeploy after you change them. Every other value stays on the server.
 
@@ -131,7 +136,7 @@ In the [Privy Dashboard](https://dashboard.privy.io), for your app:
       - **housekeeping** (every 2 min) fixes legacy wallet ids and re-checks wallets that still lack the signer (each at most every 6 h).
 
       Limits: wallets created by Privy's client SDKs are **user-owned**, so changing their signers needs the owner's authorization ([self-custodial user wallets](https://docs.privy.io/controls/authorization-keys/owners/configuration/user)). With the member offline, only wallets owned by a 1-of-k key quorum that includes an app key can be updated ([server updates](https://docs.privy.io/controls/authorization-keys/owners/configuration/user/server-updates)). SkyBOT deliberately doesn't migrate ownership (that would let the server rewrite signers on members' wallets). A wallet without the signer shows "not verified yet" in `/check` until the member next opens SkyBOT signed in with Privy (Mini App sessions without Privy can't add it); live stages are still checked through the OpenSea mint API, which needs no signature.
-6. **Policies (strongly recommended)**: attach a policy to the signer that allowlists contract targets (SeaDrop and the mint contracts you use), limits `value` per transaction, restricts chain IDs, and denies `approve`, `setApprovalForAll`, and `transfer`. See [SECURITY.md](SECURITY.md).
+6. **Policies (strongly recommended)**: create a policy for the mint signer that allowlists contract targets (SeaDrop and the mint contracts you use), limits `value` per transaction, restricts chain IDs, and denies `approve`, `setApprovalForAll`, and `transfer`. Put its id in `PRIVY_MINT_POLICY_ID` and redeploy. The app then attaches the signer with that policy, and re-adds it to existing wallets that still carry the signer without it. `PRIVY_MINT_POLICY_ID` is optional. Without it minting works the same, but Privy lets the server key sign any transaction for those wallets, and only SkyBOT's own checks limit it. See [SECURITY.md](SECURITY.md).
 
 ## 8. Configure BotFather
 
@@ -154,7 +159,8 @@ In [@BotFather](https://t.me/BotFather):
 2. Sign in on the web with email or Google. Wallets are created on first login.
 3. In Telegram, send `/start` to the bot and tap **Open Dashboard**. You should be logged in automatically through Privy.
 4. On the web, sign out and sign in again with **Telegram**. You should land in the same account (same wallets).
-5. Schedule a small test mint a few minutes ahead and watch **Jobs**.
+5. Schedule a small test mint a few minutes ahead and watch **Jobs**. Schedule a second one and cancel it, from **Jobs** or from the Telegram `/jobs` buttons. It should show _Cancelled_ and never broadcast.
+6. Paste your URL into a Discord or Telegram chat (or check it on [opengraph.xyz](https://www.opengraph.xyz)). It should unfurl with the `og.png` preview.
 
 ## One Account Across Web and Telegram
 
@@ -172,6 +178,22 @@ Legacy `/start link_<code>` deep links and the `/api/telegram/link-code` endpoin
 
 QStash delivers the message about `JOB_LEAD_MS` (default 20 s) before the stage starts. The function then pre-signs the transactions, waits in-process until the exact start time, and broadcasts to every RPC in parallel. Expect broadcasts within roughly **50–300 ms of stage start**, depending on the region and RPC latency. Deploy your Vercel functions in a region close to your RPC providers (Project → Settings → Functions → Region). If QStash delivers late, the job still fires as soon as it arrives. Jobs that miss their window are marked as missed by housekeeping.
 
+## Cancelling Jobs
+
+Members cancel from **Jobs** (with a confirm dialog) or from the Telegram `/jobs` list (**Cancel #n**, then **Yes, cancel**). `POST /api/jobs/:id/cancel` is owner-scoped. Admins (allow-listed by `ADMIN_EMAILS` / `ADMIN_TELEGRAM_IDS`) can cancel any job by id.
+
+- **Cancellable:** `scheduled`, `waiting_unlock`, and `running` until the first broadcast. The runner re-checks after the claim, during the pre-sign wait, before signing, and at the broadcast gate (`jobs.broadcast_at`, set atomically). A cancel during signing discards the signed transactions. No nonce is used and no gas is spent.
+- **Not cancellable:** `done`, `failed`, `cancelled`, or a job that has started broadcasting. The API answers `409`, because the transactions are already on-chain.
+- Late QStash deliveries and housekeeping leave cancelled jobs alone. The owner gets a Telegram notice.
+
+## Link Preview (Open Graph)
+
+`web/app/layout.tsx` sets Open Graph and X `summary_large_image` metadata with absolute URLs (`metadataBase` = `NEXT_PUBLIC_SITE_URL` → `PUBLIC_URL` → Vercel production URL → `https://skybot-mint.vercel.app`, https only). The image is the static file `web/public/og.png` (1200×630, about 50 KB). No middleware guards it, so crawlers can fetch it.
+
+- **Regenerate** after changing the copy or logo in `web/scripts/og-image.mjs`: `npm run og --workspace web`. It renders with `next/og` and the bundled OFL fonts in `web/scripts/og-fonts`.
+- **Replace** with your own design: overwrite `web/public/og.png` (1200×630 PNG, keep it under about 500 KB for WhatsApp).
+- After either change, bump `?v=` in `OG_IMAGE` in `layout.tsx` so X, Discord, and Telegram refetch it, then redeploy. Telegram caches previews, and [@WebpageBot](https://t.me/WebpageBot) can refresh them.
+
 ## Local Development
 
 See [README → Quick Start](README.md#quick-start-local-development). Locally, the bot uses **long polling** and the scheduler runs in-process. Do not set `TELEGRAM_WEBHOOK_SECRET` locally if the production webhook is active for the same bot, because Telegram delivers updates either by webhook or by polling, never both.
@@ -187,3 +209,5 @@ See [README → Quick Start](README.md#quick-start-local-development). Locally, 
 | Webhook `last_error_message: 401`                     | `TELEGRAM_WEBHOOK_SECRET` changed. Rerun step 6                                                                                                                                    |
 | "Scheduler unavailable" when scheduling               | Check `QSTASH_TOKEN` (and `QSTASH_URL` for your region)                                                                                                                            |
 | Function timeout on scheduled mints                   | Reduce `JOB_LEAD_MS` or raise `maxDuration` (Pro)                                                                                                                                  |
+| Cancel returns `409` "already sent its transactions"  | Broadcasting already started, and on-chain transactions can't be undone. The job finishes on its own                                                                               |
+| Shared link shows no image                            | Check `https://<your-app>/og.png` loads, check that `og:image` in the page source is absolute, then bump `?v=` and refresh the preview cache                                       |

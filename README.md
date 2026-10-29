@@ -22,13 +22,17 @@ SkyBOT Mint lets a community mint NFT drops quickly and safely from many wallets
 
 - **Drop resolver**: OpenSea collection or drop URLs, SeaDrop contracts, and any generic `mint` function. Stages, prices, and limits are detected automatically.
 - **Wallet eligibility**: allowlist checks without funding (OpenSea ordering, `stateOverride` simulation, Merkle proofs) and per-wallet balance and limit checks.
-- **Simulation first**: every mint is simulated before it is signed. Approve, transfer, and `setApprovalForAll` calls are blocked.
-- **Scheduled mints**: Upstash QStash fires a few seconds early, then the function pre-signs and waits until the stage starts before broadcasting.
-- **Multi-RPC broadcast**: signed transactions go to every configured RPC in parallel, with public RPC fallbacks.
+- **Simulation first**: every mint is simulated before it is signed. Approve, transfer, and `setApprovalForAll` calls are blocked. The simulation becomes a single-use **plan** stored in the database (10-minute TTL, bound to your account); Execute consumes it, and a wrong confirmation phrase does not.
+- **Scheduled mints**: Upstash QStash fires a few seconds early, then the function pre-signs and waits until the stage starts before broadcasting. **Mint Now** jobs record their start time, so housekeeping can time them out if a function dies.
+- **Cancel jobs**: cancel a scheduled, waiting, or running job from **Jobs** (confirm dialog) or from the Telegram `/jobs` list, as long as nothing has been broadcast yet. Once the first transaction is sent, the job can't be cancelled and finishes on its own.
+- **Multi-RPC broadcast**: signed transactions go to every configured RPC in parallel, with public RPC fallbacks. Each wallet is sent independently, so one failing wallet never drops the others' tx hashes.
+- **Spend caps**: global `MAX_PRICE_PER_NFT` / `MAX_DAILY_SPEND`, plus per-user, per-chain caps in Settings that are re-checked at execute time.
 - **Privy custody**: embedded and server wallets, client-side key import and export, and server signing only through Privy authorization keys.
-- **Telegram Mini App**: the full dashboard opens inside Telegram with seamless login, native MainButton confirm, BackButton, haptics, and theme colors.
-- **Telegram bot**: same account as the web (Privy Telegram sign-in), read-only `/check` for every wallet's eligibility, `/mint` to open a drop in the Mini App, wallets and jobs lists, and notifications when mints finish. Times use your own timezone.
-- **Multi-user and admin**: per-user data scoping, Fund Wallets (split native coin from Main to your other wallets), optional spend caps, and an admin user list.
+- **NFTs, Withdraw, Fund Wallets**: view and send holdings (optionally kept fresh by Alchemy webhooks), withdraw native coin, and split native coin from Main to your other wallets.
+- **Telegram Mini App**: the full dashboard opens inside Telegram with seamless login, an inline confirm step, BackButton, haptics, and theme colors.
+- **Telegram bot**: same account as the web (Privy Telegram sign-in), read-only `/check` for every wallet's eligibility, `/mint` to open a drop in the Mini App, wallets and jobs lists (with Cancel buttons), and notifications when mints finish or are cancelled. Times use your own timezone. A **Telegram Bot** link in the app navigation opens the bot.
+- **Link previews**: Open Graph and X (`summary_large_image`) tags with a static 1200×630 image, so shared links unfurl on X, Discord, Telegram, and WhatsApp.
+- **Multi-user and admin**: per-user data scoping and an admin user list. Admins can cancel any job.
 - **Serverless-native**: a single Vercel project with Neon Postgres, QStash, and optional Upstash Redis rate limits.
 
 ## Screenshots
@@ -131,14 +135,15 @@ pm2 start ecosystem.config.cjs   # skybot-web (next start) + skybot-worker
 
 Useful scripts:
 
-| Command                  | Description                                                                                  |
-| ------------------------ | -------------------------------------------------------------------------------------------- |
-| `npm run typecheck`      | TypeScript checks for server and web                                                         |
-| `npm run lint`           | ESLint (zero warnings in CI)                                                                 |
-| `npm run format`         | Prettier                                                                                     |
-| `npm test`               | Vitest suite (auth, cross-user authz, initData forgery, safety, resolver, serverless/QStash) |
-| `npm run migrate`        | Apply database migrations to `DATABASE_URL`                                                  |
-| `npm run telegram:setup` | Set the webhook, commands, and menu button (after deploy)                                    |
+| Command                  | Description                                                                                              |
+| ------------------------ | -------------------------------------------------------------------------------------------------------- |
+| `npm run typecheck`      | TypeScript checks for server and web                                                                     |
+| `npm run lint`           | ESLint (zero warnings in CI)                                                                             |
+| `npm run format`         | Prettier                                                                                                 |
+| `npm test`               | Vitest suite (auth, cross-user authz, initData forgery, safety, resolver, serverless/QStash, job cancel) |
+| `npm run migrate`        | Apply database migrations to `DATABASE_URL` (the same idempotent DDL also runs on first request)         |
+| `npm run og -w web`      | Re-render the link-preview image `web/public/og.png`                                                     |
+| `npm run telegram:setup` | Set the webhook, commands, and menu button (after deploy)                                                |
 
 ## Deployment
 
@@ -155,30 +160,37 @@ See **[DEPLOY.md](DEPLOY.md)** for the full step-by-step guide.
 
 All variables are listed in [`.env.example`](.env.example). The main ones:
 
-| Variable                                                                | Required | Description                                                     |
-| ----------------------------------------------------------------------- | :------: | --------------------------------------------------------------- |
-| `NEXT_PUBLIC_PRIVY_APP_ID`                                              |    ✅    | Privy App ID (public)                                           |
-| `PRIVY_APP_SECRET`                                                      |    ✅    | Privy App secret (server only)                                  |
-| `PRIVY_AUTH_PRIVATE_KEY`                                                |    ✅    | Privy authorization key used for server-side signing            |
-| `PRIVY_AUTH_KEY_QUORUM_ID`                                              |    ✅    | Key quorum ID added as signer on user wallets                   |
-| `PUBLIC_URL`                                                            |    ✅    | Public HTTPS URL of the deployment (Mini App, deep links, CORS) |
-| `SESSION_SECRET`                                                        |    ✅    | HMAC secret for Telegram-first session cookies                  |
-| `DATABASE_URL`                                                          | ✅ prod  | Neon Postgres connection string                                 |
-| `QSTASH_TOKEN`, `QSTASH_CURRENT_SIGNING_KEY`, `QSTASH_NEXT_SIGNING_KEY` | ✅ prod  | Scheduling and signature verification                           |
-| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_BOT_USERNAME`                           |    ✅    | Telegram bot                                                    |
-| `TELEGRAM_WEBHOOK_SECRET`                                               | ✅ prod  | Secret token used to verify webhook calls                       |
-| `ADMIN_EMAILS`, `ADMIN_TELEGRAM_IDS`, `TELEGRAM_USER_ID`                |    —     | Admin users and notification target                             |
-| `OPENSEA_API_KEY`, `ETHERSCAN_API_KEY`                                  |    ✅    | Drop resolution and ABI lookup                                  |
-| `RPC_<CHAIN>`                                                           |    —     | Private RPC URLs per chain (public fallbacks built in)          |
-| `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`                    |    —     | Distributed rate limiting                                       |
-| `JOB_LEAD_MS`, `JOB_MAX_DURATION_SEC`                                   |    —     | Scheduler timing (defaults 20000 ms / 300 s)                    |
-| `MAX_PRICE_PER_NFT`, `MAX_DAILY_SPEND`, `MAX_GAS_PRICE_GWEI`            |    —     | Global safety limits                                            |
-| `NEXT_PUBLIC_SOURCE_URL`                                                |    —     | Repository URL for the footer "Source" link (AGPL)              |
+| Variable                                                                          | Required | Description                                                                                    |
+| --------------------------------------------------------------------------------- | :------: | ---------------------------------------------------------------------------------------------- |
+| `NEXT_PUBLIC_PRIVY_APP_ID`                                                        |    ✅    | Privy App ID (public)                                                                          |
+| `PRIVY_APP_SECRET`                                                                |    ✅    | Privy App secret (server only)                                                                 |
+| `PRIVY_AUTH_PRIVATE_KEY`                                                          |    ✅    | Privy authorization key used for server-side signing                                           |
+| `PRIVY_AUTH_KEY_QUORUM_ID`                                                        |    ✅    | Key quorum ID added as signer on user wallets                                                  |
+| `PRIVY_MINT_POLICY_ID`                                                            |    —     | Privy policy attached with the mint signer (limits what it may sign)                           |
+| `PRIVY_SIWE_AUTH_PRIVATE_KEY`, `PRIVY_SIWE_KEY_QUORUM_ID`, `PRIVY_SIWE_POLICY_ID` |    —     | Sign-in-only signer for OpenSea checks in Telegram `/check`                                    |
+| `PUBLIC_URL`                                                                      |    ✅    | Public HTTPS URL of the deployment (Mini App, deep links, CORS, link-preview URLs)             |
+| `SESSION_SECRET`                                                                  |    ✅    | HMAC secret for Telegram-first session cookies                                                 |
+| `DATABASE_URL`                                                                    | ✅ prod  | Neon Postgres connection string                                                                |
+| `QSTASH_TOKEN`, `QSTASH_CURRENT_SIGNING_KEY`, `QSTASH_NEXT_SIGNING_KEY`           | ✅ prod  | Scheduling and signature verification                                                          |
+| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_BOT_USERNAME`                                     |    ✅    | Telegram bot (the username also feeds the nav **Telegram Bot** link)                           |
+| `TELEGRAM_WEBHOOK_SECRET`                                                         | ✅ prod  | Secret token used to verify webhook calls                                                      |
+| `ADMIN_EMAILS`, `ADMIN_TELEGRAM_IDS`, `TELEGRAM_USER_ID`                          |    —     | Admin users and notification target                                                            |
+| `OPENSEA_API_KEY`, `ETHERSCAN_API_KEY`                                            |    ✅    | Drop resolution and ABI lookup                                                                 |
+| `RPC_<CHAIN>`                                                                     |    —     | Private RPC URLs per chain (public fallbacks built in)                                         |
+| `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`                              |    —     | Distributed rate limiting                                                                      |
+| `ALCHEMY_AUTH_TOKEN`                                                              |    —     | Alchemy Notify token: webhooks that refresh NFT holdings                                       |
+| `JOB_LEAD_MS`, `JOB_MAX_DURATION_SEC`                                             |    —     | Scheduler timing (defaults 20000 ms / 300 s)                                                   |
+| `MAX_PRICE_PER_NFT`, `MAX_DAILY_SPEND`, `MAX_GAS_PRICE_GWEI`, `GAS_MODE`          |    —     | Global safety limits and default gas mode                                                      |
+| `VAULT_ADDRESS`                                                                   |    —     | Default withdraw destination                                                                   |
+| `NEXT_PUBLIC_SOURCE_URL`                                                          |    —     | Repository URL for the footer "Source" link (AGPL)                                             |
+| `NEXT_PUBLIC_TELEGRAM_BOT_USERNAME`                                               |    —     | Build-time bot username for the nav link (defaults to `TELEGRAM_BOT_USERNAME`)                 |
+| `NEXT_PUBLIC_SITE_URL`                                                            |    —     | Origin for link-preview URLs (defaults to `PUBLIC_URL`, then `https://skybot-mint.vercel.app`) |
 
 ## Security Model
 
 - **No raw keys on our side.** Wallets live in Privy. Import and export happen client-side through Privy's UI, and the server-side import endpoint is disabled.
-- **Constrained server signing.** Transactions are signed only through Privy authorization keys. Dangerous selectors are denied, and Privy policies should restrict targets, chains, and value.
+- **Constrained server signing.** Transactions are signed only through Privy authorization keys. Dangerous selectors are denied, and Privy policies should restrict targets, chains, and value. Set `PRIVY_MINT_POLICY_ID` and the app attaches that policy with the mint signer. Minting works without it, but the signer is then limited only by SkyBOT's own checks.
+- **Bounded Privy checks.** Signer checks run with an overall deadline. Negative results are cached for 60 s, and inconclusive diagnostics are not cached.
 - **Authentication on every private route**: a Privy JWT, or a short-lived httpOnly session cookie plus a CSRF header for Telegram-first users. Telegram initData is HMAC-verified with an `auth_date` max age.
 - **One account per person**: email, Google and Telegram are linked in Privy and resolve to a single SkyBOT account; accounts that own wallets are never merged automatically.
 - **Per-user data scoping**, rate limits, strict CORS, CSP and security headers, Zod input validation, and redacted logs.
@@ -188,25 +200,44 @@ Read the full threat model and production checklist in **[SECURITY.md](SECURITY.
 
 ## Telegram Bot Commands
 
-| Command                  | Description                                                                          |
-| ------------------------ | ------------------------------------------------------------------------------------ |
-| `/start`                 | Welcome message and **Open Dashboard** button (Mini App, signs you in with Telegram) |
-| `/check <link\|address>` | Read-only: stages (price, limit, time in your timezone) and per-wallet eligibility   |
-| `/mint <link\|address>`  | Resolve a drop and open it in the dashboard                                          |
-| `/wallets`               | List your wallets                                                                    |
-| `/jobs`                  | Show recent and scheduled mints                                                      |
-| `/withdraw`              | Open the Withdraw page                                                               |
-| `/help`                  | How to use SkyBOT Mint                                                               |
+| Command                  | Description                                                                               |
+| ------------------------ | ----------------------------------------------------------------------------------------- |
+| `/start`                 | Welcome message and **Open Dashboard** button (Mini App, signs you in with Telegram)      |
+| `/check <link\|address>` | Read-only: stages (price, limit, time in your timezone) and per-wallet eligibility        |
+| `/mint <link\|address>`  | Resolve a drop and open it in the dashboard                                               |
+| `/wallets`               | List your wallets                                                                         |
+| `/jobs`                  | Recent and scheduled mints, with a **Cancel** button (plus confirm) for jobs not yet sent |
+| `/withdraw`              | Open the Withdraw page                                                                    |
+| `/help`                  | How to use SkyBOT Mint                                                                    |
+
+Cancellable states are `scheduled`, `waiting_unlock`, and `running` until broadcast. The runner atomically sets `jobs.broadcast_at` right before sending, so a cancel and a broadcast can never both win. A cancelled job is never run, even if a QStash message arrives later.
+
+## API Routes
+
+All private routes need a Privy JWT, or the session cookie plus CSRF header. Data is always scoped to the signed-in user.
+
+| Area              | Routes                                                                                                                                                              |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Account           | `GET /api/me`, `PUT /api/me/timezone`, `GET/PUT /api/settings`, `POST /api/session/logout`, `POST /api/account/attach-privy`                                        |
+| Drops and minting | `POST /api/resolve`, `POST /api/eligibility`, `POST /api/simulate` → plan, `POST /api/mint/execute` (consumes the plan)                                             |
+| Jobs              | `GET /api/jobs`, `GET /api/jobs/:id`, `POST /api/jobs/:id/cancel` (owner; admins may cancel any job), `GET /api/minted`                                             |
+| Wallets           | `/api/wallets` (list, generate, sync, balances, main, remove/restore, mint-signer and siwe-signer verify)                                                           |
+| Funds and NFTs    | `/api/fund/*`, `/api/withdraw/*`, `/api/nfts`, `/api/nfts/refresh`, `/api/nfts/send*`, `POST /api/tx/status`                                                        |
+| Telegram          | `POST /api/telegram/webhook`, `POST /api/telegram/session`, `POST /api/telegram/unlink`, legacy link-code routes                                                    |
+| Platform          | `GET /api/health`, `GET /api/status`, `GET /api/chains/health`, `POST /api/jobs/run` (QStash), `POST /api/cron/housekeeping` (QStash), `POST /api/webhooks/alchemy` |
+| Admin             | `GET /api/admin/users`, `POST /api/admin/users/:id/disable`, `POST /api/admin/telegram/setup`, `/api/admin/alchemy/*`                                               |
 
 ## Project Structure
 
 ```
 .
 ├── web/                      # Next.js app (deployed to Vercel, Root Directory = web)
-│   ├── app/                  # pages: /, /app/{mint,wallets,jobs,settings,admin}, /source
-│   │   └── api/              # [...path] (Fastify adapter), jobs/run, cron/housekeeping
-│   ├── components/           # AppShell, Confirm, SiteFooter, …
+│   ├── app/                  # pages: /, /app/{mint,wallets,nfts,withdraw,jobs,settings,admin}, /source
+│   │   └── api/              # [...path] (Fastify adapter), jobs/run, cron/housekeeping, webhooks/alchemy
+│   ├── components/           # AppShell, ShellNav, Confirm, SiteFooter, …
 │   ├── lib/                  # Privy + Telegram providers, API client, theme
+│   ├── public/og.png         # link-preview image (rendered by scripts/og-image.mjs)
+│   ├── scripts/              # og-image.mjs + og-fonts (OFL subsets)
 │   └── vercel.json           # function durations
 ├── server/                   # @nft-mint-bot/server: API, mint engine, bot, scheduler
 │   ├── src/api/              # Fastify routes (auth, wallets, mint, jobs, telegram, admin)
