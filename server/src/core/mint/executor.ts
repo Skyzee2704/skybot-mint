@@ -5,7 +5,7 @@ import { getPool } from "../rpc/pool.js";
 import { getResolved } from "../resolver/cache.js";
 import { getWallet } from "../../users/service.js";
 import { assertDailyBudget, recordSpend, settleSpend } from "../safety/safety.js";
-import { appendJobLog, patchJob, recordMinted, type JobRecord } from "../jobs/repo.js";
+import { appendJobLog, jobStatus, JobCancelledError, patchJob, recordMinted, type JobRecord } from "../jobs/repo.js";
 import { buildMintTx, MintBuildError } from "./build.js";
 import { getFees } from "./fees.js";
 import { parseMintedTokenIds, waitForReceipt } from "./receipts.js";
@@ -72,6 +72,20 @@ export async function prepareAll(
     status: "pending",
   }));
 
+  // Shared, throttled cancel check (≤1 DB read/second for all wallets) used while waiting for the stage to open.
+  let lastCheck = 0;
+  let lastCheckP: Promise<boolean> = Promise.resolve(false);
+  const cancelled = () => {
+    if (Date.now() - lastCheck >= 1000) {
+      lastCheck = Date.now();
+      lastCheckP = jobStatus(job.id).then(
+        (s) => s === "cancelled",
+        () => false,
+      );
+    }
+    return lastCheckP;
+  };
+
   const built = await Promise.all(
     req.wallets.map(async (wq, i) => {
       const addr = results[i].address;
@@ -81,6 +95,7 @@ export async function prepareAll(
         } catch (e: any) {
           if (e instanceof MintBuildError && e.code === "NOT_ACTIVE" && Date.now() < buildDeadline) {
             await sleep(300);
+            if (await cancelled()) throw new JobCancelledError();
             continue;
           }
           results[i].status = "failed";
@@ -123,6 +138,8 @@ export async function prepareAll(
       const wq = req.wallets[i];
       const w = walletRows[i];
       try {
+        // Cancelled while preparing: don't ask Privy to sign anything else.
+        if ((await jobStatus(job.id)) === "cancelled") throw new JobCancelledError();
         if (!w.privyWalletId) throw new Error("Wallet has no Privy id — re-sync from Settings/Wallets");
         const nonce = await pool.read((p) => p.getTransactionCount(w.address, "pending"), "nonce");
         const raw = await signRawTransaction(w.privyWalletId, {
@@ -148,7 +165,10 @@ export async function prepareAll(
         results[i].status = "signed";
       } catch (e: any) {
         results[i].status = "failed";
-        results[i].error = await signFailureMessage(e, w.address, { chain, contract: req.contract });
+        results[i].error =
+          e instanceof JobCancelledError
+            ? "Cancelled before signing"
+            : await signFailureMessage(e, w.address, { chain, contract: req.contract });
       }
     }),
   );

@@ -69,6 +69,8 @@ export const jobs = sqliteTable(
     runAt: text("run_at"),
     /** Frozen when the job is claimed (scheduled → running). Used for Mint Now timeout/receipt finalization. */
     startedAt: text("started_at"),
+    /** Set atomically right before the first broadcast; once set the job can no longer be cancelled. */
+    broadcastAt: text("broadcast_at"),
     chain: text("chain").notNull(),
     target: text("target").notNull(),
     strategy: text("strategy").notNull(),

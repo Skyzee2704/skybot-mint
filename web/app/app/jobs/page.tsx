@@ -39,6 +39,24 @@ export default function JobsPage() {
     api("/api/jobs")
       .then((r) => setJobs(r.jobs))
       .catch((e) => setErr(e.message));
+  // Cancellable until the runner starts broadcasting (server sets broadcastAt); the server re-checks atomically.
+  const canCancel = (j: any) => ["scheduled", "waiting_unlock"].includes(j.status) || (j.status === "running" && !j.broadcastAt);
+  const [cancelling, setCancelling] = useState<string | null>(null);
+  const cancel = (j: any) => {
+    const msg =
+      j.status === "running"
+        ? "Cancel this mint? It is about to start. If it sends its transactions before the cancel lands, it can't be stopped."
+        : "Cancel this scheduled mint? Nothing has been sent yet.";
+    if (!confirm(msg)) return;
+    setErr(null);
+    setCancelling(j.id);
+    api(`/api/jobs/${j.id}/cancel`, { body: {} })
+      .catch((e) => setErr(e.message))
+      .finally(() => {
+        setCancelling(null);
+        load();
+      });
+  };
   // Poll fast only while a job is active and the tab is visible; otherwise slow down (DB reads, no RPC).
   const active = jobs.some((j) => ["scheduled", "waiting_unlock", "running"].includes(j.status));
   useEffect(() => {
@@ -93,15 +111,16 @@ export default function JobsPage() {
                     : "—"}
                 </td>
                 <td>
-                  {["scheduled", "waiting_unlock"].includes(j.status) && (
+                  {canCancel(j) && (
                     <button
                       className="ghost"
+                      disabled={cancelling === j.id}
                       onClick={(e) => {
                         e.stopPropagation();
-                        api(`/api/jobs/${j.id}/cancel`, { body: {} }).then(load);
+                        cancel(j);
                       }}
                     >
-                      Cancel
+                      {cancelling === j.id ? "Cancelling…" : "Cancel"}
                     </button>
                   )}
                 </td>

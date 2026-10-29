@@ -209,7 +209,7 @@ export function createBot(token: string, opts: ConstructorParameters<typeof Bot>
     "/check &lt;link|address&gt; — stages + eligibility of all your wallets (read-only)",
     "/mint &lt;link|address&gt; — drop summary, then mint in the dashboard",
     "/wallets — your wallets",
-    "/jobs — recent and scheduled mints",
+    "/jobs — recent and scheduled mints (tap Cancel under a mint that hasn't sent yet)",
     "/withdraw — open the Withdraw page",
     "",
     `Dashboard: ${esc(dashUrl("/"))}`,
@@ -292,21 +292,69 @@ export function createBot(token: string, opts: ConstructorParameters<typeof Bot>
         reply_markup: openDashboardKeyboard(),
       });
     const { listJobs } = await import("../core/jobs/repo.js");
+    const { isCancellable } = await import("../jobs/scheduler.js");
     const js = await listJobs(u.id, 10);
     if (!js.length) return ctx.reply("No jobs yet.");
+    // One Cancel button per job that can still be stopped (nothing broadcast yet); numbered like the list.
+    const kb = new InlineKeyboard();
+    js.forEach((j, i) => {
+      if (isCancellable(j)) kb.text(`✖ Cancel #${i + 1}`, `jc:${j.id}`).row();
+    });
     await ctx.reply(
       js
         .map(
-          (j) =>
-            `${esc(jobStatusLabel(j.status))} · ${esc(j.chain)} · <code>${j.target.slice(0, 6)}…${j.target.slice(-4)}</code>\n   ${
+          (j, i) =>
+            `${i + 1}. ${esc(jobStatusLabel(j.status))} · ${esc(j.chain)} · <code>${j.target.slice(0, 6)}…${j.target.slice(-4)}</code>\n   ${
               j.runAt
                 ? `${new Date(j.runAt).getTime() > Date.now() ? "runs" : "ran"} ${formatDateTime(j.runAt, { timeZone: u.timezone ?? null })}`
                 : `created ${formatDateTime(j.createdAt, { timeZone: u.timezone ?? null })}`
             }`,
         )
         .join("\n") + tzFooter(u.timezone),
-      { parse_mode: "HTML" },
+      { parse_mode: "HTML", ...(kb.inline_keyboard.length ? { reply_markup: kb } : {}) },
     );
+  });
+
+  // [Cancel #n] under /jobs → ask to confirm; [Yes, cancel] → cancel (owner only, same rules as the dashboard).
+  bot.callbackQuery(/^jc:/, async (ctx) => {
+    const id = ctx.callbackQuery.data.slice(3);
+    const u = await linkedUser(ctx);
+    if (!u) {
+      await ctx.answerCallbackQuery({ text: "Open SkyBOT first to sign in with Telegram.", show_alert: true }).catch(() => {});
+      return;
+    }
+    const { getJob } = await import("../core/jobs/repo.js");
+    const j = await getJob(u.id, id);
+    await ctx.answerCallbackQuery().catch(() => {});
+    if (!j) return ctx.reply("That mint wasn't found.");
+    await ctx.reply(
+      `Cancel this mint?\n${esc(jobStatusLabel(j.status))} · ${esc(j.chain)} · <code>${j.target.slice(0, 6)}…${j.target.slice(-4)}</code>\nNothing has been sent yet. If it starts sending first, it can't be cancelled.`,
+      { parse_mode: "HTML", reply_markup: new InlineKeyboard().text("Yes, cancel", `jcy:${id}`).text("Keep it", "jcn") },
+    );
+  });
+
+  bot.callbackQuery("jcn", async (ctx) => {
+    await ctx.answerCallbackQuery({ text: "Kept." }).catch(() => {});
+    await ctx.editMessageText("Kept. The mint will run as planned.").catch(() => {});
+  });
+
+  bot.callbackQuery(/^jcy:/, async (ctx) => {
+    const id = ctx.callbackQuery.data.slice(4);
+    const u = await linkedUser(ctx);
+    if (!u) {
+      await ctx.answerCallbackQuery({ text: "Open SkyBOT first to sign in with Telegram.", show_alert: true }).catch(() => {});
+      return;
+    }
+    const { cancelJob } = await import("../jobs/scheduler.js");
+    try {
+      await cancelJob({ id: u.id, admin: false }, id);
+      await ctx.answerCallbackQuery({ text: "Cancelled." }).catch(() => {});
+      await ctx.editMessageText("✅ Mint cancelled. Nothing was sent and no gas was spent.").catch(() => {});
+    } catch (e: any) {
+      const msg = redactString(String(e?.message ?? e)).slice(0, 180);
+      await ctx.answerCallbackQuery({ text: msg, show_alert: true }).catch(() => {});
+      await ctx.editMessageText(`Couldn't cancel: ${esc(msg)}`, { parse_mode: "HTML" }).catch(() => {});
+    }
   });
 
   async function runCheck(ctx: any, u: AppUser, args: { input: string; chain?: string }) {

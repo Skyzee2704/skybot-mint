@@ -21,11 +21,19 @@ export async function notifyJobDone(jobId: string) {
     if (!u?.telegramUserId) return;
     const results = j.results as any[];
     const ok = results.filter((r) => r.status === "confirmed");
-    const title = j.status === "done" ? "Mint finished" : j.status === "failed" ? "Mint failed" : `Mint ${esc(j.status)}`;
+    const cancelled = j.status === "cancelled";
+    const title =
+      j.status === "done"
+        ? "Mint finished"
+        : j.status === "failed"
+          ? "Mint failed"
+          : cancelled
+            ? "Mint cancelled"
+            : `Mint ${esc(j.status)}`;
     const lines = [
       `<b>${title}</b> · ${esc(j.chain)} <code>${j.target.slice(0, 6)}…${j.target.slice(-4)}</code>`,
-      `${ok.length} of ${results.length} wallet(s) minted`,
-      ...results.map(
+      ...(cancelled ? [] : [`${ok.length} of ${results.length} wallet(s) minted`]),
+      ...(cancelled ? [] : results).map(
         (r) =>
           `${r.status === "confirmed" ? "✅" : "❌"} <code>${String(r.address).slice(0, 6)}…${String(r.address).slice(-4)}</code> ${esc(r.status)}${
             (r.tokenIds ?? []).length ? ` · #${(r.tokenIds as string[]).join(", #")}` : ""

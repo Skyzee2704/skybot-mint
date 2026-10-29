@@ -18,6 +18,7 @@ import { registerNftRoutes } from "./nftRoutes.js";
 import { simulateMint } from "../core/mint/simulate.js";
 import { consumePlan, mintConfirmation } from "../core/plans.js";
 import { cancelJob, enqueueMint } from "../jobs/scheduler.js";
+import { notifyJobDone } from "../bot/notify.js";
 import { listJobs, getJob, listMinted } from "../core/jobs/repo.js";
 import {
   publicUser,
@@ -42,7 +43,7 @@ import { redactString, log } from "../util/log.js";
 import { dbMode, ensureDb } from "../db/client.js";
 import { signSession, verifySession, readCookie, sessionCookie, clearSessionCookie } from "../auth/session.js";
 import { verifyPrivyAccessToken, getPrivy } from "../auth/privy.js";
-import { upsertTelegramFirstUser, attachPrivyToUser, checkRateLimit, profileFromPrivyUser } from "../users/service.js";
+import { upsertTelegramFirstUser, attachPrivyToUser, checkRateLimit, profileFromPrivyUser, isAdminIdentity } from "../users/service.js";
 import { validateInitData, publicHttpsReady } from "../bot/telegramWebApp.js";
 import { handleWebhookUpdate, setupTelegramWebhook } from "../bot/telegram.js";
 
@@ -600,9 +601,11 @@ export async function buildServer(): Promise<FastifyInstance> {
       if (!j) throw Object.assign(new Error("job not found"), { statusCode: 404 });
       return { job: j };
     });
+    // Owner-scoped; admins (allow-list identity, not the stored role) may cancel any job by id.
     a.post("/api/jobs/:id/cancel", async (req) => {
-      await cancelJob(req.user!.id, (req.params as any).id);
-      return { ok: true };
+      const job = await cancelJob({ id: req.user!.id, admin: isAdminIdentity(req.user!) }, (req.params as any).id);
+      await notifyJobDone(job.id); // never throws; Telegram heads-up like other status changes
+      return { ok: true, job };
     });
     a.get("/api/minted", async (req) => ({ minted: await listMinted(req.user!.id) }));
 

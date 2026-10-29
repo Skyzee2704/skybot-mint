@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { eq, and, desc, inArray } from "drizzle-orm";
+import { eq, and, desc, inArray, isNull } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { getDb } from "../../db/client.js";
 import { jobs, minted, spend } from "../../db/schema.js";
@@ -13,6 +13,8 @@ export interface JobRecord {
   runAt: string | null;
   /** Set once when claimed (scheduled → running). Anchors Mint Now housekeeping timeouts. */
   startedAt: string | null;
+  /** Set right before the first broadcast (cancel gate). */
+  broadcastAt: string | null;
   chain: string;
   target: string;
   strategy: string;
@@ -30,6 +32,7 @@ function rowToJob(r: typeof jobs.$inferSelect): JobRecord {
     status: r.status as JobRecord["status"],
     runAt: r.runAt,
     startedAt: r.startedAt ?? null,
+    broadcastAt: r.broadcastAt ?? null,
     chain: r.chain,
     target: r.target,
     strategy: r.strategy,
@@ -53,6 +56,7 @@ export async function insertJob(userId: string, req: MintRequest, gasHints: Reco
       status: "scheduled",
       runAt: req.runAt ?? null,
       startedAt: null,
+      broadcastAt: null,
       chain: req.chain,
       target: req.contract,
       strategy: req.strategy,
@@ -96,6 +100,50 @@ export async function patchJob(id: string, p: Partial<JobRecord>) {
   if (p.results !== undefined) set.resultsJson = JSON.stringify(p.results);
   if (p.log !== undefined) set.logJson = JSON.stringify(p.log);
   if (Object.keys(set).length) await getDb().update(jobs).set(set).where(eq(jobs.id, id));
+}
+
+/** Thrown by the runner/executor when the job was cancelled before broadcasting. */
+export class JobCancelledError extends Error {
+  constructor() {
+    super("job cancelled");
+    this.name = "JobCancelledError";
+  }
+}
+
+/** Like patchJob, but only while the job is still in `from` (never overwrites a cancel). Returns whether it applied. */
+export async function patchJobIfStatus(id: string, from: JobRecord["status"], p: Partial<JobRecord>): Promise<boolean> {
+  const set: any = {};
+  if (p.status !== undefined) set.status = p.status;
+  if (p.error !== undefined) set.error = p.error;
+  if (p.results !== undefined) set.resultsJson = JSON.stringify(p.results);
+  if (!Object.keys(set).length) return false;
+  const r = await getDb()
+    .update(jobs)
+    .set(set)
+    .where(and(eq(jobs.id, id), eq(jobs.status, from)))
+    .returning({ id: jobs.id });
+  return r.length > 0;
+}
+
+export const patchRunningJob = (id: string, p: Partial<JobRecord>) => patchJobIfStatus(id, "running", p);
+
+/** Current status only (cheap re-check for the runner). */
+export async function jobStatus(id: string): Promise<JobRecord["status"] | null> {
+  const r = await getDb().select({ status: jobs.status }).from(jobs).where(eq(jobs.id, id)).limit(1);
+  return (r[0]?.status as JobRecord["status"]) ?? null;
+}
+
+/**
+ * Cancel gate, runner side: atomically mark that broadcasting starts. Fails (false) when the job was cancelled
+ * (or is no longer running), so a cancel and a broadcast can never both win.
+ */
+export async function beginBroadcast(id: string): Promise<boolean> {
+  const r = await getDb()
+    .update(jobs)
+    .set({ broadcastAt: new Date().toISOString() })
+    .where(and(eq(jobs.id, id), eq(jobs.status, "running"), isNull(jobs.broadcastAt)))
+    .returning({ id: jobs.id });
+  return r.length > 0;
 }
 
 export async function appendJobLog(id: string, msg: string) {

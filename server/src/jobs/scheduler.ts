@@ -10,11 +10,23 @@
  *
  * Local dev: no QStash → `startLocalScheduler()` polls the DB and runs due jobs in-process.
  */
-import { and, eq, inArray, lt } from "drizzle-orm";
+import { and, eq, inArray, isNull, lt, or } from "drizzle-orm";
 import { getDb } from "../db/client.js";
 import { jobs, telegramLinks } from "../db/schema.js";
 import { env, privyServerSigningReady } from "../config/env.js";
-import { getJob, insertJob, listActiveJobs, patchJob, appendJobLog, type JobRecord } from "../core/jobs/repo.js";
+import {
+  getJob,
+  insertJob,
+  listActiveJobs,
+  patchJob,
+  patchRunningJob,
+  patchJobIfStatus,
+  appendJobLog,
+  beginBroadcast,
+  jobStatus,
+  JobCancelledError,
+  type JobRecord,
+} from "../core/jobs/repo.js";
 import type { MintRequest } from "../core/mint/types.js";
 import { broadcastAndTrack, prepareAll, trackReceipts } from "../core/mint/executor.js";
 import { notifyJobDone } from "../bot/notify.js";
@@ -82,18 +94,46 @@ export async function enqueueMint(userId: string, req: MintRequest, gasHints: Re
   return (await getJob(userId, job.id))!;
 }
 
-export async function cancelJob(userId: string, id: string) {
-  const j = await getJob(userId, id);
+/** Statuses a job can still be cancelled from (running only until the first broadcast, see beginBroadcast). */
+export const CANCELLABLE = ["scheduled", "waiting_unlock", "running"] as const;
+
+/** True when the UI / bot should offer Cancel for this job. */
+export const isCancellable = (j: Pick<JobRecord, "status" | "broadcastAt">) =>
+  (CANCELLABLE as readonly string[]).includes(j.status) && !(j.status === "running" && j.broadcastAt);
+
+export const ALREADY_SENT_MESSAGE =
+  "This mint already sent its transactions, so it can't be cancelled (they are on-chain). It will finish on its own.";
+
+/**
+ * Cancel a job. Owner-scoped; admins (actor.admin) may cancel any job. Allowed while scheduled / waiting, and while
+ * running until the runner starts broadcasting (jobs.broadcast_at). One conditional UPDATE decides the race with the
+ * runner's claim and with beginBroadcast, so a job is either cancelled with nothing sent or it sends and the cancel
+ * is refused — never both.
+ */
+export async function cancelJob(actor: string | { id: string; admin?: boolean }, id: string): Promise<JobRecord> {
+  const a = typeof actor === "string" ? { id: actor, admin: false } : actor;
+  const j = await getJob(a.admin ? null : a.id, id);
   if (!j) throw Object.assign(new Error("job not found"), { statusCode: 404 });
-  if (j.status !== "scheduled" && j.status !== "waiting_unlock")
-    throw Object.assign(new Error(`cannot cancel a ${j.status} job`), { statusCode: 409 });
-  // Conditional update: loses the race cleanly if the run route already claimed it.
+  if (j.status === "running" && j.broadcastAt) throw Object.assign(new Error(ALREADY_SENT_MESSAGE), { statusCode: 409 });
+  if (!isCancellable(j)) throw Object.assign(new Error(`cannot cancel a ${j.status} job`), { statusCode: 409 });
+  const by = a.id === j.userId ? "owner" : "admin";
   const r = await getDb()
     .update(jobs)
-    .set({ status: "cancelled" })
-    .where(and(eq(jobs.id, id), inArray(jobs.status, ["scheduled", "waiting_unlock"])))
+    .set({ status: "cancelled", error: `Cancelled by ${by}. Nothing was sent; no gas was spent.` })
+    .where(
+      and(
+        eq(jobs.id, id),
+        or(inArray(jobs.status, ["scheduled", "waiting_unlock"]), and(eq(jobs.status, "running"), isNull(jobs.broadcastAt))),
+      ),
+    )
     .returning({ id: jobs.id });
-  if (!r.length) throw Object.assign(new Error("job is already running"), { statusCode: 409 });
+  if (!r.length) {
+    const now = await getJob(null, id);
+    if (now?.broadcastAt) throw Object.assign(new Error(ALREADY_SENT_MESSAGE), { statusCode: 409 });
+    throw Object.assign(new Error(`cannot cancel a ${now?.status ?? "missing"} job`), { statusCode: 409 });
+  }
+  await appendJobLog(id, `cancelled by ${by}${j.status === "running" ? " before broadcast (signed txs discarded)" : ""}`);
+  return (await getJob(null, id))!;
 }
 
 /** Atomic claim: only one invocation can move scheduled → running. */
@@ -130,9 +170,11 @@ export async function runJob(id: string, budgetMs = env.jobMaxDurationSec * 1000
   if (!job) return { status: "skipped", reason: "already claimed" };
   const req = job.request as MintRequest & { gasHints: Record<string, string> };
   try {
+    // Cancelled between the claim and here: stop before any signing.
+    if ((await jobStatus(id)) === "cancelled") throw new JobCancelledError();
     if (!privyServerSigningReady()) {
       const { SIGNING_OFF_MESSAGE } = await import("../users/mintSigner.js");
-      await patchJob(id, { status: "failed", error: SIGNING_OFF_MESSAGE });
+      await patchRunningJob(id, { status: "failed", error: SIGNING_OFF_MESSAGE });
       await notifyJobDone(id);
       return { status: "failed", reason: "signing not configured" };
     }
@@ -142,20 +184,30 @@ export async function runJob(id: string, budgetMs = env.jobMaxDurationSec * 1000
       const diag = await mintSignerDiag().catch(() => null);
       const bad = diag && !diag.keyReadable ? KEY_UNREADABLE_MESSAGE : diag?.keyInQuorum === false ? KEY_NOT_IN_QUORUM_MESSAGE : null;
       if (bad) {
-        await patchJob(id, { status: "failed", error: bad });
+        await patchRunningJob(id, { status: "failed", error: bad });
         await notifyJobDone(id);
         return { status: "failed", reason: "signing key misconfigured" };
       }
     }
     const buildDeadline = Math.min(Math.max(fireAt + 30_000, Date.now() + 30_000), deadline - 5_000);
     const presignAt = req.strategy === "opensea_api" ? fireAt : fireAt - PRESIGN_LEAD_MS;
-    while (Date.now() < presignAt) await sleep(Math.min(200, presignAt - Date.now()));
+    // Pre-sign wait: re-check for a cancel about once a second.
+    let lastCheck = Date.now();
+    while (Date.now() < presignAt) {
+      await sleep(Math.min(200, presignAt - Date.now()));
+      if (Date.now() - lastCheck >= 1000) {
+        lastCheck = Date.now();
+        if ((await jobStatus(id)) === "cancelled") throw new JobCancelledError();
+      }
+    }
     const { prepared, results } = await prepareAll(job, req, req.gasHints ?? {}, buildDeadline);
     // Precise wait: coarse sleep, then tight spin for the last few ms.
     while (Date.now() < fireAt - 30) await sleep(Math.min(100, fireAt - 30 - Date.now()));
     while (Date.now() < fireAt) {
       /* spin ≤30ms */
     }
+    // Cancel gate: atomically claim the right to broadcast. Lost → the job was cancelled; signed txs are discarded.
+    if (!(await beginBroadcast(id))) throw new JobCancelledError();
     await appendJobLog(
       id,
       `broadcast at ${new Date().toISOString()} (target ${new Date(fireAt).toISOString()}, drift ${Date.now() - fireAt}ms)`,
@@ -167,6 +219,10 @@ export async function runJob(id: string, budgetMs = env.jobMaxDurationSec * 1000
     if (!pending) await notifyJobDone(id);
     return { status: failed ? "failed" : "done" };
   } catch (e: any) {
+    if (e instanceof JobCancelledError || (await jobStatus(id)) === "cancelled") {
+      await appendJobLog(id, "runner stopped: job was cancelled (nothing broadcast)").catch(() => {});
+      return { status: "skipped", reason: "cancelled" };
+    }
     const { jobFailureMessage } = await import("../core/mint/jobErrors.js");
     const chain = getChain(req.chain);
     const error = await jobFailureMessage(e, chain ? { chain, contract: req.contract } : undefined).catch(() =>
@@ -175,7 +231,7 @@ export async function runJob(id: string, budgetMs = env.jobMaxDurationSec * 1000
     // If some wallets already broadcast, keep running so housekeeping can finish receipts / keep tx hashes.
     const cur = await getJob(null, id);
     const pending = Boolean(cur?.results?.some((r: any) => r.status === "broadcast"));
-    await patchJob(id, {
+    await patchRunningJob(id, {
       status: pending ? "running" : "failed",
       error: pending ? `Interrupted after broadcast: ${error}` : error,
     });
@@ -203,13 +259,16 @@ export async function housekeeping() {
         out.finished++;
       } else await patchJob(j.id, { results: j.results });
     } else if (j.status === "running" && now - fireAt > 15 * 60_000) {
-      await patchJob(j.id, { status: "failed", error: "stuck in running (function timed out?)" });
-      await notifyJobDone(j.id);
-      out.stuck++;
+      if (await patchRunningJob(j.id, { status: "failed", error: "stuck in running (function timed out?)" })) {
+        await notifyJobDone(j.id);
+        out.stuck++;
+      }
     } else if (j.status === "scheduled" && now - fireAt > 5 * 60_000) {
-      await patchJob(j.id, { status: "failed", error: "missed start time (trigger not delivered)" });
-      await notifyJobDone(j.id);
-      out.missed++;
+      // Conditional: a cancel that lands between the list and here wins.
+      if (await patchJobIfStatus(j.id, "scheduled", { status: "failed", error: "missed start time (trigger not delivered)" })) {
+        await notifyJobDone(j.id);
+        out.missed++;
+      }
     }
   }
   const del = await getDb()
