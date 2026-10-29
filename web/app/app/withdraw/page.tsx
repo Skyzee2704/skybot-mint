@@ -72,7 +72,11 @@ export default function WithdrawPage() {
     setBusy("Preparing withdrawal…");
     try {
       const q = await api("/api/withdraw/quote", {
-        body: { chain, to: to.trim(), wallets: (only ?? ids).map((walletId) => ({ walletId, amount: (amounts[walletId] ?? "").trim() || "max" })) },
+        body: {
+          chain,
+          to: to.trim(),
+          wallets: (only ?? ids).map((walletId) => ({ walletId, amount: (amounts[walletId] ?? "").trim() || "max" })),
+        },
       });
       setQuote(q);
     } catch (e: any) {

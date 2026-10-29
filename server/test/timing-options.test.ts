@@ -5,11 +5,43 @@ import { applyStageChoice } from "../src/core/mint/stagePlan.js";
 
 // thesquad-nfts as resolved on 2026-10-22 (GTD 14:00Z, FCFS 15:00Z, Public 16:00Z).
 const stages: any[] = [
-  { name: "GTD", type: "signed", priceWei: "3000000000000000", start: "2026-10-22T14:00:00.000Z", end: "2026-10-22T15:00:00.000Z", maxPerWallet: 2, status: "upcoming", source: "opensea" },
-  { name: "FCFS", type: "signed", priceWei: "3000000000000000", start: "2026-10-22T15:00:00.000Z", end: "2026-10-22T16:00:00.000Z", maxPerWallet: 2, status: "upcoming", source: "opensea" },
-  { name: "Public (on-chain)", type: "public", priceWei: "3000000000000000", start: "2026-10-22T16:00:00.000Z", end: "2026-10-23T16:00:00.000Z", maxPerWallet: 3, status: "upcoming", source: "onchain" },
+  {
+    name: "GTD",
+    type: "signed",
+    priceWei: "3000000000000000",
+    start: "2026-10-22T14:00:00.000Z",
+    end: "2026-10-22T15:00:00.000Z",
+    maxPerWallet: 2,
+    status: "upcoming",
+    source: "opensea",
+  },
+  {
+    name: "FCFS",
+    type: "signed",
+    priceWei: "3000000000000000",
+    start: "2026-10-22T15:00:00.000Z",
+    end: "2026-10-22T16:00:00.000Z",
+    maxPerWallet: 2,
+    status: "upcoming",
+    source: "opensea",
+  },
+  {
+    name: "Public (on-chain)",
+    type: "public",
+    priceWei: "3000000000000000",
+    start: "2026-10-22T16:00:00.000Z",
+    end: "2026-10-23T16:00:00.000Z",
+    maxPerWallet: 3,
+    status: "upcoming",
+    source: "onchain",
+  },
 ];
-const v = (label: string, eligible: boolean | null, max: number | null = null) => ({ label, type: "signed_presale", eligible, maxPerWallet: max });
+const v = (label: string, eligible: boolean | null, max: number | null = null) => ({
+  label,
+  type: "signed_presale",
+  eligible,
+  maxPerWallet: max,
+});
 const rows: any[] = [
   { walletId: "a", label: "Main", address: "0xa", stages: [v("GTD", true, 2), v("FCFS", false), v("Public stage", true, 3)] },
   { walletId: "b", label: "wallet-2", address: "0xb", stages: [v("GTD", false), v("FCFS", false), v("Public stage", true, 3)] },
@@ -70,7 +102,18 @@ describe("timing options", () => {
 });
 
 describe("server stage choice", () => {
-  const req: any = { chain: "robinhood", contract: "0x1", strategy: "opensea_api", wallets: [{ walletId: "a", quantity: 5 }, { walletId: "b", quantity: 1 }], runAt: "2030-01-01T00:00:00.000Z", offsetMs: -200, stage: "GTD" };
+  const req: any = {
+    chain: "robinhood",
+    contract: "0x1",
+    strategy: "opensea_api",
+    wallets: [
+      { walletId: "a", quantity: 5 },
+      { walletId: "b", quantity: 1 },
+    ],
+    runAt: "2030-01-01T00:00:00.000Z",
+    offsetMs: -200,
+    stage: "GTD",
+  };
   it("uses the stage start (not the client time), eligible wallets only, stage per-wallet max", () => {
     const c = applyStageChoice(stages, rows, req, at("2026-10-22T09:22:00Z"));
     expect(c.req.runAt).toBe("2026-10-22T14:00:00.000Z");

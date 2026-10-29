@@ -1,13 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
 import { AbiCoder, Interface, id, parseEther } from "ethers";
-import {
-  decodeRevertData,
-  describeTxError,
-  explainRevert,
-  gasShortfallMessage,
-  revertDataOf,
-} from "../src/core/tx/revert.js";
+import { decodeRevertData, describeTxError, explainRevert, gasShortfallMessage, revertDataOf } from "../src/core/tx/revert.js";
 import { planWalletGas } from "../src/core/nft/transfer.js";
 
 const enc = (sig: string, types: string[] = [], vals: unknown[] = []) =>
@@ -42,7 +36,9 @@ describe("revert decoding", () => {
     expect(decodeRevertData(data).message).toContain(data.slice(0, 10));
     const sel = data.slice(0, 10);
     const fake = (async () =>
-      Response.json({ result: { function: { [sel]: [{ name: "Wrong(uint8)" }, { name: "VaultSealed(uint256)" }] } } })) as unknown as typeof fetch;
+      Response.json({
+        result: { function: { [sel]: [{ name: "Wrong(uint8)" }, { name: "VaultSealed(uint256)" }] } },
+      })) as unknown as typeof fetch;
     const d = await explainRevert(data, { fetchImpl: fake });
     expect(d).toMatchObject({ via: "signature-db", name: "VaultSealed", args: ["3"] });
   });

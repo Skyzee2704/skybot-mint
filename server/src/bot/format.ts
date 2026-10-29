@@ -78,7 +78,10 @@ export function stageHeadLine(s: Stage, sym: string): string {
 export function displayStages<T extends Stage>(stages: readonly T[]): T[] {
   const sorted = sortStages(stages);
   const rank = (s: T) => (s.status === "ended" ? 2 : isPublicStage(s) ? 1 : 0);
-  return sorted.map((s, i) => ({ s, i })).sort((a, b) => rank(a.s) - rank(b.s) || a.i - b.i).map((x) => x.s);
+  return sorted
+    .map((s, i) => ({ s, i }))
+    .sort((a, b) => rank(a.s) - rank(b.s) || a.i - b.i)
+    .map((x) => x.s);
 }
 
 export function openSeaUrl(t: Pick<ResolvedTarget, "slug" | "opensea">): string | null {

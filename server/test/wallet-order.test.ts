@@ -19,7 +19,9 @@ describe("wallet order: Main first, then oldest first", () => {
     db = client.getDb();
     schema = await import("../src/db/schema.js");
     const t = new Date().toISOString();
-    await db.insert(schema.users).values({ id: "mu", privyUserId: "did:privy:mu", role: "user", disabled: false, createdAt: t, lastSeenAt: t });
+    await db
+      .insert(schema.users)
+      .values({ id: "mu", privyUserId: "did:privy:mu", role: "user", disabled: false, createdAt: t, lastSeenAt: t });
     svc = await import("../src/users/service.js");
     const rows = [
       { id: "w-1", createdAt: "2026-10-21T14:01:00.000Z" },

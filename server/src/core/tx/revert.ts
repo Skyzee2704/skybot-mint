@@ -137,7 +137,13 @@ export function decodeRevertData(data: string | null | undefined, extraAbi?: Int
     }
     if (sel === "0x4e487b71") {
       const c = Number(AbiCoder.defaultAbiCoder().decode(["uint256"], "0x" + data.slice(10))[0]);
-      return { selector: sel, name: "Panic", args: [String(c)], message: `The contract hit an internal error (${PANIC[c] ?? `panic 0x${c.toString(16)}`}).`, via: "builtin" };
+      return {
+        selector: sel,
+        name: "Panic",
+        args: [String(c)],
+        message: `The contract hit an internal error (${PANIC[c] ?? `panic 0x${c.toString(16)}`}).`,
+        via: "builtin",
+      };
     }
   } catch {
     /* malformed */
@@ -213,10 +219,7 @@ export interface RevertCtx {
  * Full decode. `contracts` are the addresses whose verified ABI may define the error (the called contract first,
  * then e.g. its transfer validator). Network lookups only run for selectors the bundled table doesn't know.
  */
-export async function explainRevert(
-  data: string | null | undefined,
-  ctx: RevertCtx = {},
-): Promise<DecodedRevert> {
+export async function explainRevert(data: string | null | undefined, ctx: RevertCtx = {}): Promise<DecodedRevert> {
   const d = decodeRevertData(data);
   if (d.via !== "none" || !d.selector) return d;
   const contracts = typeof ctx.contracts === "function" ? await ctx.contracts().catch(() => []) : (ctx.contracts ?? []);
@@ -268,7 +271,8 @@ export function revertDataOf(e: any): string | null {
 }
 
 export const isInsufficientFunds = (e: any) =>
-  e?.code === "INSUFFICIENT_FUNDS" || /insufficient funds|insufficient balance for transfer/i.test(String(e?.shortMessage ?? e?.message ?? e));
+  e?.code === "INSUFFICIENT_FUNDS" ||
+  /insufficient funds|insufficient balance for transfer/i.test(String(e?.shortMessage ?? e?.message ?? e));
 
 /** "Not enough ETH for gas: need 0.0012 ETH, have 0.0003 ETH." */
 export function gasShortfallMessage(needWei: bigint, haveWei: bigint, symbol: string): string {
@@ -290,7 +294,8 @@ export async function describeTxError(
     const d = await explainRevert(data, ctx);
     return { message: d.message, selector: d.selector, name: d.name };
   }
-  if (isInsufficientFunds(e)) return { message: `Not enough ${ctx.chain?.nativeSymbol ?? "native token"} for gas.`, selector: null, name: null };
+  if (isInsufficientFunds(e))
+    return { message: `Not enough ${ctx.chain?.nativeSymbol ?? "native token"} for gas.`, selector: null, name: null };
   const m = String(e?.shortMessage ?? e?.reason ?? e?.message ?? e);
   if (/execution reverted/i.test(m) && !/unknown custom error/i.test(m)) {
     const reason = e?.reason ? String(e.reason) : null;

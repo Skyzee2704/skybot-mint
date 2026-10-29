@@ -66,7 +66,9 @@ describe("drop summary (/mint, plain links)", () => {
     );
     expect(stageTimeLine({ status: "active", start: null, end: null }, tz, now)).toBe("🟢 Live now");
     expect(stageTimeLine({ status: "ended", start: null, end: null }, tz, now)).toBe("Ended");
-    expect(stageTimeLine({ status: "upcoming", start: "2027-01-05T02:00:00Z", end: null }, tz, now)).toMatch(/^🕒 Tue, 5 Jan 2027 · 10:00 \(UTC\+8\)/);
+    expect(stageTimeLine({ status: "upcoming", start: "2027-01-05T02:00:00Z", end: null }, tz, now)).toMatch(
+      /^🕒 Tue, 5 Jan 2027 · 10:00 \(UTC\+8\)/,
+    );
     expect(stageTimeLine({ status: "unknown", start: null, end: null }, tz, now)).toBe("🕒 Time not announced");
     const order = displayStages([
       stage("Old", "signed", "2026-10-01T00:00:00Z", { status: "ended" }),

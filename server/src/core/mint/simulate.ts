@@ -113,7 +113,7 @@ export async function simulateMint(t: ResolvedTarget, reqIn: MintRequest, userId
   const publicStage = choice?.option.stage
     ? isPublicStage(choice.option.stage)
     : req.strategy === "seadrop_public" ||
-    (req.strategy === "opensea_api" && /public/i.test((t.opensea?.drop?.active_stage ?? t.opensea?.drop?.next_stage)?.stage_type ?? ""));
+      (req.strategy === "opensea_api" && /public/i.test((t.opensea?.drop?.active_stage ?? t.opensea?.drop?.next_stage)?.stage_type ?? ""));
   const force = new Set(req.forceWalletIds ?? []);
 
   const owned = await Promise.all(req.wallets.map((wq) => getWallet(userId, wq.walletId)));
@@ -214,10 +214,27 @@ export async function simulateMint(t: ResolvedTarget, reqIn: MintRequest, userId
       const w = skippedWallets[i];
       const q = reqIn.wallets.find((x) => x.walletId === s.walletId)?.quantity ?? 0;
       rows.push({
-        walletId: w.id, label: w.label, address: w.address, quantity: q, ok: false, expectedRevertBeforeStart: false,
-        gasEstimate: null, gasLimit: "0", valueWei: "0", maxGasCostWei: "0", totalMaxWei: "0", to: null, selector: null,
-        error: null, reason: s.reason, passesIgnoringBalance: null, balanceWei: "0", funded: false, mintable: false,
-        overridable: false, skipped: true,
+        walletId: w.id,
+        label: w.label,
+        address: w.address,
+        quantity: q,
+        ok: false,
+        expectedRevertBeforeStart: false,
+        gasEstimate: null,
+        gasLimit: "0",
+        valueWei: "0",
+        maxGasCostWei: "0",
+        totalMaxWei: "0",
+        to: null,
+        selector: null,
+        error: null,
+        reason: s.reason,
+        passesIgnoringBalance: null,
+        balanceWei: "0",
+        funded: false,
+        mintable: false,
+        overridable: false,
+        skipped: true,
       });
     });
   }

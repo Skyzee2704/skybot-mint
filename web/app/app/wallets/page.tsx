@@ -158,9 +158,7 @@ export default function WalletsPage() {
             </span>
           )}
         </h2>
-        <p className="muted">
-          Wallets are held by Privy. SkyBOT never sees your private keys. Removing a wallet never moves funds.
-        </p>
+        <p className="muted">Wallets are held by Privy. SkyBOT never sees your private keys. Removing a wallet never moves funds.</p>
         <div className="row" style={{ marginBottom: 10 }}>
           <ChainSelect value={chain} onChange={setChain} />
           <button className="ghost" disabled={balLoading} onClick={refreshBalances}>

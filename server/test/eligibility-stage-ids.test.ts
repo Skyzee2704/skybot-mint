@@ -6,9 +6,27 @@ import { groupByStage, summarizeGroup } from "../src/core/mint/stageEligibility.
 // Real shapes from production (thesquad-nfts, 2026-10-22): the drops API returns bare-hex stage ids,
 // the eligibility API returns dashed UUIDs for the same stages.
 const dropStages = [
-  { uuid: "03b94a9088894e9986c0fa32bed45bbe", stage_type: "public_sale", label: "Public stage", start_time: "2026-10-22T16:00:00Z", price: "3000000000000000" },
-  { uuid: "f7768398416f49dead4798ad09c31bc9", stage_type: "signed_presale", label: "GTD", start_time: "2026-10-22T14:00:00Z", price: "3000000000000000" },
-  { uuid: "cc267f20a2ec4b43b698b73597a838b7", stage_type: "signed_presale", label: "FCFS", start_time: "2026-10-22T15:00:00Z", price: "3000000000000000" },
+  {
+    uuid: "03b94a9088894e9986c0fa32bed45bbe",
+    stage_type: "public_sale",
+    label: "Public stage",
+    start_time: "2026-10-22T16:00:00Z",
+    price: "3000000000000000",
+  },
+  {
+    uuid: "f7768398416f49dead4798ad09c31bc9",
+    stage_type: "signed_presale",
+    label: "GTD",
+    start_time: "2026-10-22T14:00:00Z",
+    price: "3000000000000000",
+  },
+  {
+    uuid: "cc267f20a2ec4b43b698b73597a838b7",
+    stage_type: "signed_presale",
+    label: "FCFS",
+    start_time: "2026-10-22T15:00:00Z",
+    price: "3000000000000000",
+  },
 ] as any[];
 const verdicts = [
   { stage_uuid: "f7768398-416f-49de-ad47-98ad09c31bc9", is_eligible: false, price: null, max_total_mintable_by_wallet: null },

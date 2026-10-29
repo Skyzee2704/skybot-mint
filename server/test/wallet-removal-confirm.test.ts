@@ -7,7 +7,14 @@ delete process.env.PRIVY_APP_ID;
 delete process.env.PRIVY_APP_SECRET;
 delete process.env.NEXT_PUBLIC_PRIVY_APP_ID;
 
-const bal = (chain: string, wei: string | null) => ({ chain, chainName: chain, symbol: "ETH", balanceWei: wei, balance: wei, error: wei === null ? "rpc" : null });
+const bal = (chain: string, wei: string | null) => ({
+  chain,
+  chainName: chain,
+  symbol: "ETH",
+  balanceWei: wei,
+  balance: wei,
+  error: wei === null ? "rpc" : null,
+});
 const privy = { id: "abcdefghijklmnopqrstuvwx", primaryEmbedded: false, imported: false };
 
 describe("removing a wallet that still holds funds", () => {
@@ -27,7 +34,13 @@ describe("removing a wallet that still holds funds", () => {
     const empty = decideRemoval({ balances: [bal("base", "0")], mintedNfts: 0, privy, privyAvailable: true });
     expect(confirmationProblem({ ...empty, label: "x" }, {})).toBeNull();
     // Cached NFTs also require confirmation.
-    const withNfts = decideRemoval({ balances: [bal("base", "0")], mintedNfts: 0, privy, privyAvailable: true, heldNfts: { total: 2, byChain: [{ chain: "base", count: 2 }] } });
+    const withNfts = decideRemoval({
+      balances: [bal("base", "0")],
+      mintedNfts: 0,
+      privy,
+      privyAvailable: true,
+      heldNfts: { total: 2, byChain: [{ chain: "base", count: 2 }] },
+    });
     expect(withNfts.requiresConfirmation).toBe(true);
   });
 
@@ -36,10 +49,20 @@ describe("removing a wallet that still holds funds", () => {
     const created = decideRemoval({ balances: [bal("base", "5")], mintedNfts: 0, privy, privyAvailable: true });
     expect(created.warnings.join(" ")).toMatch(/unrecoverable/);
     expect(created.warnings.join(" ")).toMatch(/archives the wallet in Privy/);
-    const imported = decideRemoval({ balances: [bal("base", "5")], mintedNfts: 0, privy: { ...privy, imported: true }, privyAvailable: true });
+    const imported = decideRemoval({
+      balances: [bal("base", "5")],
+      mintedNfts: 0,
+      privy: { ...privy, imported: true },
+      privyAvailable: true,
+    });
     expect(imported.walletKind).toBe("imported");
     expect(imported.warnings.join(" ")).toMatch(/own copy of its private key/);
-    const primary = decideRemoval({ balances: [bal("base", "5")], mintedNfts: 0, privy: { ...privy, primaryEmbedded: true }, privyAvailable: true });
+    const primary = decideRemoval({
+      balances: [bal("base", "5")],
+      mintedNfts: 0,
+      privy: { ...privy, primaryEmbedded: true },
+      privyAvailable: true,
+    });
     expect(primary).toMatchObject({ deleteMode: "hide_only", walletKind: "primary", requiresConfirmation: false });
   });
 });
@@ -62,7 +85,16 @@ describe("removing the Main wallet", () => {
     ] as const;
     let n = 1;
     for (const [id, createdAt, isMain] of rows)
-      await db.insert(schema.wallets).values({ id, userId: "mu2", address: `0x${(n++).toString(16).padStart(40, "0")}`, label: id, privyWalletId: null, source: "imported", isMain, createdAt });
+      await db.insert(schema.wallets).values({
+        id,
+        userId: "mu2",
+        address: `0x${(n++).toString(16).padStart(40, "0")}`,
+        label: id,
+        privyWalletId: null,
+        source: "imported",
+        isMain,
+        createdAt,
+      });
     svc = await import("../src/users/service.js");
     rm = await import("../src/users/walletRemoval.js");
   });

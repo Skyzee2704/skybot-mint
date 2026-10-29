@@ -180,8 +180,16 @@ export async function quoteChain(chain: ChainConfig, pool: RpcPool, to: string, 
         // Re-run as eth_call when the estimate error carries no revert data, so the real reason can be decoded.
         let err = e;
         if (!revertDataOf(e) && !isInsufficientFunds(e))
-          err = await pool.read((p) => p.call({ from: i.w.address, to: i.contract, data }), "eth_call").then(() => e, (x: any) => x);
-        const d = await describeTxError(err, { chain, contracts: async () => [i.contract, ...(await transferValidatorOf(pool, i.contract))] });
+          err = await pool
+            .read((p) => p.call({ from: i.w.address, to: i.contract, data }), "eth_call")
+            .then(
+              () => e,
+              (x: any) => x,
+            );
+        const d = await describeTxError(err, {
+          chain,
+          contracts: async () => [i.contract, ...(await transferValidatorOf(pool, i.contract))],
+        });
         const why = isInsufficientFunds(err)
           ? gasShortfallMessage(150_000n * gasPrice, balances.get(i.w.address.toLowerCase()) ?? 0n, chain.nativeSymbol)
           : !d.selector && isContract && /without giving a reason/.test(d.message)
