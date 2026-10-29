@@ -159,9 +159,7 @@ export default function WalletsPage() {
           )}
         </h2>
         <p className="muted">
-          Wallets are created and held by Privy. SkyBOT never stores or accepts raw private keys. Import uses Privy in the browser; export
-          only via Privy UI. Removing a wallet never moves funds: hide it (restorable), or remove it for good, which archives it in Privy
-          (wallets that still hold funds need an explicit confirmation).
+          Wallets are held by Privy. SkyBOT never sees your private keys. Removing a wallet never moves funds.
         </p>
         <div className="row" style={{ marginBottom: 10 }}>
           <ChainSelect value={chain} onChange={setChain} />
