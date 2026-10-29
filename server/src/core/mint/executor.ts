@@ -77,7 +77,7 @@ export async function prepareAll(
       const addr = results[i].address;
       for (;;) {
         try {
-          return await buildMintTx(t, req, addr, wq.quantity);
+          return await buildMintTx(t, req, addr, wq.quantity, undefined, job.userId);
         } catch (e: any) {
           if (e instanceof MintBuildError && e.code === "NOT_ACTIVE" && Date.now() < buildDeadline) {
             await sleep(300);
