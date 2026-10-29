@@ -267,6 +267,8 @@ export async function buildServer(): Promise<FastifyInstance> {
       return {
         user: publicUser(req.user!),
         authVia: req.authVia,
+        /** Public bot username for the "Telegram Bot" nav link (fallback when the web build has none). */
+        botUsername: env.telegramBotUsername ?? null,
         serverSigning: privyServerSigningReady(),
         // Public ids only (no keys).
         siweSigner: privySiweSignerReady()

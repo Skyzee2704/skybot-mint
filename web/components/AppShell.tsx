@@ -5,7 +5,7 @@ import { getIdentityToken, usePrivy, useSigners, useWallets } from "@privy-io/re
 import { localTimeZone } from "@/lib/time";
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
 import { api } from "@/lib/api";
-import { useTelegram } from "@/lib/telegram";
+import { telegramBotUsername, useTelegram } from "@/lib/telegram";
 import { clearWalletCache } from "@/lib/wallets";
 import { clearSwrCache, prefetchMenus, setCacheScope } from "@/lib/swr";
 import { ShellNav } from "./ShellNav";
@@ -225,6 +225,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <ShellNav
         path={path}
         isAdmin={me?.user?.role === "admin"}
+        botUsername={telegramBotUsername() ?? me?.botUsername ?? null}
         account={account}
         onSignOut={
           !tgOnly && !isMiniApp

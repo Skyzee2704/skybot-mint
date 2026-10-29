@@ -37,6 +37,8 @@ type TgWebApp = {
   setHeaderColor: (c: string) => void;
   setBackgroundColor: (c: string) => void;
   setBottomBarColor?: (c: string) => void;
+  /** Opens a t.me link inside Telegram (closes nothing; Mini App only). */
+  openTelegramLink?: (url: string) => void;
 };
 
 declare global {
@@ -104,6 +106,31 @@ export function TelegramProvider({ children }: { children: ReactNode }) {
   );
 
   return <TelegramCtx.Provider value={value}>{children}</TelegramCtx.Provider>;
+}
+
+/** The SkyBOT bot's public username (build-time NEXT_PUBLIC_TELEGRAM_BOT_USERNAME), or null when not configured. */
+export function telegramBotUsername(raw: string | undefined = process.env.NEXT_PUBLIC_TELEGRAM_BOT_USERNAME): string | null {
+  const u = (raw ?? "").trim().replace(/^@/, "");
+  return /^[A-Za-z0-9_]{5,32}$/.test(u) ? u : null;
+}
+
+/**
+ * Props for an <a> that opens the bot: new tab on the web; inside the Mini App Telegram.WebApp.openTelegramLink
+ * (a plain link would open a browser view inside Telegram).
+ */
+export function telegramBotLinkProps(username: string, webApp: TgWebApp | null) {
+  const href = `https://t.me/${username}`;
+  return {
+    href,
+    target: "_blank",
+    rel: "noopener noreferrer",
+    onClick: (e: { preventDefault: () => void }) => {
+      if (webApp?.openTelegramLink) {
+        e.preventDefault();
+        webApp.openTelegramLink(href);
+      }
+    },
+  };
 }
 
 export function useTelegram() {

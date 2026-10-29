@@ -737,6 +737,18 @@ html.tg-mini-app body {
   background: var(--orange-hot);
   border-color: var(--orange-hot);
 }
+/* Telegram bot shortcut: same pill as nav links, outlined so it reads as an external action. */
+.shell-nav a.tg-bot-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-color: var(--line);
+  white-space: nowrap;
+}
+.shell-nav a.tg-bot-link:hover {
+  border-color: var(--orange);
+  color: var(--cream);
+}
 .shell-nav a:focus-visible,
 .tabbar .tab:focus-visible,
 .sheet-item:focus-visible {

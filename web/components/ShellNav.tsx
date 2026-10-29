@@ -7,12 +7,14 @@
  */
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { telegramBotLinkProps, telegramBotUsername, useTelegram } from "@/lib/telegram";
 import {
   ArrowUpRight,
   ImageIcon,
   ListChecks,
   LogOut,
   Menu,
+  Send,
   Settings,
   ShieldCheck,
   Sparkles,
@@ -42,6 +44,8 @@ export function ShellNav(props: {
   isAdmin: boolean;
   account: string;
   onSignOut?: () => void;
+  /** Override the bot username (defaults to NEXT_PUBLIC_TELEGRAM_BOT_USERNAME); the link hides when there is none. */
+  botUsername?: string | null;
 }) {
   const { path, isAdmin, account, onSignOut } = props;
   const [sheet, setSheet] = useState(false);
@@ -49,6 +53,9 @@ export function ShellNav(props: {
   const desktop = [PRIMARY[0], PRIMARY[1], PRIMARY[3], PRIMARY[2], ...secondary];
   const moreActive = secondary.some((i) => isActive(path, i.href));
   const initial = (account.replace(/^@/, "")[0] ?? "?").toUpperCase();
+  const { webApp } = useTelegram();
+  const bot = props.botUsername === undefined ? telegramBotUsername() : telegramBotUsername(props.botUsername ?? "");
+  const botLink = bot ? telegramBotLinkProps(bot, webApp) : null;
 
   // Close the sheet on navigation and on Escape.
   useEffect(() => setSheet(false), [path]);
@@ -67,11 +74,21 @@ export function ShellNav(props: {
           <img src="/logo.png" alt="" /> SkyBOT Mint
         </Link>
         {desktop.map((n) => (
-          <Link key={n.href} href={n.href} className={isActive(path, n.href) ? "active" : ""} aria-current={isActive(path, n.href) ? "page" : undefined}>
+          <Link
+            key={n.href}
+            href={n.href}
+            className={isActive(path, n.href) ? "active" : ""}
+            aria-current={isActive(path, n.href) ? "page" : undefined}
+          >
             {n.label}
           </Link>
         ))}
         <span className="spacer" />
+        {botLink && (
+          <a {...botLink} className="tg-bot-link" title={`Open @${bot} in Telegram`}>
+            <Send size={15} aria-hidden /> Telegram Bot
+          </a>
+        )}
         <span className="account-chip" title={account}>
           <span className="avatar" aria-hidden>
             {initial}
@@ -138,6 +155,15 @@ export function ShellNav(props: {
                 </Link>
               );
             })}
+            {botLink && (
+              <a {...botLink} className="sheet-item">
+                <Send size={20} aria-hidden />
+                <span>Telegram Bot</span>
+                <span className="muted small" style={{ marginLeft: "auto" }}>
+                  @{bot}
+                </span>
+              </a>
+            )}
             {onSignOut && (
               <button type="button" className="sheet-item signout" onClick={onSignOut}>
                 <LogOut size={20} aria-hidden />
