@@ -32,7 +32,7 @@ SkyBOT Mint lets a community mint NFT drops quickly and safely from many wallets
 - **Telegram Mini App**: the full dashboard opens inside Telegram with seamless login, an inline confirm step, BackButton, haptics, and theme colors.
 - **Telegram bot**: same account as the web (Privy Telegram sign-in), read-only `/check` for every wallet's eligibility, `/mint` to open a drop in the Mini App, wallets and jobs lists (with Cancel buttons), and notifications when mints finish or are cancelled. Times use your own timezone. A **Telegram Bot** link in the app navigation opens the bot.
 - **Link previews**: Open Graph and X (`summary_large_image`) tags with a static 1200×630 image, so shared links unfurl on X, Discord, Telegram, and WhatsApp.
-- **Multi-user and admin**: per-user data scoping and an admin user list. Admins can cancel any job.
+- **Multi-user and admin**: per-user data scoping and an admin user list. Admins can cancel any job and open a private Gallery (`/app/admin/gallery`) with promo clips that only admins can stream or download.
 - **Serverless-native**: a single Vercel project with Neon Postgres, QStash, and optional Upstash Redis rate limits.
 
 ## Screenshots
@@ -225,7 +225,7 @@ All private routes need a Privy JWT, or the session cookie plus CSRF header. Dat
 | Funds and NFTs    | `/api/fund/*`, `/api/withdraw/*`, `/api/nfts`, `/api/nfts/refresh`, `/api/nfts/send*`, `POST /api/tx/status`                                                        |
 | Telegram          | `POST /api/telegram/webhook`, `POST /api/telegram/session`, `POST /api/telegram/unlink`, legacy link-code routes                                                    |
 | Platform          | `GET /api/health`, `GET /api/status`, `GET /api/chains/health`, `POST /api/jobs/run` (QStash), `POST /api/cron/housekeeping` (QStash), `POST /api/webhooks/alchemy` |
-| Admin             | `GET /api/admin/users`, `POST /api/admin/users/:id/disable`, `POST /api/admin/telegram/setup`, `/api/admin/alchemy/*`                                               |
+| Admin             | `GET /api/admin/users`, `POST /api/admin/users/:id/disable`, `POST /api/admin/telegram/setup`, `/api/admin/alchemy/*`, `GET /api/admin/gallery`, `GET /api/admin/gallery/media/:name`                                               |
 
 ## Project Structure
 
@@ -240,7 +240,7 @@ All private routes need a Privy JWT, or the session cookie plus CSRF header. Dat
 │   ├── scripts/              # og-image.mjs + og-fonts (OFL subsets)
 │   └── vercel.json           # function durations
 ├── server/                   # @nft-mint-bot/server: API, mint engine, bot, scheduler
-│   ├── src/api/              # Fastify routes (auth, wallets, mint, jobs, telegram, admin)
+│   ├── src/api/              # Fastify routes (auth, wallets, mint, jobs, telegram, admin, gallery)
 │   ├── src/auth/             # Privy, session cookies, middleware
 │   ├── src/bot/              # grammY bot, notifications, initData validation
 │   ├── src/core/             # resolver, eligibility, simulation, multi-RPC send, safety
