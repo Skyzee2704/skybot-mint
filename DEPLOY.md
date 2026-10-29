@@ -73,7 +73,7 @@ Set these in **Vercel → Project → Settings → Environment Variables** for P
 | `QSTASH_TOKEN`, `QSTASH_CURRENT_SIGNING_KEY`, `QSTASH_NEXT_SIGNING_KEY` | Upstash Console → QStash                                                            |
 | `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`                    | Upstash Console → Redis → REST API (optional)                                       |
 | `TELEGRAM_BOT_TOKEN`                                                    | @BotFather → `/mybots` → API Token                                                  |
-| `TELEGRAM_BOT_USERNAME`                                                 | Your bot's username without `@`, for example `MyTradeSkyBOT`                        |
+| `TELEGRAM_BOT_USERNAME`                                                 | Your bot's username without `@`, for example `SkymintsBOT`                        |
 | `TELEGRAM_WEBHOOK_SECRET`                                               | `openssl rand -hex 24` (letters, digits, `_` and `-` only)                          |
 | `TELEGRAM_USER_ID`, `ADMIN_TELEGRAM_IDS`                                | Your numeric Telegram ID (for example from @userinfobot)                            |
 | `ADMIN_EMAILS`                                                          | Emails that receive the admin role                                                  |
@@ -112,7 +112,7 @@ In the [Privy Dashboard](https://dashboard.privy.io), for your app:
    - Do **not** enable wallet login. SkyBOT accounts are email, Google, or Telegram only.
    - Enable **Telegram** and fill in both parts of its settings:
      - **OAuth credentials (Recommended)**: the **Client ID** and **Client secret** from @BotFather (see _Telegram OAuth credentials_ below). This powers Telegram login on the website.
-     - **Bot token and name**: the bot token and the bot handle (`MyTradeSkyBOT`). Mini App sessions are signed by Telegram with the bot token, so keep these filled for seamless login inside Telegram.
+     - **Bot token and name**: the bot token and the bot handle (`SkymintsBOT`). Mini App sessions are signed by Telegram with the bot token, so keep these filled for seamless login inside Telegram.
      - Tick **Enable login directly from the Telegram app, such as with Telegram Mini Apps** (seamless login).
    - **Identity tokens** (recommended): enable _Return user data in an identity token_. SkyBOT reads linked accounts (email, Google, Telegram) from it without an extra Privy API call. Without it, SkyBOT falls back to one Privy API lookup the first time a login is seen.
 2. **Domains / Allowed origins**

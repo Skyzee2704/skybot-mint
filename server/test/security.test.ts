@@ -45,7 +45,7 @@ describe("link codes single-use + isolation", () => {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "skybot-sec-"));
   beforeAll(() => {
     process.env.DATA_DIR = dataDir;
-    process.env.TELEGRAM_BOT_USERNAME = "MyTradeSkyBOT";
+    process.env.TELEGRAM_BOT_USERNAME = "SkymintsBOT";
     delete process.env.DATABASE_URL;
   });
   afterAll(() => {

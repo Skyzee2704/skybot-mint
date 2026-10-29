@@ -112,7 +112,7 @@ describe("Postgres path (PGlite) + job idempotency", () => {
   });
 
   it("link codes are single-use on Postgres too", async () => {
-    process.env.TELEGRAM_BOT_USERNAME = "MyTradeSkyBOT";
+    process.env.TELEGRAM_BOT_USERNAME = "SkymintsBOT";
     const { createTelegramLinkCode, consumeTelegramLink } = await import("../src/users/service.js");
     const { code } = await createTelegramLinkCode("ub");
     expect((await consumeTelegramLink(code, "777", null)).telegramUserId).toBe("777");

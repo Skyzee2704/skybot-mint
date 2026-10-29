@@ -14,7 +14,7 @@ describe("per-user plans", () => {
 
 describe("telegram link code format", () => {
   it("deep link uses link_ prefix", () => {
-    const bot = "MyTradeSkyBOT";
+    const bot = "SkymintsBOT";
     const code = "abc123";
     const deep = `https://t.me/${bot}?start=link_${code}`;
     expect(deep).toMatch(/start=link_/);

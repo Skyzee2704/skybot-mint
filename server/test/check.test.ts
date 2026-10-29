@@ -12,7 +12,7 @@ describe("/check parsing", () => {
     expect(parseCheckArgs(`/check ${addr}`)).toEqual({ input: addr });
     expect(parseCheckArgs(`/check base:${addr}`)).toEqual({ input: addr, chain: "base" });
     expect(parseCheckArgs(`/check ${addr} base`)).toEqual({ input: addr, chain: "base" });
-    expect(parseCheckArgs(`/check@MyTradeSkyBOT ethereum ${addr}`)).toEqual({ input: addr, chain: "ethereum" });
+    expect(parseCheckArgs(`/check@SkymintsBOT ethereum ${addr}`)).toEqual({ input: addr, chain: "ethereum" });
     expect(parseCheckArgs("/check kabuki-killers")).toEqual({ input: "kabuki-killers" });
   });
   it("rejects empty / junk input", () => {
