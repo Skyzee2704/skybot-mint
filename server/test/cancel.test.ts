@@ -122,8 +122,8 @@ describe("job cancellation", () => {
   it("cancel during the pre-sign wait stops the runner before signing", async () => {
     const { insertJob, getJob } = await import("../src/core/jobs/repo.js");
     const { cancelJob, runJob } = await import("../src/jobs/scheduler.js");
-    // Pre-sign starts 3 s before runAt → ~3 s of waiting here.
-    const j = await insertJob("ca", req(new Date(Date.now() + 6000).toISOString()), {});
+    // Pre-sign starts 5 s before runAt → ~3 s of waiting here.
+    const j = await insertJob("ca", req(new Date(Date.now() + 8000).toISOString()), {});
     const t0 = Date.now();
     const run = runJob(j.id, 60_000);
     await new Promise((r) => setTimeout(r, 300));

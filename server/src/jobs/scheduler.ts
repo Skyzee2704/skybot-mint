@@ -28,12 +28,12 @@ import {
   type JobRecord,
 } from "../core/jobs/repo.js";
 import type { MintRequest } from "../core/mint/types.js";
-import { broadcastAndTrack, prepareAll, trackReceipts } from "../core/mint/executor.js";
+import { broadcastAndTrack, prepareAll, trackReceipts, waitUntil, type Prepared, type WalletResult } from "../core/mint/executor.js";
 import { notifyJobDone } from "../bot/notify.js";
 import { getChain } from "../config/chains.js";
 import { log } from "../util/log.js";
 
-const PRESIGN_LEAD_MS = 3000;
+const PRESIGN_LEAD_MS = 5000;
 const SAFETY_MARGIN_MS = 15_000;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -190,7 +190,10 @@ export async function runJob(id: string, budgetMs = env.jobMaxDurationSec * 1000
       }
     }
     const buildDeadline = Math.min(Math.max(fireAt + 30_000, Date.now() + 30_000), deadline - 5_000);
-    const presignAt = req.strategy === "opensea_api" ? fireAt : fireAt - PRESIGN_LEAD_MS;
+    // Every strategy starts preparing PRESIGN_LEAD_MS early (chain, target, fees, wallets, nonces). The OpenSea mint
+    // API only builds once the stage is open, so for it the build call itself is held until fireAt (see prepareAll);
+    // building it earlier could return a tx for the previous stage.
+    const presignAt = fireAt - PRESIGN_LEAD_MS;
     // Pre-sign wait: re-check for a cancel about once a second.
     let lastCheck = Date.now();
     while (Date.now() < presignAt) {
@@ -200,19 +203,47 @@ export async function runJob(id: string, budgetMs = env.jobMaxDurationSec * 1000
         if ((await jobStatus(id)) === "cancelled") throw new JobCancelledError();
       }
     }
-    const { prepared, results } = await prepareAll(job, req, req.gasHints ?? {}, buildDeadline);
-    // Precise wait: coarse sleep, then tight spin for the last few ms.
-    while (Date.now() < fireAt - 30) await sleep(Math.min(100, fireAt - 30 - Date.now()));
-    while (Date.now() < fireAt) {
-      /* spin ≤30ms */
+    // Broadcast gate (once per job): exact start, then atomically claim the right to broadcast. Lost → cancelled.
+    let sentAt = 0;
+    let gateP: Promise<void> | null = null;
+    const gate = () =>
+      (gateP ??= (async () => {
+        await waitUntil(fireAt, async () => (await jobStatus(id)) === "cancelled");
+        if (!(await beginBroadcast(id))) throw new JobCancelledError();
+        sentAt = Date.now();
+      })());
+    const sent = new Set<string>();
+    const sends: Promise<void>[] = [];
+    let firstSend = 0;
+    let lastSend = 0;
+    // Streaming: each wallet is sent the moment it is signed (after the gate), not after the slowest wallet.
+    const onSigned = async (p: Prepared, results: WalletResult[]) => {
+      await gate();
+      sent.add(p.walletId);
+      lastSend = Date.now();
+      firstSend ||= lastSend;
+      const s = broadcastAndTrack(job, req, [p], results, 0, { track: false });
+      sends.push(s);
+      await s;
+    };
+    const { prepared, results } = await prepareAll(job, req, req.gasHints ?? {}, buildDeadline, {
+      fireAt,
+      onSigned,
+      ...(req.strategy === "opensea_api" ? { buildNotBefore: fireAt } : {}),
+    });
+    await gate();
+    await Promise.all(sends);
+    const rest = prepared.filter((p) => !sent.has(p.walletId));
+    if (rest.length) {
+      lastSend = Date.now();
+      firstSend ||= lastSend;
     }
-    // Cancel gate: atomically claim the right to broadcast. Lost → the job was cancelled; signed txs are discarded.
-    if (!(await beginBroadcast(id))) throw new JobCancelledError();
+    const tracked = broadcastAndTrack(job, req, rest, results, Math.max(5_000, deadline - Date.now()));
     await appendJobLog(
       id,
-      `broadcast at ${new Date().toISOString()} (target ${new Date(fireAt).toISOString()}, drift ${Date.now() - fireAt}ms)`,
-    );
-    await broadcastAndTrack(job, req, prepared, results, Math.max(5_000, deadline - Date.now()));
+      `broadcast at ${new Date(firstSend || sentAt).toISOString()} (target ${new Date(fireAt).toISOString()}, drift ${(firstSend || sentAt) - fireAt}ms, last wallet ${(lastSend || sentAt) - fireAt}ms; streamed ${sent.size}, batch ${rest.length})`,
+    ).catch(() => {});
+    await tracked;
     const pending = results.some((r) => r.status === "broadcast");
     const failed = !pending && results.every((r) => ["failed", "reverted", "timeout"].includes(r.status));
     await patchJob(id, { status: pending ? "running" : failed ? "failed" : "done", results });

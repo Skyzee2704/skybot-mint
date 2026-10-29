@@ -28,10 +28,7 @@ import { log, redactString } from "../util/log.js";
 
 import { esc, formatCheck, parseCheckArgs } from "./check.js";
 import { formatDropSummary, openSeaUrl } from "./format.js";
-import { formatDateTime } from "../util/time.js";
 export { esc };
-
-const tzFooter = (tz: string | null | undefined) => (tz ? "" : "\n<i>Times in UTC. Open SkyBOT once to see your own timezone.</i>");
 
 /** Back-compat alias: the compact drop summary used by /mint and plain links. */
 export function summarize(t: Awaited<ReturnType<typeof resolveTarget>>, timeZone: string | null = null): string {
@@ -209,7 +206,7 @@ export function createBot(token: string, opts: ConstructorParameters<typeof Bot>
     "/check &lt;link|address&gt; — stages + eligibility of all your wallets (read-only)",
     "/mint &lt;link|address&gt; — drop summary, then mint in the dashboard",
     "/wallets — your wallets",
-    "/jobs — recent and scheduled mints (tap Cancel under a mint that hasn't sent yet)",
+    "/jobs — active and past mints (tap Cancel under a mint that hasn't sent yet)",
     "/withdraw — open the Withdraw page",
     "",
     `Dashboard: ${esc(dashUrl("/"))}`,
@@ -291,28 +288,35 @@ export function createBot(token: string, opts: ConstructorParameters<typeof Bot>
       return ctx.reply("Open SkyBOT first: tap Open Dashboard or the menu button to sign in with Telegram.", {
         reply_markup: openDashboardKeyboard(),
       });
+    const { JOBS_MENU_TEXT, jobsMenuKeyboard } = await import("./jobsList.js");
+    await ctx.reply(JOBS_MENU_TEXT, { parse_mode: "HTML", reply_markup: jobsMenuKeyboard() });
+  });
+
+  // /jobs menu + paged lists: edit the same message in place. Only the signed-in owner's jobs are listed.
+  bot.callbackQuery(/^jl:/, async (ctx) => {
+    const data = ctx.callbackQuery.data;
+    if (data === "jl:noop") return void (await ctx.answerCallbackQuery().catch(() => {}));
+    const u = await linkedUser(ctx);
+    if (!u) {
+      await ctx.answerCallbackQuery({ text: "Open SkyBOT first to sign in with Telegram.", show_alert: true }).catch(() => {});
+      return;
+    }
+    const { parseJobsCallback, renderJobsPage, JOBS_MENU_TEXT, jobsMenuKeyboard } = await import("./jobsList.js");
+    const req = parseJobsCallback(data);
+    await ctx.answerCallbackQuery().catch(() => {});
+    if (!req) return;
+    // "message is not modified" (same page tapped twice) is harmless.
+    if (req === "menu") {
+      await ctx.editMessageText(JOBS_MENU_TEXT, { parse_mode: "HTML", reply_markup: jobsMenuKeyboard() }).catch(() => {});
+      return;
+    }
     const { listJobs } = await import("../core/jobs/repo.js");
     const { isCancellable } = await import("../jobs/scheduler.js");
-    const js = await listJobs(u.id, 10);
-    if (!js.length) return ctx.reply("No jobs yet.");
-    // One Cancel button per job that can still be stopped (nothing broadcast yet); numbered like the list.
-    const kb = new InlineKeyboard();
-    js.forEach((j, i) => {
-      if (isCancellable(j)) kb.text(`✖ Cancel #${i + 1}`, `jc:${j.id}`).row();
-    });
-    await ctx.reply(
-      js
-        .map(
-          (j, i) =>
-            `${i + 1}. ${esc(jobStatusLabel(j.status))} · ${esc(j.chain)} · <code>${j.target.slice(0, 6)}…${j.target.slice(-4)}</code>\n   ${
-              j.runAt
-                ? `${new Date(j.runAt).getTime() > Date.now() ? "runs" : "ran"} ${formatDateTime(j.runAt, { timeZone: u.timezone ?? null })}`
-                : `created ${formatDateTime(j.createdAt, { timeZone: u.timezone ?? null })}`
-            }`,
-        )
-        .join("\n") + tzFooter(u.timezone),
-      { parse_mode: "HTML", ...(kb.inline_keyboard.length ? { reply_markup: kb } : {}) },
-    );
+    const js = await listJobs(u.id, 100);
+    const r = renderJobsPage(js, req.tab, req.page, { timeZone: u.timezone ?? null, cancellable: isCancellable });
+    await ctx
+      .editMessageText(r.text, { parse_mode: "HTML", reply_markup: r.keyboard, link_preview_options: { is_disabled: true } })
+      .catch(() => {});
   });
 
   // [Cancel #n] under /jobs → ask to confirm; [Yes, cancel] → cancel (owner only, same rules as the dashboard).

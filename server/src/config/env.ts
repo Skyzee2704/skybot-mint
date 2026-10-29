@@ -158,7 +158,7 @@ export const env = {
   },
   /** How early QStash fires before runAt (function then pre-signs and waits precisely). */
   get jobLeadMs() {
-    return num("JOB_LEAD_MS", 20_000);
+    return num("JOB_LEAD_MS", 60_000);
   },
   /** Must match the run route's maxDuration (Hobby 300, Pro up to 800). */
   get jobMaxDurationSec() {
