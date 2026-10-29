@@ -45,7 +45,7 @@ git push -u origin main
 3. Framework preset: **Next.js**. Install and build commands come from `web/vercel.json` (`cd .. && npm ci`, then `npm run build`).
 4. Keep **Fluid compute** enabled (the default).
 5. Add the environment variables from step 5, then click **Deploy**.
-6. After the first deploy, note your production URL, for example `https://skybot-mint.vercel.app`. Set `PUBLIC_URL` to it and **redeploy**.
+6. After the first deploy, note your production URL, for example `https://<project>.vercel.app` (ours: `https://skybotmint.web.id`, a custom domain; use the host that serves 200 directly, not the one that redirects). Set `PUBLIC_URL` to it and **redeploy**.
 
 ### Function durations
 
@@ -100,7 +100,7 @@ Run this once per production URL. It sets the Telegram webhook (with `secret_tok
 **Option B: script, from your machine:**
 
 ```bash
-PUBLIC_URL=https://skybot-mint.vercel.app \
+PUBLIC_URL=https://skybotmint.web.id \
 TELEGRAM_BOT_TOKEN=… TELEGRAM_WEBHOOK_SECRET=… \
 QSTASH_TOKEN=… \
 npm run telegram:setup
@@ -148,7 +148,7 @@ In [@BotFather](https://t.me/BotFather):
       - `https://auth.privy.io/api/v1/oauth/callback` (Privy's OAuth callback, required)
       - `https://<your-app>.vercel.app` (the website origin where the login button appears)
    3. Copy the **Client ID** and **Client Secret** shown in the same section and paste them into Privy → Login methods → Telegram → _OAuth credentials_. The Client Secret is **not** the bot token.
-2. `/setdomain`: select your bot and enter your Vercel host, for example `skybot-mint.vercel.app`. This is still needed by the legacy Login Widget flow that Privy uses with _Bot token and name_.
+2. `/setdomain`: select your bot and enter your Vercel host, for example `skybotmint.web.id` (our custom domain). This is still needed by the legacy Login Widget flow that Privy uses with _Bot token and name_.
 3. `/setuserpic`: upload `assets/logo-512.png`. Telegram shows the bot's name and picture on the login consent screen.
 4. Optional: `/setmenubutton` sets the menu button manually to `PUBLIC_URL` with the text **Open Dashboard**. Step 6 already does this through the API.
 5. Optional: `/newapp` registers a named Mini App (t.me/<bot>/<app>) that points to `PUBLIC_URL`.
@@ -188,7 +188,7 @@ Members cancel from **Jobs** (with a confirm dialog) or from the Telegram `/jobs
 
 ## Link Preview (Open Graph)
 
-`web/app/layout.tsx` sets Open Graph and X `summary_large_image` metadata with absolute URLs (`metadataBase` = `NEXT_PUBLIC_SITE_URL` → `PUBLIC_URL` → Vercel production URL → `https://skybot-mint.vercel.app`, https only). The image is the static file `web/public/og.png` (1200×630, about 50 KB). No middleware guards it, so crawlers can fetch it.
+`web/app/layout.tsx` sets Open Graph and X `summary_large_image` metadata with absolute URLs (`metadataBase` = `NEXT_PUBLIC_SITE_URL` → `PUBLIC_URL` → Vercel production URL → `https://skybotmint.web.id`, https only). The image is the static file `web/public/og.png` (1200×630, about 50 KB). No middleware guards it, so crawlers can fetch it.
 
 - **Regenerate** after changing the copy or logo in `web/scripts/og-image.mjs`: `npm run og --workspace web`. It renders with `next/og` and the bundled OFL fonts in `web/scripts/og-fonts`.
 - **Replace** with your own design: overwrite `web/public/og.png` (1200×630 PNG, keep it under about 500 KB for WhatsApp).

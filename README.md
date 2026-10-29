@@ -184,7 +184,7 @@ All variables are listed in [`.env.example`](.env.example). The main ones:
 | `VAULT_ADDRESS`                                                                   |    —     | Default withdraw destination                                                                   |
 | `NEXT_PUBLIC_SOURCE_URL`                                                          |    —     | Repository URL for the footer "Source" link (AGPL)                                             |
 | `NEXT_PUBLIC_TELEGRAM_BOT_USERNAME`                                               |    —     | Build-time bot username for the nav link (defaults to `TELEGRAM_BOT_USERNAME`)                 |
-| `NEXT_PUBLIC_SITE_URL`                                                            |    —     | Origin for link-preview URLs (defaults to `PUBLIC_URL`, then `https://skybot-mint.vercel.app`) |
+| `NEXT_PUBLIC_SITE_URL`                                                            |    —     | Origin for link-preview URLs (defaults to `PUBLIC_URL`, then `https://skybotmint.web.id`) |
 
 ## Security Model
 

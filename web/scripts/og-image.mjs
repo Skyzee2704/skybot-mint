@@ -116,7 +116,7 @@ const tree = h(
     h(
       "div",
       { display: "flex", alignItems: "center" },
-      h("div", {}, "skybot-mint.vercel.app"),
+      h("div", {}, "skybotmint.web.id"),
       h("div", { margin: "0 14px", color: ORANGE }, "•"),
       h("div", { color: ORANGE }, "@SkymintsBOT"),
     ),
