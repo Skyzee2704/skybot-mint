@@ -125,7 +125,7 @@ const DDL = [
     name TEXT NOT NULL, created_at TEXT NOT NULL, UNIQUE(user_id, name))`,
   `CREATE TABLE IF NOT EXISTS jobs (
     id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    created_at TEXT NOT NULL, status TEXT NOT NULL, run_at TEXT, chain TEXT NOT NULL,
+    created_at TEXT NOT NULL, status TEXT NOT NULL, run_at TEXT, started_at TEXT, chain TEXT NOT NULL,
     target TEXT NOT NULL, strategy TEXT NOT NULL, request_json TEXT NOT NULL,
     results_json TEXT NOT NULL DEFAULT '[]', error TEXT, log_json TEXT NOT NULL DEFAULT '[]')`,
   `CREATE INDEX IF NOT EXISTS jobs_user_idx ON jobs(user_id)`,
@@ -194,12 +194,15 @@ DROP TABLE telegram_links; ALTER TABLE telegram_links_v2 RENAME TO telegram_link
     if (!ucols.rows.some((r: any) => r.name === "timezone")) await c.execute("ALTER TABLE users ADD COLUMN timezone TEXT");
     const wcols = await c.execute("PRAGMA table_info(wallets)");
     if (!wcols.rows.some((r: any) => r.name === "removed_at")) await c.execute("ALTER TABLE wallets ADD COLUMN removed_at TEXT");
+    const jcols = await c.execute("PRAGMA table_info(jobs)");
+    if (!jcols.rows.some((r: any) => r.name === "started_at")) await c.execute("ALTER TABLE jobs ADD COLUMN started_at TEXT");
     c.close();
   } else {
     for (const s of DDL) await exec!(s);
     await exec!(`ALTER TABLE telegram_links ADD COLUMN IF NOT EXISTS meta_json TEXT NOT NULL DEFAULT '{}'`);
     await exec!(`ALTER TABLE users ADD COLUMN IF NOT EXISTS timezone TEXT`);
     await exec!(`ALTER TABLE wallets ADD COLUMN IF NOT EXISTS removed_at TEXT`);
+    await exec!(`ALTER TABLE jobs ADD COLUMN IF NOT EXISTS started_at TEXT`);
   }
 }
 

@@ -29,8 +29,11 @@ export function qstashEnabled() {
   return Boolean(env.qstashToken);
 }
 
-const runAtMs = (j: Pick<JobRecord, "runAt" | "request">) =>
-  (j.runAt ? new Date(j.runAt).getTime() : Date.now()) + ((j.request as MintRequest)?.offsetMs ?? 0);
+/** Scheduled fire time. Mint Now (null runAt) uses frozen startedAt once claimed; before claim falls back to now. */
+const runAtMs = (j: Pick<JobRecord, "runAt" | "startedAt" | "request">) => {
+  const base = j.runAt ? new Date(j.runAt).getTime() : j.startedAt ? new Date(j.startedAt).getTime() : Date.now();
+  return base + ((j.request as MintRequest)?.offsetMs ?? 0);
+};
 
 /** Publish (or re-publish) the QStash trigger for a job. Idempotent via deduplicationId. */
 export async function publishJob(job: JobRecord, attempt = 0) {
@@ -95,9 +98,10 @@ export async function cancelJob(userId: string, id: string) {
 
 /** Atomic claim: only one invocation can move scheduled → running. */
 export async function claimJob(id: string): Promise<JobRecord | null> {
+  const startedAt = new Date().toISOString();
   const r = await getDb()
     .update(jobs)
-    .set({ status: "running" })
+    .set({ status: "running", startedAt })
     .where(and(eq(jobs.id, id), eq(jobs.status, "scheduled")))
     .returning({ id: jobs.id });
   return r.length ? getJob(null, id) : null;
@@ -168,10 +172,16 @@ export async function runJob(id: string, budgetMs = env.jobMaxDurationSec * 1000
     const error = await jobFailureMessage(e, chain ? { chain, contract: req.contract } : undefined).catch(() =>
       String(e?.message ?? e).slice(0, 400),
     );
-    await patchJob(id, { status: "failed", error });
+    // If some wallets already broadcast, keep running so housekeeping can finish receipts / keep tx hashes.
+    const cur = await getJob(null, id);
+    const pending = Boolean(cur?.results?.some((r: any) => r.status === "broadcast"));
+    await patchJob(id, {
+      status: pending ? "running" : "failed",
+      error: pending ? `Interrupted after broadcast: ${error}` : error,
+    });
     log.error(`job ${id} failed`, e);
-    await notifyJobDone(id);
-    return { status: "failed", reason: String(e?.message ?? e).slice(0, 200) };
+    if (!pending) await notifyJobDone(id);
+    return { status: pending ? "done" : "failed", reason: String(e?.message ?? e).slice(0, 200) };
   }
 }
 

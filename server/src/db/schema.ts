@@ -67,6 +67,8 @@ export const jobs = sqliteTable(
     createdAt: text("created_at").notNull(),
     status: text("status").notNull(),
     runAt: text("run_at"),
+    /** Frozen when the job is claimed (scheduled → running). Used for Mint Now timeout/receipt finalization. */
+    startedAt: text("started_at"),
     chain: text("chain").notNull(),
     target: text("target").notNull(),
     strategy: text("strategy").notNull(),

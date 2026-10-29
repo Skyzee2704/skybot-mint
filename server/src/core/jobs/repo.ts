@@ -11,6 +11,8 @@ export interface JobRecord {
   createdAt: string;
   status: "scheduled" | "running" | "done" | "failed" | "cancelled" | "waiting_unlock";
   runAt: string | null;
+  /** Set once when claimed (scheduled → running). Anchors Mint Now housekeeping timeouts. */
+  startedAt: string | null;
   chain: string;
   target: string;
   strategy: string;
@@ -27,6 +29,7 @@ function rowToJob(r: typeof jobs.$inferSelect): JobRecord {
     createdAt: r.createdAt,
     status: r.status as JobRecord["status"],
     runAt: r.runAt,
+    startedAt: r.startedAt ?? null,
     chain: r.chain,
     target: r.target,
     strategy: r.strategy,
@@ -49,6 +52,7 @@ export async function insertJob(userId: string, req: MintRequest, gasHints: Reco
       createdAt,
       status: "scheduled",
       runAt: req.runAt ?? null,
+      startedAt: null,
       chain: req.chain,
       target: req.contract,
       strategy: req.strategy,
@@ -87,6 +91,7 @@ export async function patchJob(id: string, p: Partial<JobRecord>) {
   const set: any = {};
   if (p.status !== undefined) set.status = p.status;
   if (p.runAt !== undefined) set.runAt = p.runAt;
+  if (p.startedAt !== undefined) set.startedAt = p.startedAt;
   if (p.error !== undefined) set.error = p.error;
   if (p.results !== undefined) set.resultsJson = JSON.stringify(p.results);
   if (p.log !== undefined) set.logJson = JSON.stringify(p.log);

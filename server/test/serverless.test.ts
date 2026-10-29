@@ -111,6 +111,32 @@ describe("Postgres path (PGlite) + job idempotency", () => {
     expect((await getJob(null, j.id))!.status).toBe("failed");
   });
 
+  it("Mint Now (null runAt): claim freezes startedAt so housekeeping can time out stuck running jobs", async () => {
+    const { insertJob, getJob, patchJob } = await import("../src/core/jobs/repo.js");
+    const { claimJob, housekeeping } = await import("../src/jobs/scheduler.js");
+    const j = await insertJob(
+      "ua",
+      {
+        chain: "base",
+        contract: "0x" + "1".repeat(40),
+        strategy: "seadrop_public",
+        wallets: [{ walletId: "w", quantity: 1 }],
+        runAt: null,
+      } as any,
+      {},
+    );
+    expect(j.startedAt).toBeNull();
+    const claimed = await claimJob(j.id);
+    expect(claimed?.status).toBe("running");
+    expect(claimed?.startedAt).toBeTruthy();
+    // Pretend the job has been running for 20 minutes with no progress.
+    await patchJob(j.id, { startedAt: new Date(Date.now() - 20 * 60_000).toISOString() });
+    const r = await housekeeping();
+    expect(r.stuck).toBeGreaterThanOrEqual(1);
+    expect((await getJob(null, j.id))!.status).toBe("failed");
+    expect((await getJob(null, j.id))!.error).toMatch(/stuck in running/i);
+  });
+
   it("link codes are single-use on Postgres too", async () => {
     process.env.TELEGRAM_BOT_USERNAME = "SkymintsBOT";
     const { createTelegramLinkCode, consumeTelegramLink } = await import("../src/users/service.js");
