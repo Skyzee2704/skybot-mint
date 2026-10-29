@@ -12,6 +12,11 @@ import { ShellNav } from "./ShellNav";
 
 /** How long the Mini App waits for Privy's seamless Telegram login before using the verified-initData fallback. */
 const SEAMLESS_WAIT_MS = 2500;
+/** Backoff for /api/me while Privy's access token isn't ready yet (or the first call got a 401). */
+const ME_RETRY_MS = [500, 1000, 2000];
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+/** Fired by useApi on any successful call so the shell can drop a stale auth error. */
+const API_OK_EVENT = "skybot:api-ok";
 
 type ShellState = {
   /** Signed in via the SkyBOT Telegram session fallback (no Privy session in this browser). */
@@ -50,6 +55,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [me, setMe] = useState<any>(null);
   const [tgOnly, setTgOnly] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [meRetry, setMeRetry] = useState(0);
   const path = usePathname();
   const router = useRouter();
   const { addSigners } = useSigners();
@@ -156,9 +162,28 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     const run = async () => {
       try {
         if (authenticated) {
-          const token = await getAccessToken();
-          const idToken = await idTokenOrNull();
-          const r = await api("/api/me", { token, idToken });
+          // Privy can report `authenticated` before the access token is ready (seen in the Mini App on a fresh
+          // domain): wait/retry briefly, and always fall back to Telegram initData when there's no token.
+          let r: any;
+          let token: string | null = null;
+          let idToken: string | null = null;
+          for (let attempt = 0; ; attempt++) {
+            token = await getAccessToken().catch(() => null);
+            if (!token && attempt < ME_RETRY_MS.length && !(isMiniApp && initData)) {
+              await sleep(ME_RETRY_MS[attempt]);
+              if (cancelled) return;
+              continue;
+            }
+            idToken = token ? await idTokenOrNull() : null;
+            try {
+              r = await api("/api/me", { token, idToken, telegramInitData: token ? null : initData });
+              break;
+            } catch (e: any) {
+              if (attempt >= ME_RETRY_MS.length || !/missing authorization|unauthori|401/i.test(String(e?.message ?? ""))) throw e;
+              await sleep(ME_RETRY_MS[attempt]);
+              if (cancelled) return;
+            }
+          }
           if (cancelled) return;
           setMe(r);
           setTgOnly(false);
@@ -187,7 +212,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [ready, authenticated, isMiniApp, initData]); // eslint-disable-line
+  }, [ready, authenticated, isMiniApp, initData, meRetry]); // eslint-disable-line
+
+  // A later successful request means auth works now: drop the stale error and refetch /api/me if it failed.
+  useEffect(() => {
+    if (!err) return;
+    const onOk = () => {
+      setErr(null);
+      if (!me) setMeRetry((n) => n + 1);
+    };
+    window.addEventListener(API_OK_EVENT, onOk);
+    return () => window.removeEventListener(API_OK_EVENT, onOk);
+  }, [err, me]);
 
   useEffect(() => {
     if (!webApp || !isMiniApp) return;
@@ -260,7 +296,9 @@ export function useApi() {
       const token = authenticated ? await getAccessToken() : null;
       const idToken = token ? await idTokenOrNull() : null;
       // Prefer Privy token; otherwise the httpOnly session cookie carries auth (initData header only as last resort).
-      return api<T>(path, { ...opts, token, idToken, telegramInitData: token ? null : initData });
+      const r = await api<T>(path, { ...opts, token, idToken, telegramInitData: token ? null : initData });
+      if (typeof window !== "undefined") window.dispatchEvent(new Event(API_OK_EVENT));
+      return r;
     },
     [authenticated, getAccessToken, initData],
   );
