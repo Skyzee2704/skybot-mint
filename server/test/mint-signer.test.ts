@@ -139,7 +139,7 @@ describe("mint signer readiness", () => {
     const r = await mintSignerStatus({ id: "u9", privyUserId: "did:privy:x" });
     expect(r.missingAddresses).toEqual(["0x" + "a".repeat(40)]);
     privyWallets.pw10aaaaaaaaaaaaaaaaaaa.additional_signers.push({ signer_id: "mintquorum" });
-    expect((await mintSignerStatus({ id: "u9", privyUserId: "did:privy:x" })).attachedAddresses).toHaveLength(1);
+    expect((await mintSignerStatus({ id: "u9", privyUserId: "did:privy:x" }, { force: true })).attachedAddresses).toHaveLength(1);
   });
 
   it("several wallets missing: one message listing them", async () => {

@@ -86,11 +86,11 @@ async function siweSignerStatus(user: { id: string; privyUserId: string | null }
 }
 
 /** Mint signer status of a member's wallets (time-boxed, never fails the request). */
-async function mintSignerStatusTimed(user: { id: string; privyUserId: string | null }) {
+async function mintSignerStatusTimed(user: { id: string; privyUserId: string | null }, opts: { force?: boolean } = {}) {
   const { mintSignerReady, mintSignerStatus } = await import("../users/mintSigner.js");
   if (!mintSignerReady()) return null;
   return (await Promise.race([
-    mintSignerStatus(user).catch((e) => {
+    mintSignerStatus(user, opts).catch((e) => {
       log.warn("mint signer status", redactString(String(e?.message ?? e)).slice(0, 160));
       return null;
     }),
@@ -289,7 +289,7 @@ export async function buildServer(): Promise<FastifyInstance> {
       };
     });
     a.post("/api/wallets/mint-signer/verify", async (req) => {
-      const st = await mintSignerStatusTimed(req.user!);
+      const st = await mintSignerStatusTimed(req.user!, { force: true });
       if (st) log.info("mint signer verify", { attached: st.attachedAddresses.length, missing: st.missingAddresses.length });
       return { attached: st?.attachedAddresses ?? [], missing: st?.missingAddresses ?? [], upgrade: st?.upgradeAddresses ?? [] };
     });

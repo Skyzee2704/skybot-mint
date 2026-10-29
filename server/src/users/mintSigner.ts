@@ -61,6 +61,8 @@ export function walletHasMintSigner(w: any, quorum = env.privyAuthKeyQuorumId): 
 const iso = () => new Date().toISOString();
 /** Cached "attached" rows only count for the quorum + policy they were checked against. */
 const cacheTag = () => `q:${env.privyAuthKeyQuorumId ?? ""}|p:${env.privyMintPolicyId ?? ""}`;
+/** Reuse a recent non-attached Privy check (missing / upgrade) without hitting Privy again. */
+export const NEGATIVE_CACHE_MS = 60_000;
 async function mark(walletId: string, attached: boolean, note: string | null) {
   const at = iso();
   if (attached) note = cacheTag();
@@ -102,7 +104,10 @@ export interface MintSignerReport {
 }
 
 /** Status of every active wallet of a member (for the app's silent attach). Attached wallets are not re-read. */
-export async function mintSignerStatus(user: { id: string; privyUserId: string | null }): Promise<MintSignerReport> {
+export async function mintSignerStatus(
+  user: { id: string; privyUserId: string | null },
+  opts: { force?: boolean } = {},
+): Promise<MintSignerReport> {
   const out: MintSignerReport = { attachedAddresses: [], missingAddresses: [], upgradeAddresses: [] };
   if (!mintSignerReady() || !privyConfigured() || !user.privyUserId || user.privyUserId.startsWith("tg:")) return out;
   const db = getDb();
@@ -116,6 +121,12 @@ export async function mintSignerStatus(user: { id: string; privyUserId: string |
     const k = known.get(w.id);
     if (k?.attachedAt && k.note === cacheTag()) {
       out.attachedAddresses.push(w.address);
+      continue;
+    }
+    // Short negative cache: missing / policy_upgrade / no_privy within 60s skip a Privy round-trip.
+    // Verify passes force:true so a just-added signer is re-read immediately.
+    if (!opts.force && k?.checkedAt && !k.attachedAt && Date.now() - new Date(k.checkedAt).getTime() < NEGATIVE_CACHE_MS) {
+      (k.note === "policy_upgrade" ? out.upgradeAddresses : out.missingAddresses).push(w.address);
       continue;
     }
     let row = w as WalletLite;
@@ -142,8 +153,17 @@ export async function mintSigningProblem(
   if (diag && !diag.keyReadable) return { message: KEY_UNREADABLE_MESSAGE, missing: [] };
   if (diag && diag.keyInQuorum === false) return { message: KEY_NOT_IN_QUORUM_MESSAGE, missing: [] };
   if (!mintSignerReady()) return null;
+  const CHECK_MS = 8_000;
+  const deadline = Date.now() + CHECK_MS;
   const missing: string[] = [];
-  for (const w of ws) if ((await checkMintSigner(w, privyUserId)) === "missing") missing.push(w.address);
+  // Overall timeout across wallets: if Privy is too slow, don't block job create (signing will error clearly later).
+  for (const w of ws) {
+    if (Date.now() > deadline) return null;
+    const remaining = Math.max(1, deadline - Date.now());
+    const st = await Promise.race([checkMintSigner(w, privyUserId), new Promise<null>((r) => setTimeout(() => r(null), remaining))]);
+    if (st === null) return null;
+    if (st === "missing") missing.push(w.address);
+  }
   if (!missing.length) return null;
   return {
     missing,
@@ -188,7 +208,8 @@ export interface MintSignerDiag {
 export async function mintSignerDiag(): Promise<MintSignerDiag | null> {
   if (!privyServerSigningReady()) return null;
   const ck = `${env.privyAuthPrivateKey}|${env.privyAuthKeyQuorumId}`;
-  if (diagCache && diagCache.k === ck && Date.now() - diagCache.at < 600_000) return diagCache.v;
+  // Never reuse a cached "couldn't ask Privy" (keyInQuorum null) for the long TTL.
+  if (diagCache && diagCache.k === ck && diagCache.v.keyInQuorum !== null && Date.now() - diagCache.at < 600_000) return diagCache.v;
   const { authKeyShape, authPublicKey, samePublicKey } = await import("../auth/authKey.js");
   const shape = authKeyShape(env.privyAuthPrivateKey);
   const pub = shape === "ok" ? authPublicKey(env.privyAuthPrivateKey) : null;
@@ -207,6 +228,7 @@ export async function mintSignerDiag(): Promise<MintSignerDiag | null> {
       log.warn("mint signer diag", redactString(String(e?.message ?? e)).slice(0, 160));
     }
   }
-  diagCache = { at: Date.now(), k: ck, v };
+  // Cache definitive results only (readable/not, or quorum membership known). Skip null/errored quorum checks.
+  if (!v.keyReadable || !v.quorumConfigured || v.keyInQuorum !== null) diagCache = { at: Date.now(), k: ck, v };
   return v;
 }
