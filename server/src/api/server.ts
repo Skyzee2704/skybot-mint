@@ -580,7 +580,7 @@ export async function buildServer(): Promise<FastifyInstance> {
           confirmPhrase: z.string().optional(),
         })
         .parse(req.body);
-      const plan = consumePlan<{ request: MintRequest; gasHints: Record<string, string> }>(
+      const plan = await consumePlan<{ request: MintRequest; gasHints: Record<string, string> }>(
         req.user!.id,
         b.planId,
         "mint",

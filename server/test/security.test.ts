@@ -84,8 +84,8 @@ describe("link codes single-use + isolation", () => {
 
   it("plans cannot be consumed cross-user", async () => {
     const { createPlan, consumePlan } = await import("../src/core/plans.js");
-    const p = createPlan("alice", "mint", { n: 1 }, "MINT 1");
-    expect(() => consumePlan("eve", p.id, "mint", "MINT 1")).toThrow(/another user/);
+    const p = await createPlan("alice", "mint", { n: 1 }, "MINT 1");
+    await expect(consumePlan("eve", p.id, "mint", "MINT 1")).rejects.toThrow(/another user/);
   });
 });
 

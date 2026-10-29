@@ -258,7 +258,7 @@ export async function simulateMint(t: ResolvedTarget, reqIn: MintRequest, userId
   const plan =
     blockers.length || okRows.length === 0
       ? null
-      : createPlan(
+      : await createPlan(
           userId,
           "mint",
           {

@@ -279,3 +279,18 @@ export const nftRescanQueue = sqliteTable("nft_rescan_queue", {
   dueAt: integer("due_at").notNull(), // ms
   pass: integer("pass").notNull().default(1),
 });
+
+/** Short-lived mint/fund/sweep confirm plans (simulate → execute). Shared across serverless instances. */
+export const plans = sqliteTable(
+  "plans",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    kind: text("kind").notNull(),
+    createdAt: text("created_at").notNull(),
+    expiresAt: text("expires_at").notNull(),
+    dataJson: text("data_json").notNull(),
+    confirmPhrase: text("confirm_phrase").notNull(),
+  },
+  (t) => [index("plans_user_idx").on(t.userId), index("plans_expires_idx").on(t.expiresAt)],
+);
