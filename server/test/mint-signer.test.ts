@@ -92,6 +92,56 @@ describe("mint signer readiness", () => {
     expect(await mintSignerDiag()).toEqual({ keyReadable: true, keyShape: "ok", quorumConfigured: true, keyInQuorum: true });
   });
 
+  it("quorum change: an earlier mint quorum doesn't count; policy is optional; a cached attach is tied to the quorum", async () => {
+    const { mintSignerOnWallet, mintSigningProblem } = await import("../src/users/mintSigner.js");
+    const old = { owner_id: "user-owner", additional_signers: [{ signer_id: "siwequorum" }, { signer_id: "oldmintquorum" }] };
+    expect(mintSignerOnWallet(old)).toBe("missing");
+    expect(mintSignerOnWallet({ ...old, additional_signers: [...old.additional_signers, { signer_id: "mintquorum" }] })).toBe("attached");
+    // No PRIVY_MINT_POLICY_ID: a signer without override policy is fully attached.
+    delete process.env.PRIVY_MINT_POLICY_ID;
+    expect(mintSignerOnWallet({ additional_signers: [{ signer_id: "mintquorum" }] })).toBe("attached");
+    process.env.PRIVY_MINT_POLICY_ID = "pol1";
+    expect(mintSignerOnWallet({ additional_signers: [{ signer_id: "mintquorum" }] })).toBe("policy_upgrade");
+    expect(mintSignerOnWallet({ additional_signers: [{ signer_id: "mintquorum", override_policy_ids: ["pol1"] }] })).toBe("attached");
+    delete process.env.PRIVY_MINT_POLICY_ID;
+    // Wallet attached for the old quorum, then the quorum changes: refused until the new one is added.
+    privyWallets.pw9aaaaaaaaaaaaaaaaaaaa = { owner_id: "user-owner", additional_signers: [{ signer_id: "mintquorum" }] };
+    expect(await mintSigningProblem([W(9, "pw9aaaaaaaaaaaaaaaaaaaa")])).toBeNull();
+    privyWallets.pw9aaaaaaaaaaaaaaaaaaaa = old;
+    expect((await mintSigningProblem([W(9, "pw9aaaaaaaaaaaaaaaaaaaa")]))?.missing).toHaveLength(1);
+  });
+
+  it("status report: cached attach only counts for the same quorum", async () => {
+    const { mintSignerStatus } = await import("../src/users/mintSigner.js");
+    const { getDb } = await import("../src/db/client.js");
+    const { users, wallets, mintSigners } = await import("../src/db/schema.js");
+    const db = getDb();
+    await db
+      .insert(users)
+      .values({ id: "u9", privyUserId: "did:privy:x", createdAt: new Date().toISOString(), lastSeenAt: new Date().toISOString() } as any)
+      .onConflictDoNothing();
+    await db
+      .insert(wallets)
+      .values({
+        id: "w10",
+        userId: "u9",
+        address: "0x" + "a".repeat(40),
+        privyWalletId: "pw10aaaaaaaaaaaaaaaaaaa",
+        source: "imported",
+        createdAt: new Date().toISOString(),
+      } as any)
+      .onConflictDoNothing();
+    await db
+      .insert(mintSigners)
+      .values({ walletId: "w10", attachedAt: new Date().toISOString(), checkedAt: new Date().toISOString(), note: "q:oldmintquorum|p:" })
+      .onConflictDoNothing();
+    privyWallets.pw10aaaaaaaaaaaaaaaaaaa = { owner_id: "user-owner", additional_signers: [{ signer_id: "oldmintquorum" }] };
+    const r = await mintSignerStatus({ id: "u9", privyUserId: "did:privy:x" });
+    expect(r.missingAddresses).toEqual(["0x" + "a".repeat(40)]);
+    privyWallets.pw10aaaaaaaaaaaaaaaaaaa.additional_signers.push({ signer_id: "mintquorum" });
+    expect((await mintSignerStatus({ id: "u9", privyUserId: "did:privy:x" })).attachedAddresses).toHaveLength(1);
+  });
+
   it("several wallets missing: one message listing them", async () => {
     privyWallets.pw6aaaaaaaaaaaaaaaaaaaa = { owner_id: "user-owner", additional_signers: [] };
     privyWallets.pw7aaaaaaaaaaaaaaaaaaaa = { owner_id: "user-owner", additional_signers: [] };

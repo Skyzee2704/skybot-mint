@@ -83,7 +83,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       .map((address) => ({
         address,
         signers: cfgs
-          .filter(([sg]) => !(((sg.attached as string[] | null) ?? []) as string[]).some((x) => x.toLowerCase() === address.toLowerCase()))
+          // "upgrade" = signer already there (it can sign) but without a newer policy: not re-added from here.
+          .filter(
+            ([sg]) =>
+              ![...((sg.attached as string[] | null) ?? []), ...(((sg as any).upgrade as string[] | undefined) ?? [])].some(
+                (x) => x.toLowerCase() === address.toLowerCase(),
+              ),
+          )
           .map(([sg, verify]) => ({ signerId: String(sg.signerId), policyIds: sg.policyId ? [String(sg.policyId)] : [], verify })),
       }))
       .filter((p) => p.signers.length);

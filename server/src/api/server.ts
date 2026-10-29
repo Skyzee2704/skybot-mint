@@ -259,7 +259,10 @@ export async function buildServer(): Promise<FastifyInstance> {
       const [st, ms] = req.privyAccessToken
         ? await Promise.all([siweSignerStatus(req.user!), mintSignerStatusTimed(req.user!)])
         : [null, null];
-      const { mintSignerReady } = await import("../users/mintSigner.js");
+      const { mintSignerReady, mintSignerDiag } = await import("../users/mintSigner.js");
+      // Only hand the app a signer to attach when the server key really belongs to that quorum.
+      const diag = mintSignerReady() ? await mintSignerDiag().catch(() => null) : null;
+      const mintOk = mintSignerReady() && Boolean(diag?.keyReadable) && diag?.keyInQuorum !== false;
       return {
         user: publicUser(req.user!),
         authVia: req.authVia,
@@ -274,12 +277,13 @@ export async function buildServer(): Promise<FastifyInstance> {
             }
           : null,
         // Mint signer (scheduled / server-run mints): the app adds it silently where missing. Public ids only.
-        mintSigner: mintSignerReady()
+        mintSigner: mintOk
           ? {
               signerId: env.privyAuthKeyQuorumId,
               policyId: env.privyMintPolicyId ?? null,
               attached: ms?.attachedAddresses ?? null,
               missing: ms?.missingAddresses ?? null,
+              upgrade: ms?.upgradeAddresses ?? [],
             }
           : null,
       };
@@ -287,7 +291,7 @@ export async function buildServer(): Promise<FastifyInstance> {
     a.post("/api/wallets/mint-signer/verify", async (req) => {
       const st = await mintSignerStatusTimed(req.user!);
       if (st) log.info("mint signer verify", { attached: st.attachedAddresses.length, missing: st.missingAddresses.length });
-      return { attached: st?.attachedAddresses ?? [], missing: st?.missingAddresses ?? [] };
+      return { attached: st?.attachedAddresses ?? [], missing: st?.missingAddresses ?? [], upgrade: st?.upgradeAddresses ?? [] };
     });
     // After the app added the signer: re-verify against Privy and record it (so /check can sign server-side).
     a.post("/api/wallets/siwe-signer/verify", async (req) => {

@@ -34,14 +34,36 @@ export function mintSignerReady() {
 }
 
 /** Can the app key sign for this Privy wallet record? */
+/**
+ * Mint signer state on a Privy wallet record. "policy_upgrade": the signer is there (it can sign) but without the
+ * configured PRIVY_MINT_POLICY_ID, so the app re-adds it with the policy. Other quorums (e.g. an earlier mint
+ * quorum) are ignored: only the configured one counts.
+ */
+export function mintSignerOnWallet(
+  w: any,
+  quorum = env.privyAuthKeyQuorumId,
+  policy = env.privyMintPolicyId ?? null,
+): "attached" | "missing" | "policy_upgrade" {
+  if (!w || !quorum) return "missing";
+  if (w.owner_id === quorum) return "attached";
+  const s = (w.additional_signers ?? []).find((x: any) => x?.signer_id === quorum);
+  if (!s) return "missing";
+  if (policy && !(s.override_policy_ids ?? []).includes(policy)) return "policy_upgrade";
+  return "attached";
+}
+
+/** Signing for the configured quorum is possible on this wallet (policy or not). */
 export function walletHasMintSigner(w: any, quorum = env.privyAuthKeyQuorumId): boolean {
   if (!w || !quorum) return false;
   return w.owner_id === quorum || (w.additional_signers ?? []).some((s: any) => s?.signer_id === quorum);
 }
 
 const iso = () => new Date().toISOString();
+/** Cached "attached" rows only count for the quorum + policy they were checked against. */
+const cacheTag = () => `q:${env.privyAuthKeyQuorumId ?? ""}|p:${env.privyMintPolicyId ?? ""}`;
 async function mark(walletId: string, attached: boolean, note: string | null) {
   const at = iso();
+  if (attached) note = cacheTag();
   const v = { walletId, attachedAt: attached ? at : null, checkedAt: at, note };
   await getDb()
     .insert(mintSigners)
@@ -50,7 +72,7 @@ async function mark(walletId: string, attached: boolean, note: string | null) {
 }
 
 type WalletLite = { id: string; userId: string; address: string; privyWalletId: string | null };
-export type MintSignerState = "attached" | "missing" | "no_privy_wallet" | "unknown";
+export type MintSignerState = "attached" | "missing" | "policy_upgrade" | "no_privy_wallet" | "unknown";
 
 /** Live Privy check for one wallet (records the result). Lookup errors are "unknown" — never block on them. */
 export async function checkMintSigner(w: WalletLite, privyUserId?: string | null): Promise<MintSignerState> {
@@ -63,9 +85,9 @@ export async function checkMintSigner(w: WalletLite, privyUserId?: string | null
     }
     const { getPrivy } = await import("../auth/privy.js");
     const pw: any = await getPrivy().wallets().get(id);
-    const ok = walletHasMintSigner(pw);
-    await mark(w.id, ok, ok ? null : "added by the member's app");
-    return ok ? "attached" : "missing";
+    const st = mintSignerOnWallet(pw);
+    await mark(w.id, st === "attached", st === "missing" ? "added by the member's app" : st);
+    return st;
   } catch (e: any) {
     log.warn("mint signer check failed", redactString(String(e?.message ?? e)).slice(0, 160));
     return "unknown";
@@ -75,11 +97,13 @@ export async function checkMintSigner(w: WalletLite, privyUserId?: string | null
 export interface MintSignerReport {
   attachedAddresses: string[];
   missingAddresses: string[];
+  /** Signer present without the configured policy: the app re-adds it with the policy. */
+  upgradeAddresses: string[];
 }
 
 /** Status of every active wallet of a member (for the app's silent attach). Attached wallets are not re-read. */
 export async function mintSignerStatus(user: { id: string; privyUserId: string | null }): Promise<MintSignerReport> {
-  const out: MintSignerReport = { attachedAddresses: [], missingAddresses: [] };
+  const out: MintSignerReport = { attachedAddresses: [], missingAddresses: [], upgradeAddresses: [] };
   if (!mintSignerReady() || !privyConfigured() || !user.privyUserId || user.privyUserId.startsWith("tg:")) return out;
   const db = getDb();
   const ws = await db
@@ -89,7 +113,8 @@ export async function mintSignerStatus(user: { id: string; privyUserId: string |
   const known = new Map((await db.select().from(mintSigners)).map((s) => [s.walletId, s]));
   let ids: Map<string, string> | null = null;
   for (const w of ws) {
-    if (known.get(w.id)?.attachedAt) {
+    const k = known.get(w.id);
+    if (k?.attachedAt && k.note === cacheTag()) {
       out.attachedAddresses.push(w.address);
       continue;
     }
@@ -99,7 +124,7 @@ export async function mintSignerStatus(user: { id: string; privyUserId: string |
       row = { ...w, privyWalletId: ids.get(w.address.toLowerCase()) ?? w.privyWalletId };
     }
     const st = await checkMintSigner(row, user.privyUserId);
-    (st === "attached" ? out.attachedAddresses : out.missingAddresses).push(w.address);
+    (st === "attached" ? out.attachedAddresses : st === "policy_upgrade" ? out.upgradeAddresses : out.missingAddresses).push(w.address);
   }
   return out;
 }
