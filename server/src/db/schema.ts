@@ -239,6 +239,14 @@ export const siweSigners = sqliteTable("siwe_signers", {
   note: text("note"),
 });
 
+/** Mint signer (app key quorum, PRIVY_AUTH_KEY_QUORUM_ID) status per wallet — scheduled mints can only sign with it. */
+export const mintSigners = sqliteTable("mint_signers", {
+  walletId: text("wallet_id").primaryKey(),
+  attachedAt: text("attached_at"),
+  checkedAt: text("checked_at").notNull(),
+  note: text("note"),
+});
+
 /** One Alchemy Address Activity webhook per network (signing key AES-GCM encrypted, never returned by the API). */
 export const alchemyWebhooks = sqliteTable("alchemy_webhooks", {
   network: text("network").primaryKey(), // e.g. BASE_MAINNET

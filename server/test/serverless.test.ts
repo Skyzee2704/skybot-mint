@@ -93,7 +93,7 @@ describe("Postgres path (PGlite) + job idempotency", () => {
     const { runJob } = await import("../src/jobs/scheduler.js");
     const j = await insertJob("ua", req(new Date(Date.now() - 1000).toISOString()), {});
     expect((await runJob(j.id, 30_000)).status).toBe("failed");
-    expect((await getJob(null, j.id))!.error).toMatch(/signing not configured/i);
+    expect((await getJob(null, j.id))!.error).toMatch(/signing key not configured/i);
   });
 
   it("housekeeping fails missed jobs and purges expired link codes", async () => {

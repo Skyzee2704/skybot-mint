@@ -7,6 +7,7 @@
  * the server import helper is disabled unless ALLOW_SERVER_KEY_IMPORT=1 (dev only).
  */
 import { PrivyClient } from "@privy-io/node";
+import { normalizeAuthKey } from "./authKey.js";
 import { env, privyConfigured, privyServerSigningReady, privySiweSignerReady } from "../config/env.js";
 import { log } from "../util/log.js";
 
@@ -40,7 +41,8 @@ export async function verifyPrivyAccessToken(accessToken: string): Promise<Verif
 
 export function authContext() {
   if (!privyServerSigningReady()) return undefined;
-  return { authorization_private_keys: [env.privyAuthPrivateKey!] };
+  // Privy's SDK only takes bare base64 PKCS#8; a pasted PEM would make every signing call throw.
+  return { authorization_private_keys: [normalizeAuthKey(env.privyAuthPrivateKey) ?? env.privyAuthPrivateKey!] };
 }
 
 /**

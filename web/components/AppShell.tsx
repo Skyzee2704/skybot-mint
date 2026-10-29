@@ -54,15 +54,23 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const { addSigners } = useSigners();
   const { wallets: privyWallets } = useWallets();
-  // Sign-in-only signer (Privy policy allows personal_sign of OpenSea's login text only) added silently to each
-  // embedded wallet, so the Telegram /check can verify upcoming OpenSea stages. Privy only lets the wallet owner add
-  // it, so this runs in the member's session: the server says which wallets already have it, the app adds the rest,
-  // then the server re-verifies with Privy and records it. Never blocks or shows errors.
-  const sgKey = me?.siweSigner ? `${me.siweSigner.signerId}:${me.siweSigner.policyId}:${me.siweSigner.attached?.length ?? "?"}` : "";
+  // Two signers are added silently to each embedded wallet with the member's own Privy session (Privy only lets the
+  // wallet owner add them): the sign-in-only signer (Privy policy allows personal_sign of OpenSea's login text only)
+  // so the Telegram /check can verify upcoming OpenSea stages, and the mint signer so scheduled mints can be signed
+  // by the server. The server says which wallets already have each one, the app adds the rest (one call per wallet,
+  // so the signer list is never rewritten concurrently), then the server re-verifies with Privy. Never blocks or
+  // shows errors.
+  const sgKey = [me?.siweSigner, me?.mintSigner]
+    .map((sg: any) => (sg ? `${sg.signerId}:${sg.policyId ?? ""}:${sg.attached?.length ?? "?"}` : ""))
+    .join("|");
   useEffect(() => {
-    const sg = me?.siweSigner;
-    if (!authenticated || !sg?.signerId || !sg?.policyId) return;
-    const done = new Set<string>(((sg.attached as string[] | null) ?? []).map((a) => a.toLowerCase()));
+    const cfgs = (
+      [
+        [me?.siweSigner, "/api/wallets/siwe-signer/verify", true],
+        [me?.mintSigner, "/api/wallets/mint-signer/verify", false],
+      ] as const
+    ).filter(([sg, , needsPolicy]) => sg?.signerId && (!needsPolicy || sg?.policyId));
+    if (!authenticated || !cfgs.length) return;
     // Every Privy embedded EVM wallet of this user: linked accounts (generated, imported, server-created) + connected.
     const addrs = new Set<string>();
     for (const a of (user?.linkedAccounts ?? []) as any[]) {
@@ -71,26 +79,39 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       }
     }
     for (const w of privyWallets ?? []) if (w.walletClientType === "privy") addrs.add(w.address);
-    const todo = [...addrs].filter((a) => !done.has(a.toLowerCase()));
-    if (!todo.length) return;
+    const plan = [...addrs]
+      .map((address) => ({
+        address,
+        signers: cfgs
+          .filter(([sg]) => !(((sg.attached as string[] | null) ?? []) as string[]).some((x) => x.toLowerCase() === address.toLowerCase()))
+          .map(([sg, verify]) => ({ signerId: String(sg.signerId), policyIds: sg.policyId ? [String(sg.policyId)] : [], verify })),
+      }))
+      .filter((p) => p.signers.length);
+    if (!plan.length) return;
     let cancelled = false;
     (async () => {
-      let added = 0;
+      const verify = new Set<string>();
       // Sequential: each call reads then rewrites the wallet's signer list, so parallel calls could race.
-      for (const address of todo) {
+      for (const p of plan) {
         if (cancelled) return;
-        try {
-          await addSigners({ address, signers: [{ signerId: sg.signerId, policyIds: [sg.policyId] }] });
-          added++;
-        } catch (e: any) {
-          // Already present counts as done; anything else retries on the next visit.
-          if (/already|duplicate|exists/i.test(String(e?.message ?? ""))) added++;
-        }
+        const add = async (list: typeof p.signers) => {
+          try {
+            await addSigners({ address: p.address, signers: list.map(({ signerId, policyIds }) => ({ signerId, policyIds })) });
+            list.forEach((x) => verify.add(x.verify));
+            return true;
+          } catch (e: any) {
+            // Already present counts as done; anything else retries on the next visit.
+            if (/already|duplicate|exists/i.test(String(e?.message ?? ""))) list.forEach((x) => verify.add(x.verify));
+            return false;
+          }
+        };
+        // Both in one call; if that fails, one at a time so one signer can't hold the other back.
+        if (!(await add(p.signers)) && p.signers.length > 1) for (const x of p.signers) if (!cancelled) await add([x]);
       }
-      if (added && !cancelled) {
+      if (verify.size && !cancelled) {
         try {
           const token = await getAccessToken();
-          await api("/api/wallets/siwe-signer/verify", { method: "POST", body: {}, token });
+          for (const path of verify) await api(path, { method: "POST", body: {}, token });
         } catch {
           /* best effort */
         }

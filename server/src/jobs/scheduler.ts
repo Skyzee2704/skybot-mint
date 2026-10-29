@@ -18,6 +18,7 @@ import { getJob, insertJob, listActiveJobs, patchJob, appendJobLog, type JobReco
 import type { MintRequest } from "../core/mint/types.js";
 import { broadcastAndTrack, prepareAll, trackReceipts } from "../core/mint/executor.js";
 import { notifyJobDone } from "../bot/notify.js";
+import { getChain } from "../config/chains.js";
 import { log } from "../util/log.js";
 
 const PRESIGN_LEAD_MS = 3000;
@@ -126,10 +127,9 @@ export async function runJob(id: string, budgetMs = env.jobMaxDurationSec * 1000
   const req = job.request as MintRequest & { gasHints: Record<string, string> };
   try {
     if (!privyServerSigningReady()) {
-      await patchJob(id, {
-        status: "failed",
-        error: "Server signing not configured (PRIVY_AUTH_PRIVATE_KEY + key quorum as session signer on wallets).",
-      });
+      const { SIGNING_OFF_MESSAGE } = await import("../users/mintSigner.js");
+      await patchJob(id, { status: "failed", error: SIGNING_OFF_MESSAGE });
+      await notifyJobDone(id);
       return { status: "failed", reason: "signing not configured" };
     }
     const buildDeadline = Math.min(Math.max(fireAt + 30_000, Date.now() + 30_000), deadline - 5_000);
@@ -152,7 +152,12 @@ export async function runJob(id: string, budgetMs = env.jobMaxDurationSec * 1000
     if (!pending) await notifyJobDone(id);
     return { status: failed ? "failed" : "done" };
   } catch (e: any) {
-    await patchJob(id, { status: "failed", error: String(e?.message ?? e).slice(0, 400) });
+    const { jobFailureMessage } = await import("../core/mint/jobErrors.js");
+    const chain = getChain(req.chain);
+    const error = await jobFailureMessage(e, chain ? { chain, contract: req.contract } : undefined).catch(() =>
+      String(e?.message ?? e).slice(0, 400),
+    );
+    await patchJob(id, { status: "failed", error });
     log.error(`job ${id} failed`, e);
     await notifyJobDone(id);
     return { status: "failed", reason: String(e?.message ?? e).slice(0, 200) };

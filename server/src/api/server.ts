@@ -34,6 +34,7 @@ import {
   unlinkTelegram,
   listUsersAdmin,
   setUserDisabled,
+  getWallet,
 } from "../users/service.js";
 import { defaultCapValues, dailySpent } from "../core/safety/safety.js";
 import { MintRequest } from "../core/mint/types.js";
@@ -82,6 +83,19 @@ async function siweSignerStatus(user: { id: string; privyUserId: string | null }
     }),
     new Promise((r) => setTimeout(() => r(null), 5_000)),
   ])) as Awaited<ReturnType<typeof ensureSiweSigners>> | null;
+}
+
+/** Mint signer status of a member's wallets (time-boxed, never fails the request). */
+async function mintSignerStatusTimed(user: { id: string; privyUserId: string | null }) {
+  const { mintSignerReady, mintSignerStatus } = await import("../users/mintSigner.js");
+  if (!mintSignerReady()) return null;
+  return (await Promise.race([
+    mintSignerStatus(user).catch((e) => {
+      log.warn("mint signer status", redactString(String(e?.message ?? e)).slice(0, 160));
+      return null;
+    }),
+    new Promise((r) => setTimeout(() => r(null), 5_000)),
+  ])) as Awaited<ReturnType<typeof mintSignerStatus>> | null;
 }
 
 /** Wallet added / removed / restored: update the Alchemy webhook address lists (time-boxed, best effort). */
@@ -199,6 +213,8 @@ export async function buildServer(): Promise<FastifyInstance> {
     privyConfigured: privyConfigured(),
     privyAppId: env.privyAppId ?? null,
     serverSigning: privyServerSigningReady(),
+    // Booleans only: the signing key parses and belongs to the configured key quorum.
+    mintSigner: await (await import("../users/mintSigner.js")).mintSignerDiag().catch(() => null),
     config: configStatus(),
     setup: !privyConfigured()
       ? {
@@ -240,7 +256,10 @@ export async function buildServer(): Promise<FastifyInstance> {
     a.get("/api/me", async (req) => {
       // Which wallets still miss the sign-in-only signer (Telegram /check). The app adds it with the member's own
       // Privy session; the server can't (Privy rejects user JWTs at /v1/wallets/authenticate for this app).
-      const st = req.privyAccessToken ? await siweSignerStatus(req.user!) : null;
+      const [st, ms] = req.privyAccessToken
+        ? await Promise.all([siweSignerStatus(req.user!), mintSignerStatusTimed(req.user!)])
+        : [null, null];
+      const { mintSignerReady } = await import("../users/mintSigner.js");
       return {
         user: publicUser(req.user!),
         authVia: req.authVia,
@@ -254,7 +273,21 @@ export async function buildServer(): Promise<FastifyInstance> {
               missing: st?.missingAddresses ?? null,
             }
           : null,
+        // Mint signer (scheduled / server-run mints): the app adds it silently where missing. Public ids only.
+        mintSigner: mintSignerReady()
+          ? {
+              signerId: env.privyAuthKeyQuorumId,
+              policyId: env.privyMintPolicyId ?? null,
+              attached: ms?.attachedAddresses ?? null,
+              missing: ms?.missingAddresses ?? null,
+            }
+          : null,
       };
+    });
+    a.post("/api/wallets/mint-signer/verify", async (req) => {
+      const st = await mintSignerStatusTimed(req.user!);
+      if (st) log.info("mint signer verify", { attached: st.attachedAddresses.length, missing: st.missingAddresses.length });
+      return { attached: st?.attachedAddresses ?? [], missing: st?.missingAddresses ?? [] };
     });
     // After the app added the signer: re-verify against Privy and record it (so /check can sign server-side).
     a.post("/api/wallets/siwe-signer/verify", async (req) => {
@@ -549,6 +582,12 @@ export async function buildServer(): Promise<FastifyInstance> {
         "mint",
         mintConfirmation(b),
       );
+      // Refuse up front what would only fail at fire time: no signing key, or wallets Privy won't let us sign for.
+      const { mintSigningProblem } = await import("../users/mintSigner.js");
+      const ws = await Promise.all(plan.data.request.wallets.map((w) => getWallet(req.user!.id, w.walletId)));
+      const problem = await mintSigningProblem(ws, req.user!.privyUserId);
+      if (problem)
+        throw Object.assign(new Error(problem.message), { statusCode: 409, code: "MINT_SIGNER_NOT_READY", missing: problem.missing });
       return { job: await enqueueMint(req.user!.id, plan.data.request, plan.data.gasHints) };
     });
     a.get("/api/jobs", async (req) => ({ jobs: await listJobs(req.user!.id) }));

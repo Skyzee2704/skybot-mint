@@ -56,6 +56,10 @@ export const env = {
   get privyAuthKeyQuorumId() {
     return str("PRIVY_AUTH_KEY_QUORUM_ID");
   },
+  /** Optional Privy policy the member's app attaches with the mint signer (restricts what it may sign). */
+  get privyMintPolicyId() {
+    return str("PRIVY_MINT_POLICY_ID");
+  },
   /**
    * Dedicated sign-in-only signer (separate from the mint signer): its key quorum is added to user wallets with
    * PRIVY_SIWE_POLICY_ID, a Privy policy that only ALLOWS personal_sign of OpenSea's login text (everything else denied).

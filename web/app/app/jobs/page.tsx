@@ -125,7 +125,10 @@ export default function JobsPage() {
                           <tr key={r.walletId}>
                             <td className="mono">{short(r.address)}</td>
                             <td>{r.quantity}</td>
-                            <td>{RESULT[r.status] ?? r.status}</td>
+                            <td>
+                              {RESULT[r.status] ?? r.status}
+                              {r.error && <div className="err">{r.error}</div>}
+                            </td>
                             <td>
                               {r.txHash ? (
                                 <a className="mono" href={r.explorer} target="_blank" rel="noreferrer">

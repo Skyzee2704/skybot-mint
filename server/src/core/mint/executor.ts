@@ -9,7 +9,9 @@ import { appendJobLog, patchJob, recordMinted, type JobRecord } from "../jobs/re
 import { buildMintTx, MintBuildError } from "./build.js";
 import { getFees } from "./fees.js";
 import { parseMintedTokenIds, waitForReceipt } from "./receipts.js";
-import { fallbackGas, revertReason } from "./simulate.js";
+import { fallbackGas } from "./simulate.js";
+import { broadcastRejectedMessage, buildFailureMessage, revertedOnChainMessage, signFailureMessage } from "./jobErrors.js";
+import { describeTxError } from "../tx/revert.js";
 import { MintRequest } from "./types.js";
 import { signRawTransaction } from "../../auth/privy.js";
 import { log } from "../../util/log.js";
@@ -82,7 +84,7 @@ export async function prepareAll(
             continue;
           }
           results[i].status = "failed";
-          results[i].error = e.message;
+          results[i].error = await buildFailureMessage(e, { chain, contract: req.contract });
           return null;
         }
       }
@@ -99,7 +101,12 @@ export async function prepareAll(
           "estimateGas",
         );
         return (g * 125n) / 100n;
-      } catch {
+      } catch (e: any) {
+        // Expected before a stage opens (pre-signing); still sent with the hint gas, but the reason is kept in the log.
+        const why = await describeTxError(e, { chain, contracts: [req.contract] }).catch(() => null);
+        await jobLog(job, `gas estimate ${results[i].address.slice(0, 8)}: ${why?.message ?? "failed"} (using fallback gas)`).catch(
+          () => {},
+        );
         return BigInt(gasHints[req.wallets[i].walletId] ?? fallbackGas(req.strategy, req.wallets[i].quantity));
       }
     }),
@@ -141,7 +148,7 @@ export async function prepareAll(
         results[i].status = "signed";
       } catch (e: any) {
         results[i].status = "failed";
-        results[i].error = revertReason(e);
+        results[i].error = await signFailureMessage(e, w.address, { chain, contract: req.contract });
       }
     }),
   );
@@ -171,7 +178,10 @@ export async function broadcastAndTrack(
       r.acceptedBy = b.accepted.length;
       if (!b.accepted.length) {
         r.status = "failed";
-        r.error = `rejected by all RPCs: ${[...new Set(b.errors.map((e) => e.error))].join(" | ").slice(0, 300)}`;
+        r.error = broadcastRejectedMessage(
+          b.errors.map((e) => e.error),
+          chain.nativeSymbol,
+        );
         await settleSpend(p.reserveRef, 0n);
         return;
       }
@@ -222,6 +232,17 @@ export async function trackReceipts(job: JobRecord, req: MintRequest, results: W
         } else {
           r.status = "reverted";
           r.costWei = cost.toString();
+          // Why: replay the same call at its block (eth_call, read-only) through the shared revert decoder.
+          const tx: any = await pool.read((p) => p.getTransaction(r.txHash!), "getTx").catch(() => null);
+          r.error = tx
+            ? await revertedOnChainMessage(
+                (blockTag) => pool.read((p) => p.call({ from: r.address, to: tx.to, data: tx.data, value: tx.value, blockTag }), "replay"),
+                rec.blockNumber,
+                rec.gasUsed,
+                tx.gasLimit ?? null,
+                { chain, contract: req.contract },
+              ).catch(() => "Reverted on-chain.")
+            : "Reverted on-chain.";
           await settleSpend(ref, cost);
         }
       }),

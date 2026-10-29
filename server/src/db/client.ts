@@ -174,6 +174,7 @@ const DDL = [
   `CREATE TABLE IF NOT EXISTS nft_meta_due (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, wallet_id TEXT NOT NULL,
     chain TEXT NOT NULL, due_at BIGINT NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS siwe_signers (wallet_id TEXT PRIMARY KEY, attached_at TEXT, checked_at TEXT NOT NULL, note TEXT)`,
+  `CREATE TABLE IF NOT EXISTS mint_signers (wallet_id TEXT PRIMARY KEY, attached_at TEXT, checked_at TEXT NOT NULL, note TEXT)`,
 ];
 
 async function migrate() {
