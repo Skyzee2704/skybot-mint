@@ -54,6 +54,8 @@ export const ALCHEMY_NFT_NETWORK: Record<string, string> = {
   unichain: "unichain-mainnet",
   robinhood: "robinhood-mainnet",
   arc: "arc-mainnet",
+  // Alchemy NFT API host is elysium-mainnet.g.alchemy.com (same slug as their RPC). No Address Activity webhook id yet.
+  elysium: "elysium-mainnet",
 };
 export const ALCHEMY_PAGE_SIZE = 100;
 export const ALCHEMY_MAX_PAGES = 10; // 1 000 NFTs per wallet per chain
@@ -182,6 +184,7 @@ export async function scanAlchemy(chain: ChainConfig, owner: string, f: Fetch, k
 }
 
 export async function scanOpenSea(chain: ChainConfig, owner: string, f: Fetch, key = env.openseaApiKey): Promise<ScanResult> {
+  if (!chain.openseaChain) throw new Error(`OpenSea does not index ${chain.name}`);
   if (!key) throw new Error("OPENSEA_API_KEY is not set");
   const items: NftItem[] = [];
   let next: string | null = null;
@@ -206,7 +209,11 @@ export async function scanOpenSea(chain: ChainConfig, owner: string, f: Fetch, k
 
 /** Holdings of one wallet on one chain: Alchemy where supported, OpenSea otherwise or when Alchemy fails. */
 export async function scanHoldings(chain: ChainConfig, owner: string, f: Fetch = globalThis.fetch as any): Promise<ScanResult> {
-  const order: ("alchemy" | "opensea")[] = ALCHEMY_NFT_NETWORK[chain.key] && alchemyKey() ? ["alchemy", "opensea"] : ["opensea"];
+  const alchemyOk = Boolean(ALCHEMY_NFT_NETWORK[chain.key] && alchemyKey());
+  const order: ("alchemy" | "opensea")[] = [alchemyOk ? "alchemy" : null, chain.openseaChain ? "opensea" : null].filter(
+    (s): s is "alchemy" | "opensea" => s !== null,
+  );
+  if (!order.length) throw new Error(`No NFT indexer configured for ${chain.name}`);
   let lastErr: unknown = null;
   for (const src of order) {
     try {

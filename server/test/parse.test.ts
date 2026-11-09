@@ -26,12 +26,13 @@ describe("parseInput", () => {
 });
 
 describe("chains", () => {
-  it("has the 9 configured chains with unique ids", () => {
+  it("has the configured chains with unique ids", () => {
     expect(CHAINS.map((c) => c.key).sort()).toEqual([
       "arbitrum",
       "arc",
       "base",
       "bnb",
+      "elysium",
       "ethereum",
       "ink",
       "polygon",
@@ -45,6 +46,10 @@ describe("chains", () => {
     expect(getChain("bsc")?.key).toBe("bnb");
     expect(getChain(8453)?.key).toBe("base");
     expect(getChain("5042")?.key).toBe("arc");
+    expect(getChain(99901)?.key).toBe("elysium");
+    expect(getChain("elysium")?.nativeSymbol).toBe("HYPE");
+    expect(getChain("elysium")?.openseaChain).toBe("elysium");
+    expect(getChain("elysium")?.seadrop).toBe(true);
   });
   it("private RPC env takes priority, public fallback kept, send-only appended", () => {
     const base = getChain("base")!;

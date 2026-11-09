@@ -149,7 +149,7 @@ export async function metadataFromOpenSea(
   f: Fetch,
   key = env.openseaApiKey,
 ): Promise<{ name: string | null; image: string | null } | null> {
-  if (!key) return null;
+  if (!key || !chain.openseaChain) return null;
   const j = await getJson(
     f,
     `https://api.opensea.io/api/v2/chain/${encodeURIComponent(chain.openseaChain)}/contract/${item.contract}/nfts/${item.tokenId}`,

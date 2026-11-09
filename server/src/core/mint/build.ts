@@ -82,7 +82,7 @@ export async function buildMintTx(
         const r = await os.buildMint(slug, wallet, quantity, call.mintTimeoutMs);
         const value = BigInt(r.value || "0x0");
         tx = { to: getAddress(r.to), data: r.data, value };
-        if (r.chain && r.chain !== chain.openseaChain && r.chain !== chain.key)
+        if (r.chain && r.chain !== chain.openseaChain && r.chain !== chain.key && chain.openseaChain)
           throw new MintBuildError(`OpenSea returned chain "${r.chain}" but target is ${chain.key}`);
       } catch (e: any) {
         if (e instanceof OpenSeaHttpError) {
