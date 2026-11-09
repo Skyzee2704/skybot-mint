@@ -568,44 +568,11 @@ export default function MintPage() {
             <button
               className="ghost"
               onClick={() => {
-                setSel(Object.fromEntries(rows.filter((r: any) => viewFor(r).eligible).map((r: any) => [r.walletId, true])));
-                setSelStage(stageKey ?? "");
-              }}
-            >
-              Select Eligible
-            </button>
-            <button
-              className="ghost"
-              onClick={() => {
-                setSel(
-                  Object.fromEntries(
-                    rows
-                      .filter((r: any) => viewFor(r).eligible && BigInt(r.balanceWei ?? "0") >= rowCostWei(r))
-                      .map((r: any) => [r.walletId, true]),
-                  ),
-                );
-                setSelStage(stageKey ?? "");
-              }}
-            >
-              Select Ready to Mint
-            </button>
-            <button
-              className="ghost"
-              onClick={() => {
                 setSel({});
                 setSelStage(stageKey ?? "");
               }}
             >
               Clear
-            </button>
-            <button
-              className="ghost"
-              onClick={() => {
-                setQtys(Object.fromEntries(rows.map((r: any) => [r.walletId, maxFor(r)])));
-                setQtyStage(stageKey ?? "");
-              }}
-            >
-              Set All to Max
             </button>
             <span className="spacer" />
             <span className="muted">
