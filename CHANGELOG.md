@@ -27,6 +27,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Unified login through Privy: email, Google and Telegram on both the website and the Telegram Mini App resolve to one SkyBOT account. Telegram login is now offered on the web.
 - The Mini App prefers Privy seamless Telegram login. The verified `initData` session remains as a fallback with a **Connect with Privy** action, so wallet import works for Telegram users.
 - Settings shows **Sign-In Methods** (link Telegram, email or Google through Privy) instead of link codes. The bot no longer advertises `/link` or `/unlink`.
+- Mint page: the stage is chosen only on the eligibility cards (including Public, and Now when a drop has no stages). Timing keeps gas, the start-time offset, and when the mint runs. The wallet table lists only wallets eligible for that stage, and the only quick action above it is Clear. The Check all / Select wallets toggle reads as a selection, not a second primary button.
 
 ### Fixed
 

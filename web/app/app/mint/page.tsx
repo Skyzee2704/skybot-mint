@@ -11,7 +11,6 @@ import { assertOpenSeaSiwe } from "@nft-mint-bot/server/siwe";
 import { useWalletList } from "@/lib/wallets";
 import { ChainSelect } from "@/components/ChainSelect";
 import { ConfirmBox } from "@/components/Confirm";
-import { TimingOptions } from "@/components/TimingOptions";
 import { formatDateTime, localTimeZone, zoneLabel } from "@/lib/time";
 import { useNow } from "@/lib/useNow";
 import { clampQty } from "@nft-mint-bot/server/qty";
@@ -21,7 +20,6 @@ import {
   pickTimingOption,
   stageWalletView,
   summarizeGroup,
-  verdictText,
   type StageWalletView,
 } from "@nft-mint-bot/server/stage-eligibility";
 
@@ -270,8 +268,15 @@ export default function MintPage() {
     setQtyStage(null);
   };
   const selRows = rows.filter((r: any) => isSel(r));
+  const shownRows = rows.filter((r: any) => viewFor(r).eligible);
+  const hiddenCount = rows.length - shownRows.length;
+  const coveredStages = new Set(stageGroups.map((g) => g.stage.name));
+  // Public (and a plain "Now" when the drop has no stages) have no allowlist card. They join the same picker.
+  const extraStages = options.filter((o) => o.kind === "stage" && o.stage && !coveredStages.has(o.stage.name));
+  const nowOnly = options.find((o) => o.kind === "now" && !o.stage) ?? null;
+  const eligibleIn = (stage: any) =>
+    rows.filter((r: any) => stageWalletView(r, stage, elig?.targetStage ?? null, supplyRemaining).eligible).length;
   const minting = selRows.filter((r: any) => !chosen?.stage || chosenIds.has(r.walletId));
-  const skippedSel = (chosen?.skipped ?? []).filter((v) => selRows.some((r: any) => r.walletId === v.walletId));
   const optionsKey = options.map((o) => `${o.key}:${o.live}`).join("|");
   useEffect(() => {
     if (timing && fellBack && chosen) {
@@ -511,112 +516,55 @@ export default function MintPage() {
             </div>
           )}
           {verifyNote && <div className="notice">{verifyNote}</div>}
-          {stageGroups.length > 0 && (
-            <div className="stage-groups">
+          {(stageGroups.length > 0 || extraStages.length > 0 || nowOnly) && (
+            <div className="stage-groups" role="radiogroup" aria-label="Mint stage">
               {stageGroups.map((g) => {
                 const sum = summarizeGroup(g);
                 const offered = options.some((o) => o.kind === "stage" && o.stage?.name === g.stage.name);
                 const active = chosen?.stage?.name === g.stage.name;
+                const count =
+                  sum.unknown.length === g.total
+                    ? `${g.total} unknown`
+                    : `${g.eligible}/${g.total} eligible${sum.unknown.length ? `, ${sum.unknown.length} unknown` : ""}`;
                 return (
-                  <div key={g.stage.name} className={`stage-group${active ? " on" : ""}`}>
-                    <div
-                      className={`stage-group-head${offered ? " pick" : ""}`}
-                      onClick={offered ? () => pickStage(g.stage.name) : undefined}
-                      onKeyDown={
-                        offered
-                          ? (e) => {
-                              if (e.key === "Enter" || e.key === " ") {
-                                e.preventDefault();
-                                pickStage(g.stage.name);
-                              }
-                            }
-                          : undefined
-                      }
-                      role={offered ? "button" : undefined}
-                      tabIndex={offered ? 0 : undefined}
-                      title={offered ? `Mint in ${g.stage.name}` : undefined}
-                      aria-pressed={offered ? active : undefined}
-                    >
-                      {offered && <span className={`stage-radio${active ? " on" : ""}`} aria-hidden="true" />}
-                      <b>{g.stage.name}</b>
-                      <span className="spacer" />
-                      <span className={g.eligible ? "ok small" : sum.unknown.length ? "muted small" : "bad small"}>
-                        {sum.unknown.length === g.total
-                          ? `${g.total} unknown`
-                          : `${g.eligible}/${g.total} eligible${sum.unknown.length ? `, ${sum.unknown.length} unknown` : ""}`}
-                      </span>
-                      <span className="stage-meta muted small">
-                        {[
-                          g.stage.priceWei != null ? (g.stage.priceWei === "0" ? "Free" : `${fmtEth(g.stage.priceWei)} ${sym}`) : null,
-                          g.stage.maxPerWallet ? `max ${g.stage.maxPerWallet}/wallet` : null,
-                          stageWhen(g.stage),
-                        ]
-                          .filter(Boolean)
-                          .join(" · ")}
-                      </span>
-                    </div>
-                    {active && sum.eligible.length > 0 && (
-                      <div className="wallet-chips compact">
-                        {sum.eligible.map((w) => (
-                          <span key={w.walletId} className="chip ok" title={`${w.address}${w.max ? ` · max ${w.max}` : ""}`}>
-                            ✓ {w.label}
-                            {w.note ? <span className="warn"> · {w.note}</span> : null}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                    {active &&
-                      ((sum.notEligible.length > 0 && (sum.eligible.length > 0 || sum.unknown.length > 0)) || sum.unknown.length > 0) && (
-                        <details className="small">
-                          <summary className="muted">
-                            {[
-                              sum.notEligible.length && (sum.eligible.length || sum.unknown.length)
-                                ? `${sum.notEligible.length} not eligible`
-                                : null,
-                              sum.unknown.length ? `${sum.unknown.length} ${verdictText(sum.unknown[0]!)}` : null,
-                            ]
-                              .filter(Boolean)
-                              .join(" · ")}
-                          </summary>
-                          <div className="wallet-chips compact">
-                            {[...sum.notEligible, ...sum.unknown].map((w) => (
-                              <span key={w.walletId} className={`chip ${STATE_CLASS[w.state]}`} title={w.address}>
-                                {STATE_ICON[w.state]} {w.label}
-                              </span>
-                            ))}
-                          </div>
-                        </details>
-                      )}
-                  </div>
+                  <StagePick
+                    key={g.stage.name}
+                    name={g.stage.name}
+                    active={active}
+                    offered={offered}
+                    onPick={() => pickStage(g.stage.name)}
+                    count={count}
+                    countClass={g.eligible ? "ok small" : sum.unknown.length ? "muted small" : "bad small"}
+                    meta={stageMeta(g.stage, sym, stageWhen)}
+                  />
                 );
               })}
+              {extraStages.map((o) => (
+                <StagePick
+                  key={o.key}
+                  name={o.name}
+                  active={chosen?.key === o.key || chosen?.stage?.name === o.stage?.name}
+                  offered
+                  onPick={() => pickStage(o.key)}
+                  count={`${eligibleIn(o.stage)}/${rows.length} eligible`}
+                  countClass="ok small"
+                  meta={stageMeta(o.stage, sym, stageWhen)}
+                />
+              ))}
+              {nowOnly && (
+                <StagePick
+                  name="Now"
+                  active={chosen?.key === "now"}
+                  offered
+                  onPick={() => pickStage("now")}
+                  count="Mint immediately"
+                  countClass="ok small"
+                  meta=""
+                />
+              )}
             </div>
           )}
           <div className="row" style={{ marginBottom: 8 }}>
-            <button
-              className="ghost"
-              onClick={() => {
-                setSel(Object.fromEntries(rows.filter((r: any) => viewFor(r).eligible).map((r: any) => [r.walletId, true])));
-                setSelStage(stageKey ?? "");
-              }}
-            >
-              Select Eligible
-            </button>
-            <button
-              className="ghost"
-              onClick={() => {
-                setSel(
-                  Object.fromEntries(
-                    rows
-                      .filter((r: any) => viewFor(r).eligible && BigInt(r.balanceWei ?? "0") >= rowCostWei(r))
-                      .map((r: any) => [r.walletId, true]),
-                  ),
-                );
-                setSelStage(stageKey ?? "");
-              }}
-            >
-              Select Ready to Mint
-            </button>
             <button
               className="ghost"
               onClick={() => {
@@ -626,48 +574,36 @@ export default function MintPage() {
             >
               Clear
             </button>
-            <button
-              className="ghost"
-              onClick={() => {
-                setQtys(Object.fromEntries(rows.map((r: any) => [r.walletId, maxFor(r)])));
-                setQtyStage(stageKey ?? "");
-              }}
-            >
-              Set All to Max
-            </button>
             <span className="spacer" />
             <span className="muted">
               {selRows.length} selected · {totalNfts} NFT(s) · ~{fmtEth(totalWei.toString())} {sym}
             </span>
           </div>
-          <table>
+          {hiddenCount > 0 && <p className="muted small">{hiddenCount} not eligible hidden</p>}
+          <table className="mint-wallets">
             <thead>
               <tr>
-                <th></th>
+                <th className="col-check"></th>
                 <th>Wallet</th>
-                <th>Eligibility</th>
                 <th className="hide-sm">Simulation</th>
-                <th>Quantity</th>
-                <th>Est. Cost</th>
+                <th className="col-qty">Qty</th>
+                <th className="col-cost">Cost</th>
                 <th className="hide-sm">Balance</th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((r: any) => {
+              {shownRows.map((r: any) => {
                 const view = viewFor(r);
                 return (
                   <tr key={r.walletId}>
-                    <td>
+                    <td className="col-check">
                       <input
                         type="checkbox"
                         checked={isSel(r)}
                         onChange={(e) => {
                           const key = stageKey ?? "";
                           setSel((s) => {
-                            const base =
-                              selStage === key
-                                ? s
-                                : Object.fromEntries(rows.filter((rr: any) => viewFor(rr).eligible).map((rr: any) => [rr.walletId, true]));
+                            const base = selStage === key ? s : Object.fromEntries(shownRows.map((rr: any) => [rr.walletId, true]));
                             return { ...base, [r.walletId]: e.target.checked };
                           });
                           setSelStage(key);
@@ -675,10 +611,12 @@ export default function MintPage() {
                       />
                     </td>
                     <td>
-                      {r.label} <span className="mono muted">{short(r.address)}</span>
-                    </td>
-                    <td>
-                      <Access view={view} needsLogin={Boolean(r.needsOpenSeaLogin)} />
+                      <span className="wallet-line">
+                        <span className="name">{r.label}</span>
+                        <span className="mono muted addr" title={r.address}>
+                          {tinyAddr(r.address)}
+                        </span>
+                      </span>
                     </td>
                     <td className="hide-sm">
                       {r.simulation?.ok === true ? (
@@ -689,7 +627,7 @@ export default function MintPage() {
                         <span className="muted">—</span>
                       )}
                     </td>
-                    <td>
+                    <td className="col-qty">
                       <div className="stepper" aria-label={`Quantity for ${r.label}`}>
                         <button
                           className="ghost"
@@ -717,9 +655,7 @@ export default function MintPage() {
                       <div className="muted small">{view.maxQty > 0 ? `max ${view.maxQty}` : "none left"}</div>
                       {view.reason && <div className="bad small">{view.reason}</div>}
                     </td>
-                    <td className="mono">
-                      ~{fmtEth(rowCostWei(r).toString())} {sym}
-                    </td>
+                    <td className="mono col-cost">~{fmtEth(rowCostWei(r).toString())}</td>
                     <td className="hide-sm">
                       <span className={BigInt(r.balanceWei ?? "0") >= rowCostWei(r) ? "ok" : "warn"}>
                         {fmtEth(r.balanceWei, 5)} {sym}
@@ -728,10 +664,16 @@ export default function MintPage() {
                   </tr>
                 );
               })}
-              {!rows.length && (
+              {!shownRows.length && (
                 <tr>
-                  <td colSpan={7} className="muted">
-                    No wallets. Add some on <Link href="/app/wallets">Wallets</Link>.
+                  <td colSpan={6} className="muted">
+                    {rows.length ? (
+                      "No wallets are eligible for this stage."
+                    ) : (
+                      <>
+                        No wallets. Add some on <Link href="/app/wallets">Wallets</Link>.
+                      </>
+                    )}
                   </td>
                 </tr>
               )}
@@ -747,13 +689,10 @@ export default function MintPage() {
                 <option value="aggressive">Aggressive</option>
               </select>
             </label>
-          </div>
-          <TimingOptions options={options} chosenKey={chosen?.key ?? null} fmt={fmt} onPick={pickStage} />
-          <div className="row" style={{ marginTop: 8 }}>
             {chosen && !chosen.live && (
               <label title="Send this many milliseconds before (negative) or after (positive) the stage start">
                 Offset (ms){" "}
-                <input type="number" value={offsetMs} onChange={(e) => setOffsetMs(Number(e.target.value))} style={{ width: 90 }} />
+                <input type="number" value={offsetMs} onChange={(e) => setOffsetMs(Number(e.target.value))} style={{ width: 72 }} />
               </label>
             )}
             <button disabled={!minting.length || !chosen || !!busy} onClick={() => simulate()}>
@@ -762,19 +701,12 @@ export default function MintPage() {
           </div>
           {timingNote && <div className="notice">{timingNote}</div>}
           <p className="muted small" style={{ marginTop: 8 }}>
-            {tz ? `Times use your timezone: ${zoneLabel(tz)}.` : ""}
-            {chosen
-              ? chosen.live || !chosen.runAt
-                ? " Runs immediately."
-                : ` Runs at ${fmt(chosen.runAt)}${offsetMs ? ` (${offsetMs > 0 ? "+" : ""}${offsetMs} ms)` : ""}.`
-              : ""}
-            {chosen?.stage && minting.length ? ` Mints in ${chosen.name} with ${minting.length} wallet(s).` : ""}
-            {skippedSel.length
-              ? ` Skipped ${skippedSel.length} selected wallet(s) not eligible for ${chosen?.name}: ${skippedSel
-                  .slice(0, 3)
-                  .map((v) => v.label)
-                  .join(", ")}${skippedSel.length > 3 ? ", …" : ""}.`
-              : ""}
+            {!chosen
+              ? "Pick a stage above."
+              : chosen.live || !chosen.runAt
+                ? `Runs now${chosen.stage ? ` · ${chosen.name}` : ""}${minting.length ? ` · ${minting.length} wallet(s)` : ""}.`
+                : `Scheduled ${fmt(chosen.runAt)}${offsetMs ? ` (${offsetMs > 0 ? "+" : ""}${offsetMs} ms)` : ""} · ${chosen.name}${minting.length ? ` · ${minting.length} wallet(s)` : ""}.`}
+            {tz ? ` ${zoneLabel(tz)}.` : ""}
           </p>
         </div>
       )}
@@ -908,22 +840,62 @@ const STAGE_TYPE: Record<string, string> = {
   unknown: "Unknown",
 };
 
-const STATE_ICON = { eligible: "✓", not_eligible: "✕", unverified: "?", unknown: "?" } as const;
-const STATE_CLASS = { eligible: "ok", not_eligible: "bad", unverified: "muted", unknown: "muted" } as const;
+const tinyAddr = (a?: string | null) => (a ? `${a.slice(0, 4)}…${a.slice(-2)}` : "");
 
-/** Verdict for the stage being minted (the same stage the Timing picker has selected). */
-function Access({ view, needsLogin }: { view: StageWalletView; needsLogin: boolean }) {
-  if (needsLogin && view.access === "unknown") return <span className="muted">Not verified yet</span>;
-  const label =
-    view.access === "yes"
-      ? "Eligible"
-      : view.access === "public"
-        ? "Eligible (public)"
-        : view.access === "no"
-          ? "Not eligible"
-          : view.access === "n/a"
-            ? "No allowlist"
-            : "Unknown";
-  const cls = view.access === "yes" || view.access === "public" ? "ok" : view.access === "no" ? "bad" : "muted";
-  return <b className={cls}>{label}</b>;
+function stageMeta(s: any, sym: string, when: (s: any) => string) {
+  return [
+    s?.priceWei != null ? (s.priceWei === "0" ? "Free" : `${fmtEth(s.priceWei)} ${sym}`) : null,
+    s?.maxPerWallet ? `max ${s.maxPerWallet}/wallet` : null,
+    when(s),
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+/** One stage in the eligibility picker. The Timing section does not repeat this choice. */
+function StagePick({
+  name,
+  active,
+  offered,
+  onPick,
+  count,
+  countClass,
+  meta,
+}: {
+  name: string;
+  active: boolean;
+  offered: boolean;
+  onPick: () => void;
+  count: string;
+  countClass: string;
+  meta: string;
+}) {
+  return (
+    <div className={`stage-group${active ? " on" : ""}`}>
+      <div
+        className={`stage-group-head${offered ? " pick" : ""}`}
+        onClick={offered ? onPick : undefined}
+        onKeyDown={
+          offered
+            ? (e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  onPick();
+                }
+              }
+            : undefined
+        }
+        role={offered ? "radio" : undefined}
+        aria-checked={offered ? active : undefined}
+        tabIndex={offered ? 0 : undefined}
+        title={offered ? `Mint in ${name}` : undefined}
+      >
+        {offered && <span className={`stage-radio${active ? " on" : ""}`} aria-hidden="true" />}
+        <b>{name}</b>
+        <span className="spacer" />
+        <span className={countClass}>{count}</span>
+        {meta ? <span className="stage-meta muted small">{meta}</span> : null}
+      </div>
+    </div>
+  );
 }
