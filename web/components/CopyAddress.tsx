@@ -1,9 +1,11 @@
 "use client";
 // SPDX-License-Identifier: AGPL-3.0-only
 /**
- * Copy-address button: copies the FULL EIP-55 checksummed address. Tries the async Clipboard API, then a hidden
- * textarea + execCommand("copy") (Telegram in-app webviews often block the Clipboard API), and finally shows the
- * address in a selectable toast so the user can copy it by hand. Never triggers the surrounding row / label / summary.
+ * Copy-address button. By default copies the FULL EIP-55 checksummed address. Pass `exact` to copy the string
+ * verbatim (the published $SKYBOT contract address must keep its given checksum casing). Tries the async Clipboard
+ * API, then a hidden textarea + execCommand("copy") (Telegram in-app webviews often block the Clipboard API), and
+ * finally shows the address in a selectable toast so the user can copy it by hand. Never triggers the surrounding
+ * row / label / summary.
  */
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -55,7 +57,19 @@ export async function copyText(text: string): Promise<boolean> {
   return legacyCopy(text);
 }
 
-export function CopyAddress({ address, className }: { address?: string | null; className?: string }) {
+export function CopyAddress({
+  address,
+  className,
+  exact = false,
+  label,
+}: {
+  address?: string | null;
+  className?: string;
+  /** Copy `address` exactly as given, without EIP-55 recasing. */
+  exact?: boolean;
+  /** Visible idle label. Omit for the icon-only button used beside wallet addresses. */
+  label?: string;
+}) {
   const [state, setState] = useState<"idle" | "copied" | "manual">("idle");
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const toastRef = useRef<HTMLDivElement>(null);
@@ -73,7 +87,7 @@ export function CopyAddress({ address, className }: { address?: string | null; c
     }
   }, [state]);
   if (!address) return null;
-  const full = checksum(address);
+  const full = exact ? address : checksum(address);
 
   const onClick = async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -99,7 +113,7 @@ export function CopyAddress({ address, className }: { address?: string | null; c
         onKeyDown={stop}
       >
         {state === "copied" ? <Check size={16} strokeWidth={2.6} aria-hidden /> : <Copy size={16} aria-hidden />}
-        {state === "copied" && <span className="copy-addr-label">Copied</span>}
+        {(label || state === "copied") && <span className="copy-addr-label">{state === "copied" ? "Copied" : label}</span>}
       </button>
       <span className="sr-only" aria-live="polite">
         {state === "copied" ? "Address copied" : ""}

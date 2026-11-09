@@ -32,6 +32,7 @@ SkyBOT Mint lets a community mint NFT drops quickly and safely from many wallets
 - **Telegram Mini App**: the full dashboard opens inside Telegram with seamless login, an inline confirm step, BackButton, haptics, and theme colors.
 - **Telegram bot**: same account as the web (Privy Telegram sign-in), read-only `/check` for every wallet's eligibility, `/mint` to open a drop in the Mini App, wallets and jobs lists (with Cancel buttons), and notifications when mints finish or are cancelled. Times use your own timezone. A **Telegram Bot** link in the app navigation opens the bot.
 - **Link previews**: Open Graph and X (`summary_large_image`) tags with a static 1200×630 image, so shared links unfurl on X, Discord, Telegram, and WhatsApp.
+- **$SKYBOT**: the landing page shows the token contract address, live on [Volta.family](https://volta.family), with one-tap copy.
 - **Multi-user and admin**: per-user data scoping and an admin user list. Admins can cancel any job and open a private Gallery (`/app/admin/gallery`) with promo clips that only admins can stream or download.
 - **Serverless-native**: a single Vercel project with Neon Postgres, QStash, and optional Upstash Redis rate limits.
 
