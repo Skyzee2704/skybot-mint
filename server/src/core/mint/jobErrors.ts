@@ -22,7 +22,7 @@ export async function buildFailureMessage(e: any, c: Ctx): Promise<string> {
 export async function signFailureMessage(e: any, address: string, c: Ctx): Promise<string> {
   const refusal = privySigningRefusal(e, address);
   if (refusal) return refusal;
-  if (isInsufficientFunds(e)) return `Not enough ${c.chain.nativeSymbol} for the mint price plus gas.`;
+  if (isInsufficientFunds(e)) return `Not enough ${c.chain.nativeSymbol} for price + gas.`;
   return `Signing failed: ${(await describeTxError(e, rc(c))).message}`;
 }
 
@@ -31,8 +31,7 @@ export function broadcastRejectedMessage(errors: string[], symbol: string): stri
   const uniq = [...new Set(errors.map((x) => redactString(String(x))))];
   const all = uniq.join(" | ");
   const detail = all.slice(0, 200);
-  if (/insufficient funds|insufficient balance/i.test(all))
-    return `Not enough ${symbol} for the mint price plus gas (nothing was spent). RPC said: ${detail}`;
+  if (/insufficient funds|insufficient balance/i.test(all)) return `Not enough ${symbol} for price + gas.`;
   if (/nonce too low|already known|replacement transaction underpriced/i.test(all))
     return `Another transaction from this wallet used the same nonce first, so this one wasn't accepted. RPC said: ${detail}`;
   if (/fee cap|max fee per gas less than block base fee|underpriced/i.test(all))

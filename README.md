@@ -101,7 +101,7 @@ flowchart LR
 
 To add a chain, add an entry to `server/src/config/chains.ts` and set `RPC_<KEY>`.
 
-Elysium drops on [Kalos](https://kalos.fun) resolve from `https://kalos.fun/drops/<slug>` (or the contract address). Allowlist stages mint through the Kalos SeaDrop with the eligibility proof; the public stage uses `mintPublic`. A mint leaves `KALOS_MINT_RESERVE` native units free (default 1 HYPE on Elysium). If a contract is listed on both OpenSea and Kalos, SkyBOT uses the SeaDrop the contract actually allows.
+Elysium drops on [Kalos](https://kalos.fun) resolve from `https://kalos.fun/drops/<slug>` (or the contract address). Allowlist stages mint through the Kalos SeaDrop with the eligibility proof; the public stage uses `mintPublic`. A wallet that cannot cover the mint price plus gas stays eligible and is still scheduled; the mint is attempted at the start, and a rejected broadcast is reported as not enough of that chain's native coin. If a contract is listed on both OpenSea and Kalos, SkyBOT uses the SeaDrop the contract actually allows.
 
 ## Tech Stack
 
