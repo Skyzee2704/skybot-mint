@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /**
  * Every SkyBOT chain must be in PrivyProvider `supportedChains`. Privy's default list (react-auth 3.50 /
- * js-sdk-core 0.79) has 32 chains but NOT Ink (57073), Robinhood (4663) or Arc (5042). For a chain outside the list,
+ * js-sdk-core 0.79) has 32 chains but NOT Ink (57073), Robinhood (4663), Arc (5042) or Elysium (99901). For a chain outside the list,
  * Privy's signTransaction throws inside an async Promise executor, so the promise never settles and the UI hangs on
  * "Signing". Chains in Privy's defaults keep Privy's entry (with its RPC); the others use our public RPCs (never keyed
  * URLs, this runs in the browser).

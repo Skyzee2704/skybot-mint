@@ -59,7 +59,7 @@ export default function Landing() {
         <div className="features">
           <div className="card">
             <h3>OpenSea + Any Contract</h3>
-            <p className="muted">SeaDrop public &amp; signed stages via the official API, plus generic verified ABIs on 9 chains.</p>
+            <p className="muted">SeaDrop public &amp; signed stages via the official API, plus generic verified ABIs on 10 chains.</p>
           </div>
           <div className="card">
             <h3>Allowlist Without Funding</h3>

@@ -97,6 +97,7 @@ flowchart LR
 | Ink             |    57073 | ETH    | `RPC_INK`       |
 | Robinhood Chain |     4663 | ETH    | `RPC_ROBINHOOD` |
 | Arc             |     5042 | USDC   | `RPC_ARC`       |
+| Elysium         |    99901 | HYPE   | `RPC_ELYSIUM`   |
 
 To add a chain, add an entry to `server/src/config/chains.ts` and set `RPC_<KEY>`.
 
@@ -161,30 +162,30 @@ See **[DEPLOY.md](DEPLOY.md)** for the full step-by-step guide.
 
 All variables are listed in [`.env.example`](.env.example). The main ones:
 
-| Variable                                                                          | Required | Description                                                                                    |
-| --------------------------------------------------------------------------------- | :------: | ---------------------------------------------------------------------------------------------- |
-| `NEXT_PUBLIC_PRIVY_APP_ID`                                                        |    ✅    | Privy App ID (public)                                                                          |
-| `PRIVY_APP_SECRET`                                                                |    ✅    | Privy App secret (server only)                                                                 |
-| `PRIVY_AUTH_PRIVATE_KEY`                                                          |    ✅    | Privy authorization key used for server-side signing                                           |
-| `PRIVY_AUTH_KEY_QUORUM_ID`                                                        |    ✅    | Key quorum ID added as signer on user wallets                                                  |
-| `PRIVY_MINT_POLICY_ID`                                                            |    —     | Privy policy attached with the mint signer (limits what it may sign)                           |
-| `PRIVY_SIWE_AUTH_PRIVATE_KEY`, `PRIVY_SIWE_KEY_QUORUM_ID`, `PRIVY_SIWE_POLICY_ID` |    —     | Sign-in-only signer for OpenSea checks in Telegram `/check`                                    |
-| `PUBLIC_URL`                                                                      |    ✅    | Public HTTPS URL of the deployment (Mini App, deep links, CORS, link-preview URLs)             |
-| `SESSION_SECRET`                                                                  |    ✅    | HMAC secret for Telegram-first session cookies                                                 |
-| `DATABASE_URL`                                                                    | ✅ prod  | Neon Postgres connection string                                                                |
-| `QSTASH_TOKEN`, `QSTASH_CURRENT_SIGNING_KEY`, `QSTASH_NEXT_SIGNING_KEY`           | ✅ prod  | Scheduling and signature verification                                                          |
-| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_BOT_USERNAME`                                     |    ✅    | Telegram bot (the username also feeds the nav **Telegram Bot** link)                           |
-| `TELEGRAM_WEBHOOK_SECRET`                                                         | ✅ prod  | Secret token used to verify webhook calls                                                      |
-| `ADMIN_EMAILS`, `ADMIN_TELEGRAM_IDS`, `TELEGRAM_USER_ID`                          |    —     | Admin users and notification target                                                            |
-| `OPENSEA_API_KEY`, `ETHERSCAN_API_KEY`                                            |    ✅    | Drop resolution and ABI lookup                                                                 |
-| `RPC_<CHAIN>`                                                                     |    —     | Private RPC URLs per chain (public fallbacks built in)                                         |
-| `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`                              |    —     | Distributed rate limiting                                                                      |
-| `ALCHEMY_AUTH_TOKEN`                                                              |    —     | Alchemy Notify token: webhooks that refresh NFT holdings                                       |
-| `JOB_LEAD_MS`, `JOB_MAX_DURATION_SEC`                                             |    —     | Scheduler timing (defaults 20000 ms / 300 s)                                                   |
-| `MAX_PRICE_PER_NFT`, `MAX_DAILY_SPEND`, `MAX_GAS_PRICE_GWEI`, `GAS_MODE`          |    —     | Global safety limits and default gas mode                                                      |
-| `VAULT_ADDRESS`                                                                   |    —     | Default withdraw destination                                                                   |
-| `NEXT_PUBLIC_SOURCE_URL`                                                          |    —     | Repository URL for the footer "Source" link (AGPL)                                             |
-| `NEXT_PUBLIC_TELEGRAM_BOT_USERNAME`                                               |    —     | Build-time bot username for the nav link (defaults to `TELEGRAM_BOT_USERNAME`)                 |
+| Variable                                                                          | Required | Description                                                                               |
+| --------------------------------------------------------------------------------- | :------: | ----------------------------------------------------------------------------------------- |
+| `NEXT_PUBLIC_PRIVY_APP_ID`                                                        |    ✅    | Privy App ID (public)                                                                     |
+| `PRIVY_APP_SECRET`                                                                |    ✅    | Privy App secret (server only)                                                            |
+| `PRIVY_AUTH_PRIVATE_KEY`                                                          |    ✅    | Privy authorization key used for server-side signing                                      |
+| `PRIVY_AUTH_KEY_QUORUM_ID`                                                        |    ✅    | Key quorum ID added as signer on user wallets                                             |
+| `PRIVY_MINT_POLICY_ID`                                                            |    —     | Privy policy attached with the mint signer (limits what it may sign)                      |
+| `PRIVY_SIWE_AUTH_PRIVATE_KEY`, `PRIVY_SIWE_KEY_QUORUM_ID`, `PRIVY_SIWE_POLICY_ID` |    —     | Sign-in-only signer for OpenSea checks in Telegram `/check`                               |
+| `PUBLIC_URL`                                                                      |    ✅    | Public HTTPS URL of the deployment (Mini App, deep links, CORS, link-preview URLs)        |
+| `SESSION_SECRET`                                                                  |    ✅    | HMAC secret for Telegram-first session cookies                                            |
+| `DATABASE_URL`                                                                    | ✅ prod  | Neon Postgres connection string                                                           |
+| `QSTASH_TOKEN`, `QSTASH_CURRENT_SIGNING_KEY`, `QSTASH_NEXT_SIGNING_KEY`           | ✅ prod  | Scheduling and signature verification                                                     |
+| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_BOT_USERNAME`                                     |    ✅    | Telegram bot (the username also feeds the nav **Telegram Bot** link)                      |
+| `TELEGRAM_WEBHOOK_SECRET`                                                         | ✅ prod  | Secret token used to verify webhook calls                                                 |
+| `ADMIN_EMAILS`, `ADMIN_TELEGRAM_IDS`, `TELEGRAM_USER_ID`                          |    —     | Admin users and notification target                                                       |
+| `OPENSEA_API_KEY`, `ETHERSCAN_API_KEY`                                            |    ✅    | Drop resolution and ABI lookup                                                            |
+| `RPC_<CHAIN>`                                                                     |    —     | Private RPC URLs per chain (public fallbacks built in)                                    |
+| `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`                              |    —     | Distributed rate limiting                                                                 |
+| `ALCHEMY_AUTH_TOKEN`                                                              |    —     | Alchemy Notify token: webhooks that refresh NFT holdings                                  |
+| `JOB_LEAD_MS`, `JOB_MAX_DURATION_SEC`                                             |    —     | Scheduler timing (defaults 20000 ms / 300 s)                                              |
+| `MAX_PRICE_PER_NFT`, `MAX_DAILY_SPEND`, `MAX_GAS_PRICE_GWEI`, `GAS_MODE`          |    —     | Global safety limits and default gas mode                                                 |
+| `VAULT_ADDRESS`                                                                   |    —     | Default withdraw destination                                                              |
+| `NEXT_PUBLIC_SOURCE_URL`                                                          |    —     | Repository URL for the footer "Source" link (AGPL)                                        |
+| `NEXT_PUBLIC_TELEGRAM_BOT_USERNAME`                                               |    —     | Build-time bot username for the nav link (defaults to `TELEGRAM_BOT_USERNAME`)            |
 | `NEXT_PUBLIC_SITE_URL`                                                            |    —     | Origin for link-preview URLs (defaults to `PUBLIC_URL`, then `https://skybotmint.web.id`) |
 
 ## Security Model
@@ -217,16 +218,16 @@ Cancellable states are `scheduled`, `waiting_unlock`, and `running` until broadc
 
 All private routes need a Privy JWT, or the session cookie plus CSRF header. Data is always scoped to the signed-in user.
 
-| Area              | Routes                                                                                                                                                              |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Account           | `GET /api/me`, `PUT /api/me/timezone`, `GET/PUT /api/settings`, `POST /api/session/logout`, `POST /api/account/attach-privy`                                        |
-| Drops and minting | `POST /api/resolve`, `POST /api/eligibility`, `POST /api/simulate` → plan, `POST /api/mint/execute` (consumes the plan)                                             |
-| Jobs              | `GET /api/jobs`, `GET /api/jobs/:id`, `POST /api/jobs/:id/cancel` (owner; admins may cancel any job), `GET /api/minted`                                             |
-| Wallets           | `/api/wallets` (list, generate, sync, balances, main, remove/restore, mint-signer and siwe-signer verify)                                                           |
-| Funds and NFTs    | `/api/fund/*`, `/api/withdraw/*`, `/api/nfts`, `/api/nfts/refresh`, `/api/nfts/send*`, `POST /api/tx/status`                                                        |
-| Telegram          | `POST /api/telegram/webhook`, `POST /api/telegram/session`, `POST /api/telegram/unlink`, legacy link-code routes                                                    |
-| Platform          | `GET /api/health`, `GET /api/status`, `GET /api/chains/health`, `POST /api/jobs/run` (QStash), `POST /api/cron/housekeeping` (QStash), `POST /api/webhooks/alchemy` |
-| Admin             | `GET /api/admin/users`, `POST /api/admin/users/:id/disable`, `POST /api/admin/telegram/setup`, `/api/admin/alchemy/*`, `GET /api/admin/gallery`, `GET /api/admin/gallery/media/:name`                                               |
+| Area              | Routes                                                                                                                                                                                |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Account           | `GET /api/me`, `PUT /api/me/timezone`, `GET/PUT /api/settings`, `POST /api/session/logout`, `POST /api/account/attach-privy`                                                          |
+| Drops and minting | `POST /api/resolve`, `POST /api/eligibility`, `POST /api/simulate` → plan, `POST /api/mint/execute` (consumes the plan)                                                               |
+| Jobs              | `GET /api/jobs`, `GET /api/jobs/:id`, `POST /api/jobs/:id/cancel` (owner; admins may cancel any job), `GET /api/minted`                                                               |
+| Wallets           | `/api/wallets` (list, generate, sync, balances, main, remove/restore, mint-signer and siwe-signer verify)                                                                             |
+| Funds and NFTs    | `/api/fund/*`, `/api/withdraw/*`, `/api/nfts`, `/api/nfts/refresh`, `/api/nfts/send*`, `POST /api/tx/status`                                                                          |
+| Telegram          | `POST /api/telegram/webhook`, `POST /api/telegram/session`, `POST /api/telegram/unlink`, legacy link-code routes                                                                      |
+| Platform          | `GET /api/health`, `GET /api/status`, `GET /api/chains/health`, `POST /api/jobs/run` (QStash), `POST /api/cron/housekeeping` (QStash), `POST /api/webhooks/alchemy`                   |
+| Admin             | `GET /api/admin/users`, `POST /api/admin/users/:id/disable`, `POST /api/admin/telegram/setup`, `/api/admin/alchemy/*`, `GET /api/admin/gallery`, `GET /api/admin/gallery/media/:name` |
 
 ## Project Structure
 

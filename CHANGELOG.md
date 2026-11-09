@@ -23,6 +23,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Scheduled mints resolve the drop and fees when the function wakes, and read nonces only in the last few seconds. Public, generic, and a readable merkle allowlist are signed before the start using the simulation gas plus 30%, and broadcast at the start second. Signed GTD/FCFS still use the OpenSea mint API, with a 1.5s timeout and the gas hint when one was saved.
 - The landing page no longer shows the $SKYBOT contract address or the Volta.family link.
+- Elysium Mainnet (chain id 99901, native HYPE). SeaDrop and Multicall3 are deployed; OpenSea and Etherscan v2 are not. Optional private RPC: `RPC_ELYSIUM`.
 
 - Fewer RPC calls: Multicall3 batching for native balances, SeaDrop mint counts and NFT ownership; 30 s balance cache shared by concurrent requests; 12 s fee cache for estimates; 60 s cache for repeated link resolution (`/check`, Resolve); batched transaction status with back-off; Jobs and Settings poll only while visible.
 - Wallet deletion is also blocked when the last holdings scan shows NFTs in the wallet.

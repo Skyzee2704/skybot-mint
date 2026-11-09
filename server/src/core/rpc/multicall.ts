@@ -2,7 +2,7 @@
 /**
  * Multicall3 (0xcA11bde05977b3631167028862bE2a173976CA11) batching: N reads become ONE eth_call.
  * Deployed on every configured chain (eth_getCode verified 2026-10-21: Ethereum, Base, Polygon, Arbitrum,
- * BNB, Unichain, Ink, Robinhood, Arc). Every helper falls back to individual calls if the batch fails.
+ * BNB, Unichain, Ink, Robinhood, Arc; Elysium 2026-11-09, 3808 bytes). Every helper falls back to individual calls if the batch fails.
  */
 import { Interface } from "ethers";
 import type { RpcPool } from "./pool.js";

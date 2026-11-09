@@ -163,7 +163,7 @@ export async function resolveTarget(opts: ResolveOptions): Promise<ResolvedTarge
   if (!code || code === "0x") throw Object.assign(new Error(`No contract code at ${contract} on ${chain.name}`), { statusCode: 404 });
 
   // 3) contract -> slug (official) so we can use the drops API
-  if (!slug && os.available) {
+  if (!slug && os.available && chain.openseaChain) {
     try {
       slug = (await os.getContract(chain.openseaChain, contract)).collection ?? null;
     } catch (e: any) {

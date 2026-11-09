@@ -13,7 +13,7 @@ describe("browser signing guards", () => {
       // Never ship keyed RPC URLs to the browser.
       expect(chain.rpcUrls.default.http.join(" ")).not.toMatch(/alchemy|infura|\/v2\//i);
     }
-    for (const id of [57073, 4663, 5042]) expect(() => assertSignableChain(id)).not.toThrow();
+    for (const id of [57073, 4663, 5042, 99901]) expect(() => assertSignableChain(id)).not.toThrow();
     expect(() => assertSignableChain(999999)).toThrow(SigningError);
   });
 

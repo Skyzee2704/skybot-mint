@@ -14,7 +14,8 @@ export interface ChainConfig {
   name: string;
   nativeSymbol: string;
   explorer: string; // base URL, no trailing slash
-  openseaChain: string; // OpenSea chain slug used in URLs/API
+  /** OpenSea chain slug. Omit when OpenSea has no API for the chain; generic and on-chain mints still work. */
+  openseaChain?: string;
   publicRpcs: string[]; // reputable keyless fallbacks
   sendOnlyRpcs?: string[];
   /** ABI sources: Etherscan v2 multichain (if supported for this chain id) and/or a Blockscout instance. */
@@ -153,6 +154,21 @@ export const CHAINS: ChainConfig[] = [
     blockscoutApi: "https://explorer.arc.io/api",
     seadrop: true,
     safety: { maxPricePerNft: "100", maxDailySpend: "500" }, // USDC-denominated defaults (native gas token is USDC)
+  },
+  {
+    key: "elysium",
+    chainId: 99901, // eth_chainId 0x1863d on https://rpc.elysium.kinetiq.xyz (2026-11-09)
+    name: "Elysium",
+    nativeSymbol: "HYPE",
+    explorer: "https://elysium.kinetiq.xyz/explorer",
+    // OpenSea has no verified chain slug for Elysium (unauthenticated lookups 401 for every slug, including unknown ones).
+    publicRpcs: ["https://rpc.elysium.kinetiq.xyz"],
+    // Blockscout-compatible API (getabi returned Multicall3's ABI). Not on the Etherscan v2 chainlist.
+    blockscoutApi: "https://elysium.kinetiq.xyz/explorer/api",
+    // SeaDrop V1 bytecode is 21081 bytes, the same size as the canonical deployment. Multicall3 is 3808 bytes.
+    seadrop: true,
+    stack: "arbitrum", // Arbitrum Orbit; L1 data fee is inside eth_estimateGas
+    safety: { maxPricePerNft: "1", maxDailySpend: "5" }, // HYPE ~ $73 → about $73 / NFT and $365 / day
   },
   // Add a chain: copy an entry, set chainId/explorer/publicRpcs, then set RPC_<KEY> in env.
 ];
