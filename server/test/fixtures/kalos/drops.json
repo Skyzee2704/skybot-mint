@@ -1,0 +1,821 @@
+{
+  "drops": [
+    {
+      "slug": "elyant",
+      "cid": 77,
+      "order": 100,
+      "address": "0xB01dCc2DB45aa0550aBc3D2EAE2A76911d40967D",
+      "templateVersion": "seadrop-creator-v2.0.0-candidate.4",
+      "seaDrop": "0xCa10569ec3EdA292f435041d7610150e53119BaE",
+      "administrator": "0xCA10547F62feA6BBb777f0b50a9aF0B08F3eF28B",
+      "feeRecipient": "0xcA105395094Ceb27e6AfdA492c6379cBF468CDb8",
+      "feeBps": 1000,
+      "name": "ELYANT",
+      "symbol": "ELYANT",
+      "creator": "0xFbb0ff6e399ef8542603907d47cEf548e2293560",
+      "page": {
+        "displayName": "ELYANT",
+        "description": "ElyAnt is a collection of 1,111 unique NFTs built on the Elysium network, serving as the foundation of an onchain prediction market ecosystem. ElyAnt holders can stake their NFTs to unlock exclusive utilities, including the ability to create prediction markets across cryptocurrency, NFT, and sports categories. \n\nThrough staking, market participation, and ecosystem rewards, ElyAnt connects digital ownership with real utility in a growing decentralized economy.\n\nElyAnt — Where conviction becomes an onchain position.",
+        "logo": {
+          "id": "1c0402386598106b7eddfe20a6d88745159687d2d7567546297a3730d340512e",
+          "url": "https://www.kalos.fun/kmedia/1c0402386598106b7eddfe20a6d88745159687d2d7567546297a3730d340512e.webp"
+        },
+        "banner": {
+          "id": "8da2a859b7dd9f7738c7d660c5e10465aae45b5f8c7b05a714dabb807487db58",
+          "url": "https://www.kalos.fun/kmedia/8da2a859b7dd9f7738c7d660c5e10465aae45b5f8c7b05a714dabb807487db58.webp"
+        },
+        "bannerFocal": null,
+        "cover": null,
+        "gallery": [],
+        "links": { "x": null, "website": "https://www.elyant.fun/", "discord": null },
+        "stageCopy": {},
+        "published": true
+      },
+      "maxSupply": 1111,
+      "totalSupply": 1110,
+      "hasMinted": true,
+      "lastMintAt": 1794236462,
+      "public": {
+        "priceWei": "8000000000000000",
+        "price": "0.008",
+        "start": 1794319260,
+        "end": 1794409200,
+        "maxPerWallet": 3,
+        "feeBps": 1000
+      },
+      "stages": [
+        {
+          "index": 1,
+          "name": "Hives",
+          "start": 1794231000,
+          "end": 1794236400,
+          "priceWei": "8000000000000000",
+          "price": "0.008",
+          "maxPerWallet": 1,
+          "stageSupply": 1111
+        },
+        {
+          "index": 2,
+          "name": "Colony",
+          "start": 1794236460,
+          "end": 1794319260,
+          "priceWei": "8000000000000000",
+          "price": "0.008",
+          "maxPerWallet": 2,
+          "stageSupply": 1111
+        }
+      ],
+      "state": "live",
+      "compliance": "ok",
+      "published": true,
+      "chainAt": 1794247305226
+    },
+    {
+      "slug": "elysium-punks",
+      "cid": 76,
+      "order": 100,
+      "address": "0x221160cB3CB3ca57EC9BB586f88F7e3c0157ccd1",
+      "templateVersion": "seadrop-creator-v2.0.0-candidate.4",
+      "seaDrop": "0xCa10569ec3EdA292f435041d7610150e53119BaE",
+      "administrator": "0xCA10547F62feA6BBb777f0b50a9aF0B08F3eF28B",
+      "feeRecipient": "0xcA105395094Ceb27e6AfdA492c6379cBF468CDb8",
+      "feeBps": 1000,
+      "name": "Elysium Punks",
+      "symbol": "EPUNKS",
+      "creator": "0xC13431f22117E0694b8a4D381c396608fA246523",
+      "page": {
+        "displayName": "Elysium Punks",
+        "description": "Elysium Punks is the first punk PFP collection on Elysium. 10,000 unique pixel punks for collectors, builders and explorers who believe in being early.\n\nMainnet punks unlock staking for $EPUNK points and merging.\n\nelysiumpunks.xyz",
+        "logo": {
+          "id": "f1521bc6a84b322151a6087d1bccbcaf047b66cd0eab4c1e721ebfb4f0dc8f27",
+          "url": "https://www.kalos.fun/kmedia/f1521bc6a84b322151a6087d1bccbcaf047b66cd0eab4c1e721ebfb4f0dc8f27.webp"
+        },
+        "banner": {
+          "id": "02879f1e87c0af12826fac409e67ee61ecdeb79e387e9bc4354b080941975c0c",
+          "url": "https://www.kalos.fun/kmedia/02879f1e87c0af12826fac409e67ee61ecdeb79e387e9bc4354b080941975c0c.webp"
+        },
+        "bannerFocal": null,
+        "cover": null,
+        "gallery": [],
+        "links": { "x": null, "website": "https://elysiumpunks.xyz", "discord": null },
+        "stageCopy": {},
+        "published": true
+      },
+      "maxSupply": 10000,
+      "totalSupply": 798,
+      "hasMinted": true,
+      "lastMintAt": 1794246015,
+      "public": {
+        "priceWei": "25000000000000000",
+        "price": "0.025",
+        "start": 1794241800,
+        "end": 1794328200,
+        "maxPerWallet": 10,
+        "feeBps": 1000
+      },
+      "stages": [
+        {
+          "index": 1,
+          "name": "GTD",
+          "start": 1794232800,
+          "end": 1794238200,
+          "priceWei": "25000000000000000",
+          "price": "0.025",
+          "maxPerWallet": 3,
+          "stageSupply": 10000
+        },
+        {
+          "index": 2,
+          "name": "FCFS",
+          "start": 1794238200,
+          "end": 1794241800,
+          "priceWei": "25000000000000000",
+          "price": "0.025",
+          "maxPerWallet": 5,
+          "stageSupply": 10000
+        }
+      ],
+      "state": "live",
+      "compliance": "ok",
+      "published": true,
+      "chainAt": 1794247305226
+    },
+    {
+      "slug": "fluff-bat-society",
+      "cid": 74,
+      "order": 100,
+      "address": "0x7ED9a547A39845E9307F72c7a5c8a2055CdeE8DA",
+      "templateVersion": "seadrop-creator-v2.0.0-candidate.4",
+      "seaDrop": "0xCa10569ec3EdA292f435041d7610150e53119BaE",
+      "administrator": "0xCA10547F62feA6BBb777f0b50a9aF0B08F3eF28B",
+      "feeRecipient": "0xcA105395094Ceb27e6AfdA492c6379cBF468CDb8",
+      "feeBps": 1000,
+      "name": "Fluff Bat Society",
+      "symbol": "FLUFFBAT",
+      "creator": "0x5941644054528F7a017B7353d2cEbfa8B44631E9",
+      "page": {
+        "displayName": "Fluff Bat Society",
+        "description": "A collection of 3,555 unique, hand-crafted Fluffbats, each with its own personality, traits, and identity.\nBorn on Elysium. Powered by community. Welcome to The Fluff Bat Society.",
+        "logo": {
+          "id": "d232a6663dffbf896aced4bf2ddd1114f77d6699065cef8b5fc23d3ac6189ddf",
+          "url": "https://www.kalos.fun/kmedia/d232a6663dffbf896aced4bf2ddd1114f77d6699065cef8b5fc23d3ac6189ddf.webp"
+        },
+        "banner": {
+          "id": "2cfe4452c373e27fd84c28ee6bd3797e207e9738c37e5d169cb84ef8e427ca9a",
+          "url": "https://www.kalos.fun/kmedia/2cfe4452c373e27fd84c28ee6bd3797e207e9738c37e5d169cb84ef8e427ca9a.webp"
+        },
+        "bannerFocal": null,
+        "cover": null,
+        "gallery": [],
+        "links": { "x": null, "website": null, "discord": "https://discord.com/invite/fluffbatsociety" },
+        "stageCopy": {},
+        "published": true
+      },
+      "maxSupply": 3555,
+      "totalSupply": 329,
+      "hasMinted": true,
+      "lastMintAt": 1794246707,
+      "public": {
+        "priceWei": "77000000000000000",
+        "price": "0.077",
+        "start": 1794317400,
+        "end": 1794331800,
+        "maxPerWallet": 3,
+        "feeBps": 1000
+      },
+      "stages": [
+        {
+          "index": 1,
+          "name": "Free Mint ",
+          "start": 1794231000,
+          "end": 1794317400,
+          "priceWei": "0",
+          "price": "0",
+          "maxPerWallet": 3,
+          "stageSupply": 3555
+        },
+        {
+          "index": 2,
+          "name": "GTD WL+Kalos Holders WL",
+          "start": 1794231000,
+          "end": 1794317400,
+          "priceWei": "45500000000000000",
+          "price": "0.0455",
+          "maxPerWallet": 3,
+          "stageSupply": 3555
+        }
+      ],
+      "state": "live",
+      "compliance": "ok",
+      "published": true,
+      "chainAt": 1794247305226
+    },
+    {
+      "slug": "heroes-of-elysium",
+      "cid": 73,
+      "order": 100,
+      "address": "0xd872Ffd300c1Cba5bAE7B61fBE46996A7E4D6333",
+      "templateVersion": "seadrop-creator-v2.0.0-candidate.4",
+      "seaDrop": "0xCa10569ec3EdA292f435041d7610150e53119BaE",
+      "administrator": "0xCA10547F62feA6BBb777f0b50a9aF0B08F3eF28B",
+      "feeRecipient": "0xcA105395094Ceb27e6AfdA492c6379cBF468CDb8",
+      "feeBps": 1000,
+      "name": "Heroes of Elysium",
+      "symbol": "HEROES",
+      "creator": "0x0Ab91EE29D38bf815FF28f2CBF78ABbe222EE3e8",
+      "page": {
+        "displayName": "Heroes of Elysium",
+        "description": "Pay the ferryman. Cross the river. Join the heroes.\n\nHeroes of Elysium is a collection of 888 portraits inspired by ancient Athenian vase painting: 868 Heroes and 20 one-of-one Legends on Elysium. Black glaze, terracotta, worn clay and gilded grounds carry the faces of a new mythology.\n\nEvery Hero has a Calling and a Favour: the work they do, and how closely the gods watch them.\n\nYour journey continues in the Chronicle, where your activity on Elysium is told as an epic through Ichor, ranks, the Twelve Labors and the Books of the Odyssey. Beyond it lie the hills of Laurion. Heroes are never idle. The hills are being surveyed.\n\nYour Hero is a symbol of your journey on Elysium. The gods notice everything.",
+        "logo": {
+          "id": "dd1a3eb67d2fc6b27992871ea83508529288d80dbea4cfde7fc943cc9d879801",
+          "url": "https://www.kalos.fun/kmedia/dd1a3eb67d2fc6b27992871ea83508529288d80dbea4cfde7fc943cc9d879801.webp"
+        },
+        "banner": {
+          "id": "0ace974b23b995a7c45bc92e32dbeb8b8a169f2a2ed4a8472c1f1fb984790c9c",
+          "url": "https://www.kalos.fun/kmedia/0ace974b23b995a7c45bc92e32dbeb8b8a169f2a2ed4a8472c1f1fb984790c9c.webp"
+        },
+        "bannerFocal": null,
+        "cover": null,
+        "gallery": [],
+        "links": { "x": null, "website": "https://heroesofelysium.xyz", "discord": null },
+        "stageCopy": {},
+        "published": true
+      },
+      "maxSupply": 888,
+      "totalSupply": 238,
+      "hasMinted": true,
+      "lastMintAt": 1794246999,
+      "public": {
+        "priceWei": "40000000000000000",
+        "price": "0.04",
+        "start": 1794243660,
+        "end": 1794502800,
+        "maxPerWallet": 4,
+        "feeBps": 1000
+      },
+      "stages": [
+        {
+          "index": 2,
+          "name": "GTD",
+          "start": 1794232800,
+          "end": 1794236400,
+          "priceWei": "40000000000000000",
+          "price": "0.04",
+          "maxPerWallet": 4,
+          "stageSupply": 500
+        },
+        {
+          "index": 1,
+          "name": "FCFS",
+          "start": 1794236460,
+          "end": 1794330000,
+          "priceWei": "40000000000000000",
+          "price": "0.04",
+          "maxPerWallet": 4,
+          "stageSupply": 888
+        }
+      ],
+      "state": "live",
+      "compliance": "ok",
+      "published": true,
+      "chainAt": 1794247303774
+    },
+    {
+      "slug": "pixel-blobs",
+      "cid": 72,
+      "order": 100,
+      "address": "0x8e22026c9dD25AfAaAdd134C4b9690286A55cc0D",
+      "templateVersion": "seadrop-creator-v2.0.0-candidate.4",
+      "seaDrop": "0xCa10569ec3EdA292f435041d7610150e53119BaE",
+      "administrator": "0xCA10547F62feA6BBb777f0b50a9aF0B08F3eF28B",
+      "feeRecipient": "0xcA105395094Ceb27e6AfdA492c6379cBF468CDb8",
+      "feeBps": 1000,
+      "name": "Pixel Blobs",
+      "symbol": "PB",
+      "creator": "0x4BC3aF498CD515dd0Fa4b0184D6cf13e03760C0c",
+      "page": {
+        "displayName": "Pixel Blobs",
+        "description": "333 unique pixel blobs living on Elysium. every blob has its own mix of traits, from sleepy faces to laser eyes and halos. all phases free mint.",
+        "logo": {
+          "id": "f2ed556239c103cd822833751cae4dd9049ab010c2188a2691168d78896087c1",
+          "url": "https://www.kalos.fun/kmedia/f2ed556239c103cd822833751cae4dd9049ab010c2188a2691168d78896087c1.webp"
+        },
+        "banner": {
+          "id": "8daefc296e3abfe23fdc2ff0e77eb0c59eae30857cd432be615ed848e1583a43",
+          "url": "https://www.kalos.fun/kmedia/8daefc296e3abfe23fdc2ff0e77eb0c59eae30857cd432be615ed848e1583a43.webp"
+        },
+        "bannerFocal": null,
+        "cover": null,
+        "gallery": [],
+        "links": { "x": null, "website": "https://pixelblobs.pages.dev", "discord": null },
+        "stageCopy": {},
+        "published": true
+      },
+      "maxSupply": 333,
+      "totalSupply": 160,
+      "hasMinted": true,
+      "lastMintAt": 1794244322,
+      "public": { "priceWei": "0", "price": "0", "start": 1794276000, "end": 1794319200, "maxPerWallet": 1, "feeBps": 1000 },
+      "stages": [
+        {
+          "index": 1,
+          "name": "GTD",
+          "start": 1794232800,
+          "end": 1794254400,
+          "priceWei": "0",
+          "price": "0",
+          "maxPerWallet": 1,
+          "stageSupply": 333
+        },
+        {
+          "index": 2,
+          "name": "FCFS",
+          "start": 1794254400,
+          "end": 1794276000,
+          "priceWei": "0",
+          "price": "0",
+          "maxPerWallet": 1,
+          "stageSupply": 333
+        }
+      ],
+      "state": "live",
+      "compliance": "ok",
+      "published": true,
+      "chainAt": 1794247303774
+    },
+    {
+      "slug": "outlaws",
+      "cid": 71,
+      "order": 100,
+      "address": "0x1983979dD3c74c7e5F51ed6164407989d08D2ECb",
+      "templateVersion": "seadrop-creator-v2.0.0-candidate.4",
+      "seaDrop": "0xCa10569ec3EdA292f435041d7610150e53119BaE",
+      "administrator": "0xCA10547F62feA6BBb777f0b50a9aF0B08F3eF28B",
+      "feeRecipient": "0xcA105395094Ceb27e6AfdA492c6379cBF468CDb8",
+      "feeBps": 1000,
+      "name": "Outlaws",
+      "symbol": "OL",
+      "creator": "0x50D3A42501f3c3E7CB025E34307147F15781c00B",
+      "page": {
+        "displayName": "Outlaws",
+        "description": "OUTLAWS is an NFT powered ecosystem built on Elysium, the Layer 2 network of Hyperliquid. Designed to go beyond traditional digital collectibles, OUTLAWS aims to create a community driven ecosystem where NFT ownership brings real utility, exclusive opportunities and long term value.\n\nThe ecosystem focuses on meaningful holder benefits, including royalty sharing, exclusive whitelist access, free airdrops from upcoming collections and a native token powered economy featuring a buyback engine and rewards for long term holders.\n\nWith a long term vision of expanding into token backed NFT infrastructure, memecoin ecosystems, launchpad opportunities and creator tools, OUTLAWS aims to build more than a collection.",
+        "logo": {
+          "id": "192483adeb996718ee40a1a722a6d7bfc8ba7e35107d180820f6f350d0af4ea2",
+          "url": "https://www.kalos.fun/kmedia/192483adeb996718ee40a1a722a6d7bfc8ba7e35107d180820f6f350d0af4ea2.webp"
+        },
+        "banner": {
+          "id": "2fc9f3fe1e4f5d435ba8548426c1c71728f1bb402571341d2260c8827fcb332f",
+          "url": "https://www.kalos.fun/kmedia/2fc9f3fe1e4f5d435ba8548426c1c71728f1bb402571341d2260c8827fcb332f.webp"
+        },
+        "bannerFocal": null,
+        "cover": null,
+        "gallery": [],
+        "links": { "x": null, "website": "https://elysiumoutlaws.xyz", "discord": null },
+        "stageCopy": {},
+        "published": true
+      },
+      "maxSupply": 666,
+      "totalSupply": 632,
+      "hasMinted": true,
+      "lastMintAt": 1794247316,
+      "public": {
+        "priceWei": "30000000000000000",
+        "price": "0.03",
+        "start": 1794236400,
+        "end": 1794499200,
+        "maxPerWallet": 10,
+        "feeBps": 1000
+      },
+      "stages": [
+        {
+          "index": 1,
+          "name": "GTD Phase (GUARANTEED)",
+          "start": 1794232800,
+          "end": 1794236400,
+          "priceWei": "30000000000000000",
+          "price": "0.03",
+          "maxPerWallet": 1,
+          "stageSupply": 666
+        },
+        {
+          "index": 2,
+          "name": "FCFS Phase (FIRST COME FIRST SERVE)",
+          "start": 1794236400,
+          "end": 1794238200,
+          "priceWei": "30000000000000000",
+          "price": "0.03",
+          "maxPerWallet": 3,
+          "stageSupply": 666
+        }
+      ],
+      "state": "live",
+      "compliance": "ok",
+      "published": true,
+      "chainAt": 1794247321945
+    },
+    {
+      "slug": "slymz-crew",
+      "cid": 70,
+      "order": 2,
+      "address": "0x4A19D4108Faec0FB0567fCC386a24A6a7E677809",
+      "templateVersion": "seadrop-creator-v2.0.0-candidate.4",
+      "seaDrop": "0xCa10569ec3EdA292f435041d7610150e53119BaE",
+      "administrator": "0xCA10547F62feA6BBb777f0b50a9aF0B08F3eF28B",
+      "feeRecipient": "0xcA105395094Ceb27e6AfdA492c6379cBF468CDb8",
+      "feeBps": 1000,
+      "name": "slymz crew",
+      "symbol": "SLYMZ",
+      "creator": "0xa0BC9A9e2d8D05eCc9491f8cB5C2cb06334F353D",
+      "page": {
+        "displayName": "slymz crew",
+        "description": "slymz is a crew of 1,527 slimes running the undercity of sector elysium.",
+        "logo": {
+          "id": "cb363c6520128d69e8c9f047eed7f9b3e2d047b274c55914892c198f5454748e",
+          "url": "https://www.kalos.fun/kmedia/cb363c6520128d69e8c9f047eed7f9b3e2d047b274c55914892c198f5454748e.webp"
+        },
+        "banner": {
+          "id": "49114dffea57d4adca0cef8e34f670e07a3c364dfe1838c3713de7d59ee253f4",
+          "url": "https://www.kalos.fun/kmedia/49114dffea57d4adca0cef8e34f670e07a3c364dfe1838c3713de7d59ee253f4.webp"
+        },
+        "bannerFocal": null,
+        "cover": null,
+        "gallery": [],
+        "links": { "x": null, "website": "https://slymz.xyz/", "discord": null },
+        "stageCopy": {},
+        "published": true
+      },
+      "maxSupply": 1527,
+      "totalSupply": 1527,
+      "hasMinted": true,
+      "lastMintAt": 1794236652,
+      "public": { "priceWei": "0", "price": "0", "start": 1794240000, "end": 1794250800, "maxPerWallet": 1, "feeBps": 1000 },
+      "stages": [
+        {
+          "index": 1,
+          "name": "guaranteed",
+          "start": 1794230100,
+          "end": 1794238200,
+          "priceWei": "0",
+          "price": "0",
+          "maxPerWallet": 1,
+          "stageSupply": 1527
+        },
+        {
+          "index": 2,
+          "name": "fcfs",
+          "start": 1794238200,
+          "end": 1794241800,
+          "priceWei": "0",
+          "price": "0",
+          "maxPerWallet": 1,
+          "stageSupply": 1527
+        }
+      ],
+      "state": "past",
+      "compliance": "ok",
+      "published": true,
+      "chainAt": 1794247303774
+    },
+    {
+      "slug": "elysium-mfers",
+      "cid": 69,
+      "order": 100,
+      "address": "0xc4D82060b4DbCc9fA72B956F65B7f44c6337125c",
+      "templateVersion": "seadrop-creator-v2.0.0-candidate.4",
+      "seaDrop": "0xCa10569ec3EdA292f435041d7610150e53119BaE",
+      "administrator": "0xCA10547F62feA6BBb777f0b50a9aF0B08F3eF28B",
+      "feeRecipient": "0xcA105395094Ceb27e6AfdA492c6379cBF468CDb8",
+      "feeBps": 1000,
+      "name": "Elysium Mfers",
+      "symbol": "ELYMFERS",
+      "creator": "0x008291E08bb8A4FcD1eF2a83AAdB62Ed2d4Ad156",
+      "page": {
+        "displayName": "Elysium Mfers",
+        "description": "999 Dysto Mfers have survived the PERP & RWA cataclysm and made it into Elysium L2 Chain as ElysiumMfers... O~'",
+        "logo": {
+          "id": "1fed9f6a5562be938a5dc656c0c5766b9ecee88d8eb89243acf84995d4234d9a",
+          "url": "https://www.kalos.fun/kmedia/1fed9f6a5562be938a5dc656c0c5766b9ecee88d8eb89243acf84995d4234d9a.webp"
+        },
+        "banner": {
+          "id": "b9f9cf95a85b738a9e78d836dd08863317b2e4471e59a45158a69902b6620535",
+          "url": "https://www.kalos.fun/kmedia/b9f9cf95a85b738a9e78d836dd08863317b2e4471e59a45158a69902b6620535.webp"
+        },
+        "bannerFocal": null,
+        "cover": null,
+        "gallery": [],
+        "links": { "x": null, "website": "https://dystomfers.art", "discord": "https://discord.gg/GdUwqMJWzA" },
+        "stageCopy": {},
+        "published": true
+      },
+      "maxSupply": 999,
+      "totalSupply": 48,
+      "hasMinted": true,
+      "lastMintAt": 1794245928,
+      "public": {
+        "priceWei": "40000000000000000",
+        "price": "0.04",
+        "start": 1794272401,
+        "end": 1794877200,
+        "maxPerWallet": 5,
+        "feeBps": 1000
+      },
+      "stages": [
+        {
+          "index": 1,
+          "name": "Team",
+          "start": 1794232800,
+          "end": 1794234060,
+          "priceWei": "0",
+          "price": "0",
+          "maxPerWallet": 9,
+          "stageSupply": 9
+        },
+        {
+          "index": 2,
+          "name": "GTD Mfers",
+          "start": 1794234300,
+          "end": 1794243600,
+          "priceWei": "20000000000000000",
+          "price": "0.02",
+          "maxPerWallet": 1,
+          "stageSupply": 999
+        },
+        {
+          "index": 3,
+          "name": "FCFS Mfers",
+          "start": 1794243601,
+          "end": 1794272340,
+          "priceWei": "40000000000000000",
+          "price": "0.04",
+          "maxPerWallet": 2,
+          "stageSupply": 999
+        }
+      ],
+      "state": "live",
+      "compliance": "ok",
+      "published": true,
+      "chainAt": 1794247302306
+    },
+    {
+      "slug": "bitizens",
+      "cid": 66,
+      "order": 3,
+      "address": "0xA3aE6dBF763Aa58C41f3a3Ae9746eA13e357b722",
+      "templateVersion": "seadrop-creator-v2.0.0-candidate.4",
+      "seaDrop": "0xCa10569ec3EdA292f435041d7610150e53119BaE",
+      "administrator": "0xCA10547F62feA6BBb777f0b50a9aF0B08F3eF28B",
+      "feeRecipient": "0xcA105395094Ceb27e6AfdA492c6379cBF468CDb8",
+      "feeBps": 1000,
+      "name": "Bitizens",
+      "symbol": "BTZN",
+      "creator": "0xDe8adCaE3Ee33F0d22C016A7a1105d547c631Ad9",
+      "page": {
+        "displayName": "Bitizens",
+        "description": "4,000 pixel citizens on Elysium. Hold, earn, claim",
+        "logo": {
+          "id": "d0826e6b910f26b1d8a9957c2b6a67b8d99aa51a4d65be717d8b6a6d01923d78",
+          "url": "https://www.kalos.fun/kmedia/d0826e6b910f26b1d8a9957c2b6a67b8d99aa51a4d65be717d8b6a6d01923d78.webp"
+        },
+        "banner": {
+          "id": "51516a44198f9378f3315654d229b6292cf079c4bdc41dd4425753a14f5f2610",
+          "url": "https://www.kalos.fun/kmedia/51516a44198f9378f3315654d229b6292cf079c4bdc41dd4425753a14f5f2610.webp"
+        },
+        "bannerFocal": null,
+        "cover": null,
+        "gallery": [],
+        "links": { "x": "Bitizens_ely", "website": "https://bitizens-ely.xyz", "discord": null },
+        "stageCopy": {},
+        "published": true
+      },
+      "maxSupply": 4000,
+      "totalSupply": 308,
+      "hasMinted": true,
+      "lastMintAt": 1794247242,
+      "public": {
+        "priceWei": "22000000000000000",
+        "price": "0.022",
+        "start": 1794243600,
+        "end": 1794308400,
+        "maxPerWallet": 2,
+        "feeBps": 1000
+      },
+      "stages": [
+        {
+          "index": 1,
+          "name": "WL phase",
+          "start": 1794236400,
+          "end": 1794243600,
+          "priceWei": "12000000000000000",
+          "price": "0.012",
+          "maxPerWallet": 1,
+          "stageSupply": 4000
+        }
+      ],
+      "state": "live",
+      "compliance": "ok",
+      "published": true,
+      "chainAt": 1794247302306
+    },
+    {
+      "slug": "shift",
+      "cid": 65,
+      "order": 100,
+      "address": "0xa6e19c3FAA252fc0c99F9F91a0E3B1Ed7e32e39b",
+      "templateVersion": "seadrop-creator-v2.0.0-candidate.4",
+      "seaDrop": "0xCa10569ec3EdA292f435041d7610150e53119BaE",
+      "administrator": "0xCA10547F62feA6BBb777f0b50a9aF0B08F3eF28B",
+      "feeRecipient": "0xcA105395094Ceb27e6AfdA492c6379cBF468CDb8",
+      "feeBps": 1000,
+      "name": "Shift",
+      "symbol": "SHIFT",
+      "creator": "0xf066a6B26aE258A40D3b6ADF1Bc99d121CA78F48",
+      "page": {
+        "displayName": "Shift",
+        "description": "The Night Register",
+        "logo": {
+          "id": "890c36f0396fd902f91c4c83d63b54628a59fef2299a086be6bcc135ab29ee96",
+          "url": "https://www.kalos.fun/kmedia/890c36f0396fd902f91c4c83d63b54628a59fef2299a086be6bcc135ab29ee96.webp"
+        },
+        "banner": {
+          "id": "eeb7e72f199c917586fb11b883c14c22852cc08cd85bd52e6ff84e5a26525c66",
+          "url": "https://www.kalos.fun/kmedia/eeb7e72f199c917586fb11b883c14c22852cc08cd85bd52e6ff84e5a26525c66.webp"
+        },
+        "bannerFocal": null,
+        "cover": null,
+        "gallery": [],
+        "links": { "x": null, "website": "https://shiftforever.xyz/", "discord": null },
+        "stageCopy": {},
+        "published": true
+      },
+      "maxSupply": 1000,
+      "totalSupply": 399,
+      "hasMinted": true,
+      "lastMintAt": 1794247403,
+      "public": {
+        "priceWei": "2000000000000000",
+        "price": "0.002",
+        "start": 1794245580,
+        "end": 1794341460,
+        "maxPerWallet": 100,
+        "feeBps": 1000
+      },
+      "stages": [
+        {
+          "index": 1,
+          "name": "GTD",
+          "start": 1794232800,
+          "end": 1794240000,
+          "priceWei": "60000000000000000",
+          "price": "0.06",
+          "maxPerWallet": 1,
+          "stageSupply": 900
+        },
+        {
+          "index": 2,
+          "name": "FCFS",
+          "start": 1794240060,
+          "end": 1794250740,
+          "priceWei": "25000000000000000",
+          "price": "0.025",
+          "maxPerWallet": 3,
+          "stageSupply": 1000
+        }
+      ],
+      "state": "live",
+      "compliance": "ok",
+      "published": true,
+      "chainAt": 1794247410510
+    },
+    {
+      "slug": "elyziuma",
+      "cid": 68,
+      "order": 1,
+      "address": "0xEa82F6D7809d845991669021b941348723e8122f",
+      "templateVersion": "seadrop-creator-v2.0.0-candidate.4",
+      "seaDrop": "0xCa10569ec3EdA292f435041d7610150e53119BaE",
+      "administrator": "0xCA10547F62feA6BBb777f0b50a9aF0B08F3eF28B",
+      "feeRecipient": "0xcA105395094Ceb27e6AfdA492c6379cBF468CDb8",
+      "feeBps": 1000,
+      "name": "Elyziuma",
+      "symbol": "ELYZ",
+      "creator": "0x1b2611782f0244f2Db0d383043797658a3c933dF",
+      "page": {
+        "displayName": "Elyziuma",
+        "description": "Elyziuma is a PFP NFT collection on Elysium, featuring 2,222 unique NFTs. Built around community, creativity, and the spirit of being early. More than just NFTs, Elyziuma is about building, exploring, and creating new opportunities within the Elysium ecosystem.\n\nBuilding together. Exploring together. Being early. 🔥",
+        "logo": {
+          "id": "d46c1bce22e7f7ed6425cce9df97d57fc1d8b84c9c4a93e1104a1e44235aa9e0",
+          "url": "https://www.kalos.fun/kmedia/d46c1bce22e7f7ed6425cce9df97d57fc1d8b84c9c4a93e1104a1e44235aa9e0.webp"
+        },
+        "banner": {
+          "id": "678f9300cd204ae9d7221b2584168e15b4ab95bd60bdc3e006da49b4987c9cbe",
+          "url": "https://www.kalos.fun/kmedia/678f9300cd204ae9d7221b2584168e15b4ab95bd60bdc3e006da49b4987c9cbe.webp"
+        },
+        "bannerFocal": null,
+        "cover": null,
+        "gallery": [],
+        "links": { "x": null, "website": "https://www.elyziuma.xyz/", "discord": null },
+        "stageCopy": {},
+        "published": true
+      },
+      "maxSupply": 2222,
+      "totalSupply": 1937,
+      "hasMinted": true,
+      "lastMintAt": 1794247424,
+      "public": {
+        "priceWei": "150000000000000000",
+        "price": "0.15",
+        "start": 1794250800,
+        "end": 1794682800,
+        "maxPerWallet": 5,
+        "feeBps": 1000
+      },
+      "stages": [
+        {
+          "index": 1,
+          "name": "GTD (Guaranteed)",
+          "start": 1794232800,
+          "end": 1794240000,
+          "priceWei": "125000000000000000",
+          "price": "0.125",
+          "maxPerWallet": 1,
+          "stageSupply": 2222
+        },
+        {
+          "index": 2,
+          "name": "FCFS (First Come, First Served)",
+          "start": 1794240000,
+          "end": 1794250800,
+          "priceWei": "150000000000000000",
+          "price": "0.15",
+          "maxPerWallet": 3,
+          "stageSupply": 2222
+        }
+      ],
+      "state": "live",
+      "compliance": "ok",
+      "published": true,
+      "chainAt": 1794247427734
+    },
+    {
+      "slug": "rekt-souls",
+      "cid": 75,
+      "order": 100,
+      "address": "0xa86bE87f70Ce04ed7F04Fc9141c084BFC09CEb8a",
+      "templateVersion": "seadrop-creator-v2.0.0-candidate.4",
+      "seaDrop": "0xCa10569ec3EdA292f435041d7610150e53119BaE",
+      "administrator": "0xCA10547F62feA6BBb777f0b50a9aF0B08F3eF28B",
+      "feeRecipient": "0xcA105395094Ceb27e6AfdA492c6379cBF468CDb8",
+      "feeBps": 1000,
+      "name": "Rekt Souls",
+      "symbol": "REKT",
+      "creator": "0xeBBfce87cAc53b90544b23b019C052074AbA52e3",
+      "page": {
+        "displayName": "Rekt Souls",
+        "description": "REKT SOULS is a 2,222 piece PFP collection for everyone who’s ever been liquidated. The idea is simple: every trader on Hyperliquid has a bag that got wicked out, a 100x that went to zero, a stop they didn’t set. Instead of hiding it, we turned it into an identity. Each soul is a hand-built 2D skeleton in a suit, hoodie, jumpsuit or whatever they died in, with traits pulled straight from degen life: copium masks, liquidation receipts, laser eyes, red candle backgrounds etc.",
+        "logo": {
+          "id": "1933ebfb132a9483e1da0f552651e8b423772ff1012a6a4f1f90688d67178e82",
+          "url": "https://www.kalos.fun/kmedia/1933ebfb132a9483e1da0f552651e8b423772ff1012a6a4f1f90688d67178e82.webp"
+        },
+        "banner": {
+          "id": "07363b36801f2068cabbeaa39e88e634ac64a6022224eb3d7c875cc5c29eee52",
+          "url": "https://www.kalos.fun/kmedia/07363b36801f2068cabbeaa39e88e634ac64a6022224eb3d7c875cc5c29eee52.webp"
+        },
+        "bannerFocal": null,
+        "cover": null,
+        "gallery": [],
+        "links": { "x": null, "website": "https://rektsouls.wtf/", "discord": null },
+        "stageCopy": {},
+        "published": true
+      },
+      "maxSupply": 1111,
+      "totalSupply": 383,
+      "hasMinted": true,
+      "lastMintAt": 1794246939,
+      "public": {
+        "priceWei": "10000000000000000",
+        "price": "0.01",
+        "start": 1794240000,
+        "end": 1794844800,
+        "maxPerWallet": 10,
+        "feeBps": 1000
+      },
+      "stages": [
+        {
+          "index": 1,
+          "name": "Whitelisted Souls",
+          "start": 1794232800,
+          "end": 1794240000,
+          "priceWei": "8500000000000000",
+          "price": "0.0085",
+          "maxPerWallet": 3,
+          "stageSupply": 1111
+        }
+      ],
+      "state": "live",
+      "compliance": "ok",
+      "published": true,
+      "chainAt": 1794247302306
+    }
+  ],
+  "enabled": true
+}

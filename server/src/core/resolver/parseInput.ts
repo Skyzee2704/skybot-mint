@@ -6,7 +6,7 @@ export interface ParsedInput {
   value: string; // checksummed-or-lowercase address, or lowercase slug
   chainHint?: string; // our chain key if recognisable from the URL
   tokenId?: string;
-  source: "opensea" | "explorer" | "raw" | "url";
+  source: "opensea" | "explorer" | "raw" | "url" | "kalos";
 }
 
 const ADDR = /^0x[0-9a-fA-F]{40}$/;
@@ -42,6 +42,17 @@ export function parseInput(raw: string): ParsedInput {
       .split("/")
       .map((s) => decodeURIComponent(s).trim())
       .filter(Boolean);
+
+    if (host === "kalos.fun" || host.endsWith(".kalos.fun")) {
+      const marker = segs.findIndex((s) => s === "drops" || s === "drop" || s === "launch");
+      const slug = (marker >= 0 ? segs[marker + 1] : segs[segs.length - 1]) ?? "";
+      if (!slug || ADDR.test(slug)) {
+        const addr = segs.find((s) => ADDR.test(s));
+        if (addr) return { kind: "address", value: addr, chainHint: "elysium", source: "kalos" };
+        throw new Error("Kalos URL has no drop slug");
+      }
+      return { kind: "slug", value: slug.toLowerCase(), chainHint: "elysium", source: "kalos" };
+    }
 
     if (host.endsWith("opensea.io")) {
       const i = segs.findIndex((s) => s === "assets" || s === "item");

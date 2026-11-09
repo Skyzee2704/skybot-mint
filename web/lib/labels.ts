@@ -4,5 +4,6 @@ export const STRATEGY_LABELS: Record<string, string> = {
   seadrop_public: "SeaDrop Public",
   opensea_api: "OpenSea Mint API",
   generic: "Generic Contract",
+  kalos: "Kalos",
 };
 export const strategyLabel = (s: string) => STRATEGY_LABELS[s] ?? s;

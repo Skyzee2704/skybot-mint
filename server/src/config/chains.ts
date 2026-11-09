@@ -29,7 +29,7 @@ export interface ChainConfig {
    */
   stack?: "op" | "arbitrum";
   /** Optional per-chain safety overrides (native units). */
-  safety?: { maxPricePerNft?: string; maxDailySpend?: string };
+  safety?: { maxPricePerNft?: string; maxDailySpend?: string; /** Native units left untouched by a Kalos mint. */ kalosReserve?: string };
 }
 
 export const CHAINS: ChainConfig[] = [
@@ -169,7 +169,7 @@ export const CHAINS: ChainConfig[] = [
     // SeaDrop V1 bytecode is 21081 bytes, the same size as the canonical deployment. Multicall3 is 3808 bytes.
     seadrop: true,
     stack: "arbitrum", // Arbitrum Orbit; L1 data fee is inside eth_estimateGas
-    safety: { maxPricePerNft: "1", maxDailySpend: "5" }, // HYPE ~ $73 → about $73 / NFT and $365 / day
+    safety: { maxPricePerNft: "1", maxDailySpend: "5", kalosReserve: "1" }, // HYPE ~ $73; leave 1 HYPE after a Kalos mint
   },
   // Add a chain: copy an entry, set chainId/explorer/publicRpcs, then set RPC_<KEY> in env.
 ];

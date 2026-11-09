@@ -23,7 +23,7 @@ import {
   type StageWalletView,
 } from "@nft-mint-bot/server/stage-eligibility";
 
-type Strategy = "seadrop_public" | "opensea_api" | "generic";
+type Strategy = "seadrop_public" | "opensea_api" | "generic" | "kalos";
 const STRAT = STRATEGY_LABELS as Record<Strategy, string>;
 
 export default function MintPage() {
@@ -107,8 +107,9 @@ export default function MintPage() {
   const strategies = useMemo<Strategy[]>(() => {
     if (!t) return [];
     const s: Strategy[] = [];
-    if (t.kind === "seadrop") s.push("seadrop_public");
-    if (t.kind === "seadrop" && t.slug) s.push("opensea_api");
+    if (t.dropSource === "kalos" || t.recommendedStrategy === "kalos") s.push("kalos");
+    else if (t.kind === "seadrop") s.push("seadrop_public");
+    if (t.dropSource !== "kalos" && t.kind === "seadrop" && t.slug) s.push("opensea_api");
     if (t.generic?.candidates?.some((c: any) => c.supported)) s.push("generic");
     return s;
   }, [t]);
@@ -308,7 +309,7 @@ export default function MintPage() {
         <div className="row">
           <input
             style={{ flex: 1, minWidth: 260 }}
-            placeholder="https://opensea.io/collection/… · 0x… · slug"
+            placeholder="https://opensea.io/collection/… · kalos.fun/drops/… · 0x… · slug"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && doResolve()}
@@ -325,8 +326,8 @@ export default function MintPage() {
       {t && (
         <div className="card">
           <h2>
-            {t.name ?? "Contract"} {t.symbol && <span className="muted">({t.symbol})</span>} <span className="pill">{t.kind}</span>{" "}
-            <span className="pill">{t.standard}</span>
+            {t.name ?? "Contract"} {t.symbol && <span className="muted">({t.symbol})</span>}{" "}
+            <span className="pill">{t.dropSource === "kalos" ? "Kalos" : t.kind}</span> <span className="pill">{t.standard}</span>
           </h2>
           <div className="grid">
             <div className="kv">

@@ -7,6 +7,11 @@ import { OpenSeaClient, OsDrop, OpenSeaUnavailable } from "./opensea.js";
 import { readSeaDrop, SeaDropInfo, SEADROP_ADDRESS } from "./seadrop.js";
 import { analyzeGeneric, GenericInfo } from "./generic.js";
 import { sortStages } from "./stageOrder.js";
+import { fetchKalosDrops, findKalosDrop } from "../kalos/client.js";
+import { kalosIface } from "../kalos/calldata.js";
+import { chooseSeaDrop } from "../kalos/source.js";
+import { kalosResolved } from "../kalos/target.js";
+import type { KalosDrop } from "../kalos/types.js";
 
 export interface Stage {
   name: string;
@@ -18,7 +23,9 @@ export interface Stage {
   end: string | null;
   maxPerWallet: number | null;
   status: "active" | "upcoming" | "ended" | "unknown";
-  source: "onchain" | "opensea";
+  source: "onchain" | "opensea" | "kalos";
+  /** Kalos allowlist stage index. Public stages omit it. */
+  kalosIndex?: number;
 }
 
 export interface ResolvedTarget {
@@ -36,7 +43,16 @@ export interface ResolvedTarget {
   generic: GenericInfo | null;
   stages: Stage[];
   supply: { total: string | null; max: string | null; remaining: string | null };
-  recommendedStrategy: "seadrop_public" | "opensea_api" | "generic" | "none";
+  recommendedStrategy: "seadrop_public" | "opensea_api" | "generic" | "kalos" | "none";
+  /** Which launchpad the stages came from. */
+  dropSource?: "opensea" | "kalos" | "chain";
+  kalos?: {
+    slug: string;
+    seaDrop: string;
+    feeRecipient: string;
+    feeBps: number;
+    templateVersion: string;
+  };
   warnings: string[];
   resolvedAt: string;
 }
@@ -103,6 +119,8 @@ export interface ResolveOptions {
   chain?: string;
   os?: OpenSeaClient;
   poolFor?: (c: ChainConfig) => RpcPool;
+  /** Test hook. Production loads https://api.kalos.fun/v2/launch/drops. */
+  kalosDrops?: () => Promise<KalosDrop[]>;
 }
 
 export async function resolveTarget(opts: ResolveOptions): Promise<ResolvedTarget> {
@@ -120,9 +138,27 @@ export async function resolveTarget(opts: ResolveOptions): Promise<ResolvedTarge
 
   let drop: OsDrop | null = null;
   let osError: string | null = null;
+  let kalosHit: KalosDrop | null = null;
 
-  // 1) slug -> contract + chain via official OpenSea API
-  if (slug) {
+  const loadDrops = async () => {
+    if (opts.kalosDrops) return opts.kalosDrops();
+    if (process.env.VITEST && !process.env.KALOS_LIVE) return [];
+    return fetchKalosDrops();
+  };
+  const kalosRelevant = parsed.source === "kalos" || parsed.source === "raw";
+  if (slug && kalosRelevant) {
+    try {
+      kalosHit = findKalosDrop(await loadDrops(), { slug });
+      if (parsed.source === "kalos" && !kalosHit) throw Object.assign(new Error(`No Kalos drop "${slug}"`), { statusCode: 404 });
+    } catch (e: any) {
+      if (parsed.source === "kalos" || e?.statusCode) throw e;
+      kalosHit = null;
+    }
+  }
+  if (kalosHit) {
+    contract = getAddress(kalosHit.address);
+    chain = requireChain("elysium");
+  } else if (slug) {
     try {
       const col = await os.getCollection(slug);
       const contracts = (col.contracts ?? []).filter((c) => getChain(c.chain));
@@ -174,6 +210,38 @@ export async function resolveTarget(opts: ResolveOptions): Promise<ResolvedTarge
   await pool.checkChainId();
   const code = await pool.read((p) => p.getCode(contract!), "getCode");
   if (!code || code === "0x") throw Object.assign(new Error(`No contract code at ${contract} on ${chain.name}`), { statusCode: 404 });
+
+  if (chain.key === "elysium" && !kalosHit) {
+    try {
+      kalosHit = findKalosDrop(await loadDrops(), { address: contract });
+    } catch {
+      kalosHit = null;
+    }
+  }
+  if (kalosHit && chain.key === "elysium") {
+    let allowed: string[] | null = null;
+    try {
+      allowed = await pool.read(async (p) => {
+        const c = new Contract(contract!, kalosIface, p);
+        return (await c.getAllowedSeaDrop()) as string[];
+      }, "getAllowedSeaDrop");
+    } catch {
+      allowed = null;
+    }
+    const choice = chooseSeaDrop(allowed, parsed.source === "kalos" || Boolean(slug && kalosHit.slug === slug));
+    if (choice.use === "kalos") {
+      const standard = await detectStandard(pool, contract!);
+      return kalosResolved({
+        drop: kalosHit,
+        input: opts.input,
+        parsed,
+        code,
+        standard,
+        warning: [choice.warning, ...warnings].filter(Boolean).join(" ") || undefined,
+      });
+    }
+    if (choice.warning) warnings.push(choice.warning);
+  }
 
   // 3) contract -> slug (official) so we can use the drops API
   if (!slug && os.available && chain.openseaChain) {

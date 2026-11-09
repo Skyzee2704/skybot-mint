@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { formatEther } from "ethers";
 import { requireChain } from "../../config/chains.js";
+import { kalosReserveWei } from "../kalos/decide.js";
 import { getPool } from "../rpc/pool.js";
 import { ResolvedTarget } from "../resolver/resolver.js";
 import { getWallet } from "../../users/service.js";
@@ -171,7 +172,8 @@ export async function simulateMint(t: ResolvedTarget, reqIn: MintRequest, userId
       }
       const gasLimit = BigInt(req.gasLimit ?? (gasEstimate ? (gasEstimate * 125n) / 100n : fallbackGas(req.strategy, wq.quantity)));
       const maxGas = gasLimit * fees.maxFeePerGas;
-      const need = tx.value + maxGas;
+      const reserve = req.strategy === "kalos" ? kalosReserveWei(chain) : 0n;
+      const need = tx.value + maxGas + reserve;
       const funded = balance >= need;
       const failed = sim.ok === false;
       const expected = failed && beforeStart && /NotActive|not active|before start|stage/i.test(sim.reason ?? "");
@@ -180,7 +182,7 @@ export async function simulateMint(t: ResolvedTarget, reqIn: MintRequest, userId
       if (failed && !expected) reason = explainMintError(sim.reason);
       else if (expected) reason = "Stage hasn't started yet. Checked again at start time.";
       else if (!funded)
-        reason = `Needs ~${formatEther(need)} ${chain.nativeSymbol} (has ${formatEther(balance)}).${beforeStart ? " Fund it before the start time." : ""}`;
+        reason = `Needs ~${formatEther(need)} ${chain.nativeSymbol} (has ${formatEther(balance)}).${reserve > 0n ? ` Leaves ${formatEther(reserve)} ${chain.nativeSymbol} free after the mint.` : ""}${beforeStart ? " Fund it before the start time." : ""}`;
       const overridable = publicStage && failed && !expected;
       const mintable = ((passes !== false || expected) && (funded || beforeStart)) || (overridable && force.has(w.id));
       return {

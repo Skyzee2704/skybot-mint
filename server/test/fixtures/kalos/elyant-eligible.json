@@ -1,0 +1,69 @@
+{
+  "minter": "0xE9973af1b69E407745926fA985C0090E0e78DcF1",
+  "root": "0x4c5f5f726b6934d206f23208b10aa31915379c59a808f751f07bc7c334ce667c",
+  "published": true,
+  "rootIsKalos": true,
+  "entries": [
+    {
+      "stageIndex": 1,
+      "price": "0.008",
+      "mintParams": {
+        "mintPrice": "8000000000000000",
+        "maxTotalMintableByWallet": "1",
+        "startTime": "1794231000",
+        "endTime": "1794236400",
+        "dropStageIndex": "1",
+        "maxTokenSupplyForStage": "1111",
+        "feeBps": "1000",
+        "restrictFeeRecipients": true
+      },
+      "proof": [
+        "0xe94367f3edf4f6b99998cceb0292ab4b02e28bba1d1bbd66de20aec116c7fbfb",
+        "0x45facbc695d0530c64f03ee5a48eaeba347a8dc89166e02a408ac5ae4dc8e50d",
+        "0x1ecd0cfacc574502ef5195ff353d6820a61b7e1c6bbc0984ec4bebc142f5a772",
+        "0x04b156d6f2d091367d9aeaab8d95235ff373ad02d54751b832b3a74fb7d4de28",
+        "0x9ff6961a300529a1ffd84a9f982dcb3c5b8ec297bfe0ae141932c0196675af69",
+        "0x05b9d814c9127d8d6ba1e17d0f95c641ed34a9c68101c37791016c9f9cd9a02e",
+        "0xfd5a46c5dfa84d1bab524bf4d29862b9cfed4f999cd556c14d6c3bb8ef0782bc",
+        "0x1b80033fc812c4b9c992cfbba991c556b58ba5e43c49fc8c9fcefcf89fb75081",
+        "0x02025a41117c0fef87e9468be74cbb07e564a4daa4718fccfa459f6ef9b4c0f5",
+        "0x4ac2d2bd493e4f7beb995b839c252698f0c516200c7b5317795eecac82edf4ed",
+        "0x68fe02e969ef4e47a686dfaec0b38c3a61c14d48b03600129395c6a550a15d99",
+        "0xcc72f95c6a438a81eb40b28d756715403103d2d188094e6560d063dba601eb03",
+        "0x1777685dee158842f6b459b0a585d1cf21747b0915a29df1a1f885f524d28ca8"
+      ],
+      "stageName": "Hives"
+    },
+    {
+      "stageIndex": 2,
+      "price": "0.008",
+      "mintParams": {
+        "mintPrice": "8000000000000000",
+        "maxTotalMintableByWallet": "2",
+        "startTime": "1794236460",
+        "endTime": "1794319260",
+        "dropStageIndex": "2",
+        "maxTokenSupplyForStage": "1111",
+        "feeBps": "1000",
+        "restrictFeeRecipients": true
+      },
+      "proof": [
+        "0x1fe1142298236b7ec5b774fd1346af6ab73f38f1ba84d7d39e014fbb69d05606",
+        "0x67941aec14ff25ec9d6bf763090b6b2a18686ba2596b553d49ff6acaf33ffe4e",
+        "0x0ddacc1d29de00fcb55bef77af2c6bcc506f128cc60843a06ab3e78a98f3d4f4",
+        "0xce5db8a589f0bb50019e55e37aa67dd903d60f70f7fa2d3dc546faeb828dfaf6",
+        "0x05df04e97c67be15937f1128c0af6a826d7d7f53469b235abac14c0c8b4aad75",
+        "0xacbc7c8feff8c86bd67c66b79381e05cd3df576f964da4b8f9ee7dedb834e452",
+        "0xdcee20c4a60e176b29b42e40202447e1a9e3a93670d860abbac96d8de46181f5",
+        "0x317486f52cfdc0c5be78e24b2d8bcce2f71d55d38e5f9748b04a17bd04da58fd",
+        "0x0a6fd0bcc66eee4850d94d288ef2fb232663561f4239eef6ef972f86fe4e7422",
+        "0x9831acc77667a8378b9168860201924deb85b885e1d89a90b61ec9e809b2cb5d",
+        "0xac58f4d08e3b7e061ded36988767a8fe8d33aa701acf950be4bbb1786b851241",
+        "0x9fe3821b2c0fa3209d722a28637d1c11ca35fb9e9061b4e018936d9d39b12915",
+        "0xcc72f95c6a438a81eb40b28d756715403103d2d188094e6560d063dba601eb03",
+        "0x1777685dee158842f6b459b0a585d1cf21747b0915a29df1a1f885f524d28ca8"
+      ],
+      "stageName": "Colony"
+    }
+  ]
+}
