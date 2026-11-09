@@ -80,7 +80,7 @@ export interface EligibilityRow {
   unverifiedReason?: SignInFailure | null;
 }
 
-const DEFAULT_GAS: Record<Strategy, bigint> = { seadrop_public: 180_000n, opensea_api: 220_000n, generic: 200_000n };
+const DEFAULT_GAS: Record<Strategy, bigint> = { seadrop_public: 180_000n, opensea_api: 220_000n, generic: 200_000n, kalos: 180_000n };
 
 async function mapLimit<T, R>(items: T[], limit: number, fn: (t: T) => Promise<R>): Promise<R[]> {
   const out: R[] = new Array(items.length);
@@ -251,6 +251,13 @@ export async function checkEligibility(
   noteItems: NoteItem[];
   allowlistInfo: Record<string, unknown>;
 }> {
+  if (strategy === "kalos" && t.kalos) {
+    const { fetchKalosDrops, findKalosDrop } = await import("../kalos/client.js");
+    const { checkKalosEligibility } = await import("../kalos/eligibility.js");
+    const drop = findKalosDrop(await fetchKalosDrops(), { slug: t.kalos.slug, address: t.contract });
+    if (!drop) throw Object.assign(new Error(`Kalos drop "${t.kalos.slug}" is no longer listed`), { statusCode: 404 });
+    return checkKalosEligibility(t, userId, walletIds, drop);
+  }
   const chain = requireChain(t.chain.key);
   const pool = getPool(chain);
   const list = (await listWallets(userId)).filter((w) => !walletIds || walletIds.includes(w.id));

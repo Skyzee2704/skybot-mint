@@ -1,9 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { Interface, getAddress } from "ethers";
+import { Contract, Interface, getAddress } from "ethers";
 import { requireChain } from "../../config/chains.js";
 import { OpenSeaClient, OpenSeaHttpError } from "../resolver/opensea.js";
 import { ResolvedTarget } from "../resolver/resolver.js";
 import { SEADROP_ADDRESS, encodeMintPublic } from "../resolver/seadrop.js";
+import { encodeKalosMintPublic, encodeMintAllowList } from "../kalos/calldata.js";
+import { fetchKalosEligibility } from "../kalos/client.js";
+import { stageClock, wantOf } from "../kalos/decide.js";
+import { getPool } from "../rpc/pool.js";
+import { simulateIgnoringBalance } from "./access.js";
 import { readableAllowListTx } from "./access.js";
 import { isDangerousFunctionName, assertSafeMintTx } from "../safety/safety.js";
 import { osStage } from "./stage.js";
@@ -28,6 +33,7 @@ export class MintBuildError extends Error {
 
 /** Allowed `to` for each strategy — anything else is rejected by the safety guard. */
 export function allowedTargets(t: ResolvedTarget, req: MintRequest): string[] {
+  if (req.strategy === "kalos" && t.kalos) return [t.kalos.seaDrop, t.contract];
   return req.strategy === "generic" ? [t.contract] : [SEADROP_ADDRESS, t.contract];
 }
 
@@ -92,6 +98,48 @@ export async function buildMintTx(
         if (call.mintTimeoutMs && /abort|timeout/i.test(`${e?.name ?? ""} ${e?.message ?? e}`))
           throw new MintBuildError("OpenSea mint timed out", "RETRY");
         throw e;
+      }
+      break;
+    }
+    case "kalos": {
+      const k = t.kalos;
+      if (!k) throw new MintBuildError("This target is not a Kalos drop");
+      if (!chosen) throw new MintBuildError("Pick a Kalos stage");
+      const pool = getPool(chain);
+      const minted = await pool
+        .read(async (p) => {
+          const c = new Contract(t.contract, ["function getMintStats(address) view returns (uint256,uint256,uint256)"], p);
+          const stats = await c.getMintStats(wallet);
+          return Number(stats[0]);
+        }, "getMintStats")
+        .catch(() => 0);
+      const cap = chosen.maxPerWallet ?? 0;
+      const want = wantOf(cap, minted);
+      if (want <= 0) throw new MintBuildError("cap reached", "NOT_ELIGIBLE");
+      if (quantity > want) throw new MintBuildError(`Quantity ${quantity} is above the remaining allowance of ${want}`, "NOT_ELIGIBLE");
+      const nowSec = Math.floor(Date.now() / 1000);
+      const start = chosen.start ? Math.floor(new Date(chosen.start).getTime() / 1000) : 0;
+      const end = chosen.end ? Math.floor(new Date(chosen.end).getTime() / 1000) : 0;
+      const clock = start && end ? stageClock(start, end, nowSec) : "active";
+      if (clock === "ended") throw new MintBuildError(`The ${chosen.name} stage has ended`, "STAGE_ENDED");
+      if (chosen.type === "public" || chosen.kalosIndex === undefined) {
+        const price = BigInt(chosen.priceWei ?? "0");
+        tx = { to: k.seaDrop, data: encodeKalosMintPublic(t.contract, k.feeRecipient, quantity), value: price * BigInt(quantity) };
+      } else {
+        const elig = await fetchKalosEligibility(k.slug, wallet);
+        const entry = elig.entries.find((e) => e.stageIndex === chosen.kalosIndex);
+        if (!entry?.proof?.length) throw new MintBuildError("not on list", "NOT_ELIGIBLE");
+        const price = BigInt(entry.mintParams.mintPrice);
+        tx = {
+          to: k.seaDrop,
+          data: encodeMintAllowList(t.contract, k.feeRecipient, quantity, entry.mintParams, entry.proof),
+          value: price * BigInt(quantity),
+        };
+      }
+      builtLocal = true;
+      if (clock === "active") {
+        const sim = await simulateIgnoringBalance(pool, { from: wallet, to: tx.to, data: tx.data, value: tx.value });
+        if (sim.ok === false) throw new MintBuildError(sim.reason || "Kalos mint simulation reverted", "SIMULATION");
       }
       break;
     }

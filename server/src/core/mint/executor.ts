@@ -2,6 +2,7 @@
 import { Contract, ZeroHash, formatEther, toQuantity } from "ethers";
 import { explorerTx, requireChain } from "../../config/chains.js";
 import { nativeText } from "../../util/native.js";
+import { kalosReserveWei } from "../kalos/decide.js";
 import { getPool } from "../rpc/pool.js";
 import { getResolved } from "../resolver/cache.js";
 import { SEADROP_ABI, SEADROP_ADDRESS } from "../resolver/seadrop.js";
@@ -340,14 +341,16 @@ export async function prepareAll(
   const skipForBalance = async (i: number, value: bigint, gas: bigint): Promise<boolean> => {
     const bal = await pool.read((p) => p.getBalance(results[i].address), "balance").catch(() => null);
     if (bal === null) return false;
-    const need = value + gas * fees.maxFeePerGas;
+    const reserve = req.strategy === "kalos" ? kalosReserveWei(chain) : 0n;
+    const need = value + gas * fees.maxFeePerGas + reserve;
     if (bal >= need) return false;
     results[i].status = "failed";
+    const reserveNote = reserve > 0n ? ` Keeps ${nativeText(reserve, chain.nativeSymbol)} free after the mint.` : "";
     results[i].error =
-      `Not enough balance (have ${nativeText(bal, chain.nativeSymbol)}, need ~${nativeText(need, chain.nativeSymbol)}). Skipped.`;
+      `Not enough balance (have ${nativeText(bal, chain.nativeSymbol)}, need ~${nativeText(need, chain.nativeSymbol)}).${reserveNote} Skipped.`;
     void jobLog(
       job,
-      `skip ${results[i].address.slice(0, 8)}: balance ${nativeText(bal, chain.nativeSymbol)} < ~${nativeText(need, chain.nativeSymbol)}`,
+      `skip ${results[i].address.slice(0, 8)}: balance ${nativeText(bal, chain.nativeSymbol)} < ~${nativeText(need, chain.nativeSymbol)}${reserveNote}`,
     ).catch(() => {});
     return true;
   };

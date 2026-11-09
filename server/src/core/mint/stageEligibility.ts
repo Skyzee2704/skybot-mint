@@ -305,13 +305,14 @@ export function stageWalletView(
   }
   if (isPublicStage(stage)) {
     const maxQty = capFor(stage.maxPerWallet ?? null, r.mintedSoFar, supplyRemaining);
+    const capped = maxQty <= 0;
     return {
       walletId: r.walletId,
-      state: "eligible",
-      eligible: true,
+      state: capped ? "not_eligible" : "eligible",
+      eligible: !capped,
       maxQty,
       suggestedQty: maxQty > 0 ? maxQty : 0,
-      reason: null,
+      reason: capped ? "cap reached" : null,
       access: "public",
       unitPriceWei: price,
     };

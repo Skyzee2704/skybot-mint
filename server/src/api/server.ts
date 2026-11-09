@@ -49,7 +49,7 @@ import { validateInitData, publicHttpsReady } from "../bot/telegramWebApp.js";
 import { handleWebhookUpdate, setupTelegramWebhook } from "../bot/telegram.js";
 
 const addr = z.string().regex(/^0x[0-9a-fA-F]{40}$/);
-const strategy = z.enum(["seadrop_public", "opensea_api", "generic"]);
+const strategy = z.enum(["seadrop_public", "opensea_api", "generic", "kalos"]);
 const mintReq = z.object({
   chain: z.string(),
   contract: addr,

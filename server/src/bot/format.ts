@@ -45,7 +45,8 @@ export function fmtInt(v: string | number | bigint | null | undefined): string {
 }
 
 export const standardLabel = (s: string) => (s === "erc721" ? "ERC-721" : s === "erc1155" ? "ERC-1155" : "Unknown standard");
-export const kindLabel = (t: Pick<ResolvedTarget, "kind">) => (t.kind === "seadrop" ? "SeaDrop" : "Generic");
+export const kindLabel = (t: Pick<ResolvedTarget, "kind" | "dropSource">) =>
+  t.dropSource === "kalos" ? "Kalos" : t.kind === "seadrop" ? "SeaDrop" : "Generic";
 
 export const isPublicStage = (s: Pick<Stage, "name" | "type">) => s.type === "public" || /\bpublic\b/i.test(s.name);
 export const stageLabel = (s: Pick<Stage, "name" | "type">) => (isPublicStage(s) ? "Public" : s.name || "Stage");

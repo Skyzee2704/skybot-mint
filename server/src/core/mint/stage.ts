@@ -4,6 +4,10 @@ import type { Strategy } from "./types.js";
 
 export function stagePriceWei(t: ResolvedTarget, strategy: Strategy): bigint | null {
   if (strategy === "seadrop_public") return t.seadrop?.publicDrop ? BigInt(t.seadrop.publicDrop.mintPriceWei) : null;
+  if (strategy === "kalos") {
+    const s = t.stages.find((x) => x.status === "active") ?? t.stages.find((x) => x.status === "upcoming");
+    return s?.priceWei != null ? BigInt(s.priceWei) : null;
+  }
   if (strategy === "generic") return t.generic?.values.priceWei ? BigInt(t.generic.values.priceWei) : null;
   const s = osStage(t);
   return s.priceWei !== null ? BigInt(s.priceWei) : null;

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { GasMode } from "./fees.js";
 
-export type Strategy = "seadrop_public" | "opensea_api" | "generic";
+export type Strategy = "seadrop_public" | "opensea_api" | "generic" | "kalos";
 export interface WalletQty {
   walletId: string;
   quantity: number;
