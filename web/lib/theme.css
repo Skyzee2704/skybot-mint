@@ -756,11 +756,17 @@ html.tg-mini-app body {
   border-radius: 10px;
   padding: 10px 12px;
 }
+.stage-group.on {
+  border-color: var(--orange);
+}
 .stage-group-head {
   display: flex;
   align-items: baseline;
   flex-wrap: wrap;
   gap: 8px;
+}
+.stage-group-head.pick {
+  cursor: pointer;
 }
 .stage-group-head .spacer {
   flex: 1;
