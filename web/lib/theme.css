@@ -748,28 +748,57 @@ html.tg-mini-app body {
 /* Wallet eligibility grouped per allowlist stage */
 .stage-groups {
   display: grid;
-  gap: 10px;
+  gap: 6px;
   margin: 8px 0 12px;
 }
 .stage-group {
   border: 1px solid var(--line, rgba(255, 255, 255, 0.08));
   border-radius: 10px;
-  padding: 10px 12px;
+  padding: 8px 10px;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease;
 }
 .stage-group.on {
   border-color: var(--orange);
+  background: rgba(255, 107, 26, 0.08);
 }
 .stage-group-head {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   flex-wrap: wrap;
-  gap: 8px;
+  column-gap: 8px;
+  row-gap: 2px;
 }
 .stage-group-head.pick {
   cursor: pointer;
 }
 .stage-group-head .spacer {
   flex: 1;
+}
+.stage-group.on .stage-group-head b {
+  color: var(--orange);
+}
+.stage-meta {
+  flex-basis: 100%;
+}
+.stage-group-head.pick .stage-meta {
+  padding-left: 22px;
+}
+.stage-radio {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  box-sizing: border-box;
+}
+.stage-radio.on {
+  border-color: var(--orange);
+  background: radial-gradient(circle, var(--orange) 0 3px, transparent 3.5px);
+}
+.stage-group:not(.on):has(.stage-group-head.pick:hover) {
+  border-color: rgba(255, 107, 26, 0.45);
 }
 .wallet-chips {
   display: flex;
@@ -789,6 +818,19 @@ html.tg-mini-app body {
 }
 .stage-group summary {
   cursor: pointer;
+}
+
+.wallet-chips.compact {
+  gap: 4px;
+  margin-top: 6px;
+  padding-left: 22px;
+}
+.wallet-chips.compact .chip {
+  font-size: 12px;
+  padding: 2px 8px;
+}
+.stage-group details {
+  padding-left: 22px;
 }
 
 /* ───────── Navigation ───────── */

@@ -537,8 +537,15 @@ export default function MintPage() {
                       title={offered ? `Mint in ${g.stage.name}` : undefined}
                       aria-pressed={offered ? active : undefined}
                     >
+                      {offered && <span className={`stage-radio${active ? " on" : ""}`} aria-hidden="true" />}
                       <b>{g.stage.name}</b>
-                      <span className="muted small">
+                      <span className="spacer" />
+                      <span className={g.eligible ? "ok small" : sum.unknown.length ? "muted small" : "bad small"}>
+                        {sum.unknown.length === g.total
+                          ? `${g.total} unknown`
+                          : `${g.eligible}/${g.total} eligible${sum.unknown.length ? `, ${sum.unknown.length} unknown` : ""}`}
+                      </span>
+                      <span className="stage-meta muted small">
                         {[
                           g.stage.priceWei != null ? (g.stage.priceWei === "0" ? "Free" : `${fmtEth(g.stage.priceWei)} ${sym}`) : null,
                           g.stage.maxPerWallet ? `max ${g.stage.maxPerWallet}/wallet` : null,
@@ -547,48 +554,39 @@ export default function MintPage() {
                           .filter(Boolean)
                           .join(" · ")}
                       </span>
-                      <span className="spacer" />
-                      <span className={g.eligible ? "ok small" : "muted small"}>
-                        {sum.unknown.length === g.total
-                          ? `${g.total} unknown`
-                          : `${g.eligible}/${g.total} eligible${sum.unknown.length ? `, ${sum.unknown.length} unknown` : ""}`}
-                      </span>
                     </div>
-                    {sum.eligible.length > 0 && (
-                      <div className="wallet-chips">
+                    {active && sum.eligible.length > 0 && (
+                      <div className="wallet-chips compact">
                         {sum.eligible.map((w) => (
-                          <span key={w.walletId} className="chip ok" title={w.address}>
-                            ✓ {w.label} <span className="mono muted">{short(w.address)}</span>
-                            {w.max ? <span className="muted"> · max {w.max}</span> : null}
+                          <span key={w.walletId} className="chip ok" title={`${w.address}${w.max ? ` · max ${w.max}` : ""}`}>
+                            ✓ {w.label}
                             {w.note ? <span className="warn"> · {w.note}</span> : null}
                           </span>
                         ))}
                       </div>
                     )}
-                    {sum.eligible.length === 0 && sum.unknown.length === 0 && (
-                      <div className="bad small">{g.total === 1 ? "Not eligible" : `None of your ${g.total} wallets are eligible`}</div>
-                    )}
-                    {(sum.notEligible.length > 0 && (sum.eligible.length > 0 || sum.unknown.length > 0)) || sum.unknown.length > 0 ? (
-                      <details className="small">
-                        <summary className="muted">
-                          {[
-                            sum.notEligible.length && (sum.eligible.length || sum.unknown.length)
-                              ? `${sum.notEligible.length} not eligible`
-                              : null,
-                            sum.unknown.length ? `${sum.unknown.length} ${verdictText(sum.unknown[0]!)}` : null,
-                          ]
-                            .filter(Boolean)
-                            .join(" · ")}
-                        </summary>
-                        <div className="wallet-chips">
-                          {[...sum.notEligible, ...sum.unknown].map((w) => (
-                            <span key={w.walletId} className={`chip ${STATE_CLASS[w.state]}`} title={w.address}>
-                              {STATE_ICON[w.state]} {w.label} <span className="mono muted">{short(w.address)}</span>
-                            </span>
-                          ))}
-                        </div>
-                      </details>
-                    ) : null}
+                    {active &&
+                      ((sum.notEligible.length > 0 && (sum.eligible.length > 0 || sum.unknown.length > 0)) || sum.unknown.length > 0) && (
+                        <details className="small">
+                          <summary className="muted">
+                            {[
+                              sum.notEligible.length && (sum.eligible.length || sum.unknown.length)
+                                ? `${sum.notEligible.length} not eligible`
+                                : null,
+                              sum.unknown.length ? `${sum.unknown.length} ${verdictText(sum.unknown[0]!)}` : null,
+                            ]
+                              .filter(Boolean)
+                              .join(" · ")}
+                          </summary>
+                          <div className="wallet-chips compact">
+                            {[...sum.notEligible, ...sum.unknown].map((w) => (
+                              <span key={w.walletId} className={`chip ${STATE_CLASS[w.state]}`} title={w.address}>
+                                {STATE_ICON[w.state]} {w.label}
+                              </span>
+                            ))}
+                          </div>
+                        </details>
+                      )}
                   </div>
                 );
               })}
