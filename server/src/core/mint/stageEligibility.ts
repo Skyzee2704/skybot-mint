@@ -4,6 +4,7 @@
  * Public stages are open to every wallet, so only allowlist-type stages get per-wallet lists.
  */
 import { sortStages } from "../resolver/stageOrder.js";
+import { walletMaxQty } from "./qty.js";
 
 export interface StageLike {
   name: string;
@@ -20,9 +21,14 @@ export interface RowLike {
   label: string;
   address: string;
   needsOpenSeaLogin?: boolean;
-  access?: { status: string; detail?: string } | null;
+  access?: { status: string; source?: string; detail?: string } | null;
   reasons?: string[];
   stages?: { label: string | null; type: string | null; eligible: boolean | null; maxPerWallet: number | null }[] | null;
+  /** Already minted by this wallet (subtracted from the stage cap). */
+  mintedSoFar?: number | null;
+  /** Eligibility-row max. Used only when no stage is selected (plain contracts). */
+  maxQty?: number | null;
+  unitPriceWei?: string | null;
 }
 
 export type StageState = "eligible" | "not_eligible" | "unverified" | "unknown";
@@ -205,6 +211,123 @@ export function timingOptions<S extends StageLike>(
   const liveOpt = opts.find((o) => o.live);
   if (liveOpt) opts.unshift({ ...liveOpt, key: "now", kind: "now" });
   return opts;
+}
+
+/**
+ * Stages the Mint page can schedule. Built from every checked wallet, not from the checkboxes:
+ * an allowlist stage is offered when it has not ended and at least one wallet can mint it, and
+ * Public is offered whenever it has not ended. Checkbox selection is derived from the chosen
+ * stage, so it must not also decide which stages exist (that hid GTD/FCFS whenever the first
+ * stage, often Team, had nobody eligible and therefore nothing was preselected).
+ */
+export function mintStageOptions<S extends StageLike>(
+  stages: readonly S[],
+  rows: readonly RowLike[],
+  targetStage: { label: string | null; type?: string | null } | null,
+  now: number,
+): TimingOption<S>[] {
+  return timingOptions(
+    stages,
+    rows,
+    rows.map((r) => r.walletId),
+    targetStage,
+    now,
+  );
+}
+
+export type StageAccess = "yes" | "no" | "public" | "unknown" | "n/a";
+
+/** One wallet as the Mint table shows it for a single stage. */
+export interface StageWalletView {
+  walletId: string;
+  state: StageState;
+  /** May be preselected and minted in this stage. */
+  eligible: boolean;
+  /** Stepper cap: this stage's per-wallet max, minus already minted, never another stage's max. */
+  maxQty: number;
+  /** Default quantity: that same cap (0 when nothing is left). */
+  suggestedQty: number;
+  /** Line under the stepper. Null when this wallet can mint the stage. */
+  reason: string | null;
+  access: StageAccess;
+  /** This stage's price per NFT, when the drop published one. */
+  unitPriceWei: string | null;
+}
+
+const capFor = (maxPerWallet: number | null, minted: number | null | undefined, supply: number | null | undefined) => {
+  if (maxPerWallet !== null && maxPerWallet <= 0) return 0;
+  return walletMaxQty({ maxPerWallet, minted: minted ?? null, supplyRemaining: supply ?? null });
+};
+
+const isTargetStage = (stage: StageLike, target: { label: string | null; type?: string | null } | null) =>
+  Boolean(target && (norm(target.label) === norm(stage.name) || norm(target.type) === norm(stage.name)));
+
+/** Allowlist failure for this stage. The target stage keeps the source the checker recorded; every other stage came from the eligibility API. */
+const allowlistReason = (r: RowLike, stage: StageLike, target: { label: string | null; type?: string | null } | null) => {
+  if (isTargetStage(stage, target)) {
+    const hit = (r.reasons ?? []).find((x) => x.startsWith("not allowlisted"));
+    if (hit) return hit;
+    if (r.access?.source) return `not allowlisted (${r.access.source})`;
+  }
+  return "not allowlisted (OpenSea eligibility API)";
+};
+
+/**
+ * Wallet table row for the stage the member is minting.
+ * Row-level `access` / `maxQty` / `reasons` describe only the checker's target stage (live, else the
+ * soonest). Reading those for a later stage showed Team's "not eligible, max 699" on wallets that
+ * are allowlisted for GTD. This view is that stage alone, and it matches `walletStageVerdict`.
+ */
+export function stageWalletView(
+  r: RowLike,
+  stage: StageLike | null,
+  targetStage: { label: string | null; type?: string | null } | null,
+  supplyRemaining?: number | null,
+): StageWalletView {
+  const price = stage?.priceWei != null ? stage.priceWei : (r.unitPriceWei ?? null);
+  if (!stage) {
+    const status = r.access?.status ?? "unknown";
+    const access: StageAccess = status === "yes" || status === "no" || status === "public" || status === "n/a" ? status : "unknown";
+    const eligible = access === "yes" || access === "public" || access === "n/a";
+    const maxQty = r.maxQty ?? capFor(null, r.mintedSoFar, supplyRemaining);
+    const other = (r.reasons ?? []).filter((x) => !x.startsWith("insufficient balance"));
+    return {
+      walletId: r.walletId,
+      state: eligible ? "eligible" : access === "no" ? "not_eligible" : r.needsOpenSeaLogin ? "unverified" : "unknown",
+      eligible,
+      maxQty,
+      suggestedQty: maxQty > 0 ? maxQty : 0,
+      reason: eligible ? (other.find((x) => !x.startsWith("not allowlisted")) ?? null) : (other[0] ?? null),
+      access,
+      unitPriceWei: price,
+    };
+  }
+  if (isPublicStage(stage)) {
+    const maxQty = capFor(stage.maxPerWallet ?? null, r.mintedSoFar, supplyRemaining);
+    return {
+      walletId: r.walletId,
+      state: "eligible",
+      eligible: true,
+      maxQty,
+      suggestedQty: maxQty > 0 ? maxQty : 0,
+      reason: null,
+      access: "public",
+      unitPriceWei: price,
+    };
+  }
+  const v = walletStageVerdict(r, stage, targetStage);
+  const maxQty = capFor(v.max ?? stage.maxPerWallet ?? null, r.mintedSoFar, supplyRemaining);
+  const eligible = v.state === "eligible";
+  return {
+    walletId: r.walletId,
+    state: v.state,
+    eligible,
+    maxQty,
+    suggestedQty: maxQty > 0 ? maxQty : 0,
+    reason: v.state === "not_eligible" ? allowlistReason(r, stage, targetStage) : v.note,
+    access: eligible ? "yes" : v.state === "not_eligible" ? "no" : "unknown",
+    unitPriceWei: price,
+  };
 }
 
 /** Keep the member's choice while it is still offered; if it disappears fall back to Public (then the first option). */

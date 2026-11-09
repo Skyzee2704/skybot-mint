@@ -30,6 +30,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- Mint stage selection (dashboard and Mini App): the wallet table and the Timing picker follow the stage you choose. They no longer stick to the first stage (or Public only) when your wallets are eligible for a later allowlist stage. The default is the earliest stage some wallet can mint. Scheduling that stage still fires at its start and uses its per-wallet limit.
 - Parallel first-login requests no longer fail with `privy auth failed` (idempotent user creation).
 - Privy identity tokens are now actually sent to the server, so email and Telegram details are picked up.
 

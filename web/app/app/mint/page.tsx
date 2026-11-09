@@ -15,7 +15,15 @@ import { TimingOptions } from "@/components/TimingOptions";
 import { formatDateTime, localTimeZone, zoneLabel } from "@/lib/time";
 import { useNow } from "@/lib/useNow";
 import { clampQty } from "@nft-mint-bot/server/qty";
-import { groupByStage, pickTimingOption, summarizeGroup, timingOptions, verdictText } from "@nft-mint-bot/server/stage-eligibility";
+import {
+  groupByStage,
+  mintStageOptions,
+  pickTimingOption,
+  stageWalletView,
+  summarizeGroup,
+  verdictText,
+  type StageWalletView,
+} from "@nft-mint-bot/server/stage-eligibility";
 
 type Strategy = "seadrop_public" | "opensea_api" | "generic";
 const STRAT = STRATEGY_LABELS as Record<Strategy, string>;
@@ -44,9 +52,15 @@ export default function MintPage() {
   const [sel, setSel] = useState<Record<string, boolean>>({});
   const [verifyNote, setVerifyNote] = useState<string | null>(null);
   const [gasMode, setGasMode] = useState("normal");
-  /** Timing choice: "now" or a stage name (see timingOptions). null = default (Now if live, else Public). */
+  /** Timing choice: "now" or a stage name (see mintStageOptions). null = earliest stage some wallet can mint. */
   const [timing, setTiming] = useState<string | null>(null);
   const [timingNote, setTimingNote] = useState<string | null>(null);
+  /**
+   * Checkbox and quantity edits stick only for the stage they were made on. A different stage
+   * (or a fresh eligibility check) snaps back to that stage's eligible wallets and per-wallet max.
+   */
+  const [selStage, setSelStage] = useState<string | null>(null);
+  const [qtyStage, setQtyStage] = useState<string | null>(null);
   const [offsetMs, setOffsetMs] = useState(0);
   const [sim, setSim] = useState<any>(null);
   const [job, setJob] = useState<any>(null);
@@ -73,6 +87,8 @@ export default function MintPage() {
       setPriceEth(r.generic?.values?.priceWei ? fmtEth(r.generic.values.priceWei, 18) : "0");
       setTiming(null);
       setTimingNote(null);
+      setSelStage(null);
+      setQtyStage(null);
     } catch (e: any) {
       setErr(e.message);
     } finally {
@@ -152,8 +168,11 @@ export default function MintPage() {
         if (failed) setVerifyNote(`${failed} wallet(s) couldn't be verified with OpenSea from this device.`);
       }
       setElig(r);
-      setSel(Object.fromEntries(r.rows.filter((x: any) => x.eligibleIgnoringBalance).map((x: any) => [x.walletId, true])));
-      setQtys(Object.fromEntries(r.rows.map((x: any) => [x.walletId, clampQty(x.suggestedQty || 1, Math.max(1, x.maxQty ?? 1))])));
+      // Selection and quantities follow the chosen stage (see viewFor), not the checker's target stage.
+      setSelStage(null);
+      setQtyStage(null);
+      setSel({});
+      setQtys({});
       setForce({});
     } catch (e: any) {
       setErr(e.message);
@@ -161,11 +180,6 @@ export default function MintPage() {
       setBusy(null);
     }
   };
-  /** Stepper bound: stage per-wallet limit minus already minted (at least 1 so any wallet can be simulated). */
-  const maxFor = (r: any) => Math.max(1, r.maxQty ?? 1);
-  const qtyFor = (r: any) => clampQty(qtys[r.walletId] ?? 1, maxFor(r));
-  const setQtyFor = (r: any, q: number) => setQtys((m) => ({ ...m, [r.walletId]: clampQty(q, maxFor(r)) }));
-  const rowCostWei = (r: any) => BigInt(r.unitPriceWei ?? "0") * BigInt(qtyFor(r)) + BigInt(r.gasCostWei ?? "0");
   const simulate = async (forceIds: string[] = []) => {
     setErr(null);
     setSim(null);
@@ -180,7 +194,7 @@ export default function MintPage() {
             strategy,
             slug: t.slug,
             wallets: rows
-              .filter((r: any) => sel[r.walletId] && qtyFor(r) > 0 && (!chosen?.stage || chosenIds.has(r.walletId)))
+              .filter((r: any) => isSel(r) && qtyFor(r) > 0 && (!chosen?.stage || chosenIds.has(r.walletId)))
               .map((r: any) => ({ walletId: r.walletId, quantity: qtyFor(r) })),
             generic: genericPayload(),
             gasMode,
@@ -215,23 +229,62 @@ export default function MintPage() {
           ? fmt(s.start)
           : "";
   const sym = t?.chain?.nativeSymbol ?? "";
-  const selRows = rows.filter((r: any) => sel[r.walletId]);
-  // Timing options: re-derived every second (useNow), so "Now" appears and a stage flips to live on its own.
-  const selKey = selRows.map((r: any) => r.walletId).join(",");
+  // One source of truth: every stage some wallet can still mint. Not the checker's target stage, and not
+  // the current checkboxes (those are filled in from the stage the member picks).
   const options = useMemo(
-    () => (t ? timingOptions(t.stages ?? [], rows, selKey ? selKey.split(",") : [], elig?.targetStage ?? null, now) : []),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [t, elig, selKey, now],
+    () => (t && elig?.rows ? mintStageOptions(t.stages ?? [], elig.rows, elig.targetStage ?? null, now) : []),
+    [t, elig, now],
   );
   const { option: chosen, fellBack } = pickTimingOption(options, timing);
   const chosenIds = new Set(chosen?.walletIds ?? []);
+  const stageKey = chosen?.key ?? null;
+  const supplyRemaining = (() => {
+    const n = t?.supply?.remaining;
+    if (n == null || n === "") return null;
+    const v = Number(n);
+    return Number.isSafeInteger(v) ? v : null;
+  })();
+  const viewFor = (r: any): StageWalletView => stageWalletView(r, chosen?.stage ?? null, elig?.targetStage ?? null, supplyRemaining);
+  /** Checked for the chosen stage: the stage's eligible wallets, until the member edits the checkboxes. */
+  const isSel = (r: any) => (selStage === stageKey ? Boolean(sel[r.walletId]) : viewFor(r).eligible);
+  /** Stepper bound: this stage's per-wallet limit (at least 1 so any wallet can be simulated). */
+  const maxFor = (r: any) => Math.max(1, viewFor(r).maxQty);
+  const qtyFor = (r: any) => {
+    const view = viewFor(r);
+    const stored = qtyStage === stageKey ? qtys[r.walletId] : undefined;
+    return clampQty(stored ?? (view.suggestedQty > 0 ? view.suggestedQty : 1), maxFor(r));
+  };
+  const setQtyFor = (r: any, q: number) => {
+    const key = stageKey ?? "";
+    setQtys((m) => {
+      const base = qtyStage === key ? m : Object.fromEntries(rows.map((rr: any) => [rr.walletId, Math.max(1, viewFor(rr).suggestedQty)]));
+      return { ...base, [r.walletId]: clampQty(q, maxFor(r)) };
+    });
+    setQtyStage(key);
+  };
+  const rowCostWei = (r: any) => BigInt(viewFor(r).unitPriceWei ?? r.unitPriceWei ?? "0") * BigInt(qtyFor(r)) + BigInt(r.gasCostWei ?? "0");
+  const pickStage = (key: string) => {
+    setTiming(key);
+    setTimingNote(null);
+    setSelStage(null);
+    setQtyStage(null);
+  };
+  const selRows = rows.filter((r: any) => isSel(r));
+  const minting = selRows.filter((r: any) => !chosen?.stage || chosenIds.has(r.walletId));
+  const skippedSel = (chosen?.skipped ?? []).filter((v) => selRows.some((r: any) => r.walletId === v.walletId));
   const optionsKey = options.map((o) => `${o.key}:${o.live}`).join("|");
   useEffect(() => {
     if (timing && fellBack && chosen) {
-      const gone = timing === "now" ? "No eligible stage is live any more" : `${timing} is no longer available for the selected wallets`;
+      const gone = timing === "now" ? "No eligible stage is live any more" : `${timing} is no longer available`;
       setTimingNote(`${gone}, so timing switched to ${chosen.kind === "now" ? "Now" : chosen.name}.`);
       setTiming(chosen.key);
-    } else if (timing && !chosen) setTiming(null);
+      setSelStage(null);
+      setQtyStage(null);
+    } else if (timing && !chosen) {
+      setTiming(null);
+      setSelStage(null);
+      setQtyStage(null);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [optionsKey, timing]);
   useEffect(() => setSim(null), [chosen?.key, chosen?.live]);
@@ -345,6 +398,8 @@ export default function MintPage() {
                 setStrategy(e.target.value as Strategy);
                 setElig(null);
                 setSim(null);
+                setSelStage(null);
+                setQtyStage(null);
               }}
               style={{ width: "auto" }}
             >
@@ -460,9 +515,28 @@ export default function MintPage() {
             <div className="stage-groups">
               {stageGroups.map((g) => {
                 const sum = summarizeGroup(g);
+                const offered = options.some((o) => o.kind === "stage" && o.stage?.name === g.stage.name);
+                const active = chosen?.stage?.name === g.stage.name;
                 return (
-                  <div key={g.stage.name} className="stage-group">
-                    <div className="stage-group-head">
+                  <div key={g.stage.name} className={`stage-group${active ? " on" : ""}`}>
+                    <div
+                      className={`stage-group-head${offered ? " pick" : ""}`}
+                      onClick={offered ? () => pickStage(g.stage.name) : undefined}
+                      onKeyDown={
+                        offered
+                          ? (e) => {
+                              if (e.key === "Enter" || e.key === " ") {
+                                e.preventDefault();
+                                pickStage(g.stage.name);
+                              }
+                            }
+                          : undefined
+                      }
+                      role={offered ? "button" : undefined}
+                      tabIndex={offered ? 0 : undefined}
+                      title={offered ? `Mint in ${g.stage.name}` : undefined}
+                      aria-pressed={offered ? active : undefined}
+                    >
                       <b>{g.stage.name}</b>
                       <span className="muted small">
                         {[
@@ -523,24 +597,43 @@ export default function MintPage() {
           <div className="row" style={{ marginBottom: 8 }}>
             <button
               className="ghost"
-              onClick={() =>
-                setSel(Object.fromEntries(rows.filter((r: any) => r.eligibleIgnoringBalance).map((r: any) => [r.walletId, true])))
-              }
+              onClick={() => {
+                setSel(Object.fromEntries(rows.filter((r: any) => viewFor(r).eligible).map((r: any) => [r.walletId, true])));
+                setSelStage(stageKey ?? "");
+              }}
             >
               Select Eligible
             </button>
             <button
               className="ghost"
-              onClick={() => setSel(Object.fromEntries(rows.filter((r: any) => r.eligible).map((r: any) => [r.walletId, true])))}
+              onClick={() => {
+                setSel(
+                  Object.fromEntries(
+                    rows
+                      .filter((r: any) => viewFor(r).eligible && BigInt(r.balanceWei ?? "0") >= rowCostWei(r))
+                      .map((r: any) => [r.walletId, true]),
+                  ),
+                );
+                setSelStage(stageKey ?? "");
+              }}
             >
               Select Ready to Mint
             </button>
-            <button className="ghost" onClick={() => setSel({})}>
+            <button
+              className="ghost"
+              onClick={() => {
+                setSel({});
+                setSelStage(stageKey ?? "");
+              }}
+            >
               Clear
             </button>
             <button
               className="ghost"
-              onClick={() => setQtys((m) => ({ ...m, ...Object.fromEntries(rows.map((r: any) => [r.walletId, maxFor(r)])) }))}
+              onClick={() => {
+                setQtys(Object.fromEntries(rows.map((r: any) => [r.walletId, maxFor(r)])));
+                setQtyStage(stageKey ?? "");
+              }}
             >
               Set All to Max
             </button>
@@ -563,21 +656,31 @@ export default function MintPage() {
             </thead>
             <tbody>
               {rows.map((r: any) => {
-                const other = r.reasons.filter((x: string) => !x.startsWith("insufficient balance"));
+                const view = viewFor(r);
                 return (
                   <tr key={r.walletId}>
                     <td>
                       <input
                         type="checkbox"
-                        checked={Boolean(sel[r.walletId])}
-                        onChange={(e) => setSel((s) => ({ ...s, [r.walletId]: e.target.checked }))}
+                        checked={isSel(r)}
+                        onChange={(e) => {
+                          const key = stageKey ?? "";
+                          setSel((s) => {
+                            const base =
+                              selStage === key
+                                ? s
+                                : Object.fromEntries(rows.filter((rr: any) => viewFor(rr).eligible).map((rr: any) => [rr.walletId, true]));
+                            return { ...base, [r.walletId]: e.target.checked };
+                          });
+                          setSelStage(key);
+                        }}
                       />
                     </td>
                     <td>
                       {r.label} <span className="mono muted">{short(r.address)}</span>
                     </td>
                     <td>
-                      <Access r={r} />
+                      <Access view={view} needsLogin={Boolean(r.needsOpenSeaLogin)} />
                     </td>
                     <td className="hide-sm">
                       {r.simulation?.ok === true ? (
@@ -613,8 +716,8 @@ export default function MintPage() {
                           +
                         </button>
                       </div>
-                      <div className="muted small">{r.maxQty > 0 ? `max ${r.maxQty}` : "none left"}</div>
-                      {other.length > 0 && <div className="bad small">{other.join("; ")}</div>}
+                      <div className="muted small">{view.maxQty > 0 ? `max ${view.maxQty}` : "none left"}</div>
+                      {view.reason && <div className="bad small">{view.reason}</div>}
                     </td>
                     <td className="mono">
                       ~{fmtEth(rowCostWei(r).toString())} {sym}
@@ -647,15 +750,7 @@ export default function MintPage() {
               </select>
             </label>
           </div>
-          <TimingOptions
-            options={options}
-            chosenKey={chosen?.key ?? null}
-            fmt={fmt}
-            onPick={(k) => {
-              setTiming(k);
-              setTimingNote(null);
-            }}
-          />
+          <TimingOptions options={options} chosenKey={chosen?.key ?? null} fmt={fmt} onPick={pickStage} />
           <div className="row" style={{ marginTop: 8 }}>
             {chosen && !chosen.live && (
               <label title="Send this many milliseconds before (negative) or after (positive) the stage start">
@@ -663,10 +758,7 @@ export default function MintPage() {
                 <input type="number" value={offsetMs} onChange={(e) => setOffsetMs(Number(e.target.value))} style={{ width: 90 }} />
               </label>
             )}
-            <button
-              disabled={!selRows.length || !chosen || (chosen.stage !== null && !chosen.walletIds.length) || !!busy}
-              onClick={() => simulate()}
-            >
+            <button disabled={!minting.length || !chosen || !!busy} onClick={() => simulate()}>
               Simulate
             </button>
           </div>
@@ -678,12 +770,12 @@ export default function MintPage() {
                 ? " Runs immediately."
                 : ` Runs at ${fmt(chosen.runAt)}${offsetMs ? ` (${offsetMs > 0 ? "+" : ""}${offsetMs} ms)` : ""}.`
               : ""}
-            {chosen?.stage && chosen.walletIds.length ? ` Mints in ${chosen.name} with ${chosen.walletIds.length} wallet(s).` : ""}
-            {chosen?.skipped.length
-              ? ` Skipped ${chosen.skipped.length} selected wallet(s) not eligible for ${chosen.name}: ${chosen.skipped
+            {chosen?.stage && minting.length ? ` Mints in ${chosen.name} with ${minting.length} wallet(s).` : ""}
+            {skippedSel.length
+              ? ` Skipped ${skippedSel.length} selected wallet(s) not eligible for ${chosen?.name}: ${skippedSel
                   .slice(0, 3)
                   .map((v) => v.label)
-                  .join(", ")}${chosen.skipped.length > 3 ? ", …" : ""}.`
+                  .join(", ")}${skippedSel.length > 3 ? ", …" : ""}.`
               : ""}
           </p>
         </div>
@@ -821,21 +913,19 @@ const STAGE_TYPE: Record<string, string> = {
 const STATE_ICON = { eligible: "✓", not_eligible: "✕", unverified: "?", unknown: "?" } as const;
 const STATE_CLASS = { eligible: "ok", not_eligible: "bad", unverified: "muted", unknown: "muted" } as const;
 
-/** Verdict for the stage being minted (per-stage details are listed above the table). */
-function Access({ r }: { r: any }) {
-  const a = r?.access;
-  if (!a) return <span className="muted">—</span>;
-  if (r.needsOpenSeaLogin && r.access?.status === "unknown") return <span className="muted">Not verified yet</span>;
+/** Verdict for the stage being minted (the same stage the Timing picker has selected). */
+function Access({ view, needsLogin }: { view: StageWalletView; needsLogin: boolean }) {
+  if (needsLogin && view.access === "unknown") return <span className="muted">Not verified yet</span>;
   const label =
-    a.status === "yes"
+    view.access === "yes"
       ? "Eligible"
-      : a.status === "public"
+      : view.access === "public"
         ? "Eligible (public)"
-        : a.status === "no"
+        : view.access === "no"
           ? "Not eligible"
-          : a.status === "n/a"
+          : view.access === "n/a"
             ? "No allowlist"
             : "Unknown";
-  const cls = a.status === "yes" || a.status === "public" ? "ok" : a.status === "no" ? "bad" : "muted";
+  const cls = view.access === "yes" || view.access === "public" ? "ok" : view.access === "no" ? "bad" : "muted";
   return <b className={cls}>{label}</b>;
 }
