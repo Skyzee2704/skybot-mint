@@ -271,15 +271,33 @@ export function createBot(token: string, opts: ConstructorParameters<typeof Bot>
     const { listWallets } = await import("../users/service.js");
     const ws = await listWallets(u.id);
     if (!ws.length) return ctx.reply("No wallets yet. Create some in the dashboard.");
-    await ctx.reply(
-      ws
-        .map(
-          (w: { isMain: boolean; label: string; address: string }) =>
-            `${w.isMain ? "★ " : ""}<b>${esc(w.label)}</b>\n<code>${w.address}</code>`,
-        )
-        .join("\n\n"),
-      { parse_mode: "HTML" },
-    );
+    const { CHAINS } = await import("../config/chains.js");
+    const { getPool } = await import("../core/rpc/pool.js");
+    const { nativeBalancesBatch } = await import("../core/rpc/multicall.js");
+    const { cachedBalances } = await import("../util/balanceCache.js");
+    const { formatWalletBalances } = await import("./wallets.js");
+    const addrs = ws.map((w: { address: string }) => w.address);
+    const rows = (
+      await Promise.all(
+        CHAINS.map(async (c) => {
+          try {
+            const bals = await cachedBalances(c.key, addrs, (missing) => nativeBalancesBatch(getPool(c), missing));
+            return ws.map((w: { address: string }) => {
+              const b = bals.get(w.address.toLowerCase());
+              return { address: w.address, chain: c.name, symbol: c.nativeSymbol, wei: b instanceof Error || b === undefined ? null : b };
+            });
+          } catch {
+            return ws.map((w: { address: string }) => ({
+              address: w.address,
+              chain: c.name,
+              symbol: c.nativeSymbol,
+              wei: null as bigint | null,
+            }));
+          }
+        }),
+      )
+    ).flat();
+    await ctx.reply(formatWalletBalances(ws, rows).slice(0, 3900), { parse_mode: "HTML" });
   });
 
   bot.command("jobs", async (ctx) => {

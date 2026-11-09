@@ -171,7 +171,9 @@ export default function SettingsPage() {
                     />{" "}
                     {ch.nativeSymbol}
                   </td>
-                  <td className="mono">{ch.dailySpent}</td>
+                  <td className="mono">
+                    {ch.dailySpent} {ch.nativeSymbol}
+                  </td>
                 </tr>
               ))}
             </tbody>

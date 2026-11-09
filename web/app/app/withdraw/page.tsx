@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { assertSignableChain, withSignTimeout } from "@/lib/signing";
 import { usePrivy, useSignTransaction } from "@privy-io/react-auth";
-import { fmtEth, short } from "@/lib/api";
+import { fmtEth, fmtNative, short } from "@/lib/api";
 import { useApi, useShell } from "@/components/AppShell";
 import { ChainSelect } from "@/components/ChainSelect";
 import { useWalletList } from "@/lib/wallets";
@@ -24,6 +24,7 @@ export default function WithdrawPage() {
   const list = useWalletList(api, userId);
   const [chain, setChain] = usePersistedChain("withdraw");
   const [balances, setBalances] = useState<Record<string, string>>({});
+  const [balSymbol, setBalSymbol] = useState("");
   const [picked, setPicked] = useState<Record<string, boolean>>({});
   // "Withdraw first" from the remove dialog: preselect that wallet once the list is known.
   const preselected = useRef(false);
@@ -48,10 +49,14 @@ export default function WithdrawPage() {
 
   useEffect(() => {
     setBalances({});
+    setBalSymbol("");
     setQuote(null);
     if (!list.wallets.length) return;
     api("/api/wallets/balances", { body: { chain } })
-      .then((r) => setBalances(Object.fromEntries(r.balances.map((b: any) => [b.walletId, b.balanceWei ?? "error"]))))
+      .then((r) => {
+        setBalSymbol(r.nativeSymbol ?? "");
+        setBalances(Object.fromEntries(r.balances.map((b: any) => [b.walletId, b.balanceWei ?? "error"])));
+      })
       .catch(() => {});
   }, [chain, list.wallets.length]); // eslint-disable-line
 
@@ -150,7 +155,7 @@ export default function WithdrawPage() {
     .filter((i) => i.tx && run[i.walletId] && ["failed", "skipped"].includes(run[i.walletId].status))
     .map((i) => i.walletId as string);
 
-  const sym = quote?.nativeSymbol ?? "";
+  const sym = quote?.nativeSymbol ?? balSymbol;
   const ready = quote?.items?.filter((i: any) => i.tx) ?? [];
 
   return (
@@ -225,7 +230,7 @@ export default function WithdrawPage() {
                   ) : balances[w.id] === "error" ? (
                     <span className="muted">unavailable</span>
                   ) : (
-                    fmtEth(balances[w.id], 6)
+                    fmtNative(balances[w.id], sym, 6)
                   )}
                 </td>
                 <td>

@@ -12,6 +12,8 @@ export interface Stage {
   name: string;
   type: "public" | "allowlist" | "signed" | "token_gated" | "unknown";
   priceWei: string | null;
+  /** Set when the stage is paid in an ERC-20. Absent means the chain's native coin. */
+  paymentSymbol?: string | null;
   start: string | null; // ISO
   end: string | null;
   maxPerWallet: number | null;
@@ -47,6 +49,17 @@ function stageStatus(startSec: number | null, endSec: number | null, now = Date.
 }
 const iso = (sec: number | null) => (sec ? new Date(sec * 1000).toISOString() : null);
 const toSec = (s?: string | null) => (s ? Math.floor(new Date(s).getTime() / 1000) : null);
+
+const NATIVE_CURRENCY = "0x0000000000000000000000000000000000000000";
+/** ERC-20 mint price keeps its token symbol. Native (or unset) currency returns null. */
+export function paymentSymbolOf(s: {
+  price_currency_address?: string;
+  price_currency?: { symbol?: string; address?: string };
+}): string | null {
+  const addr = (s.price_currency?.address ?? s.price_currency_address ?? "").toLowerCase();
+  if (!addr || addr === NATIVE_CURRENCY) return null;
+  return s.price_currency?.symbol?.trim() || "ERC-20";
+}
 
 function mapOsStageType(t?: string): Stage["type"] {
   const s = (t ?? "").toLowerCase();
@@ -206,6 +219,7 @@ export async function resolveTarget(opts: ResolveOptions): Promise<ResolvedTarge
       name: s.label || s.stage_type || "stage",
       type,
       priceWei: s.price ?? null,
+      paymentSymbol: paymentSymbolOf(s),
       start: iso(toSec(s.start_time)),
       end: iso(toSec(s.end_time)),
       maxPerWallet: s.max_per_wallet ? Number(s.max_per_wallet) : null,

@@ -50,10 +50,10 @@ export const kindLabel = (t: Pick<ResolvedTarget, "kind">) => (t.kind === "seadr
 export const isPublicStage = (s: Pick<Stage, "name" | "type">) => s.type === "public" || /\bpublic\b/i.test(s.name);
 export const stageLabel = (s: Pick<Stage, "name" | "type">) => (isPublicStage(s) ? "Public" : s.name || "Stage");
 
-export function priceText(s: Pick<Stage, "priceWei">, sym: string) {
+export function priceText(s: Pick<Stage, "priceWei" | "paymentSymbol">, sym: string) {
   if (s.priceWei === null) return "Price unknown";
   if (s.priceWei === "0") return "Free";
-  return `${formatEther(s.priceWei)} ${sym}`;
+  return `${formatEther(s.priceWei)} ${s.paymentSymbol || sym}`;
 }
 
 const tzOf = (tz: string | null | undefined) => (isValidTimeZone(tz ?? undefined) ? tz! : null);

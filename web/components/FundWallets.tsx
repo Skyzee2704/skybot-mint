@@ -9,7 +9,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { usePrivy, useSignTransaction } from "@privy-io/react-auth";
 import { CopyAddress } from "@/components/CopyAddress";
 import { ChainSelect } from "@/components/ChainSelect";
-import { fmtEth, short } from "@/lib/api";
+import { fmtEth, fmtNative, short } from "@/lib/api";
 import { assertSignableChain, withSignTimeout } from "@/lib/signing";
 import { balancesAsOf, balancesFetcher, balancesKey, revalidate } from "@/lib/swr";
 import type { useApi } from "@/components/AppShell";
@@ -35,6 +35,7 @@ export function FundWallets({ api, wallets, onDone }: { api: ReturnType<typeof u
   const others = useMemo(() => wallets.filter((w) => !w.isMain), [wallets]);
   const [chain, setChain] = usePersistedChain("fund");
   const [mainBal, setMainBal] = useState<string | null | undefined>(undefined);
+  const [balSymbol, setBalSymbol] = useState("");
   const [picked, setPicked] = useState<Record<string, boolean>>({});
   const [amount, setAmount] = useState("");
   const [max, setMax] = useState(false);
@@ -60,6 +61,7 @@ export function FundWallets({ api, wallets, onDone }: { api: ReturnType<typeof u
     setMainBal(undefined);
     try {
       const r = await api("/api/wallets/balances", { body: { chain, walletIds: [main.id], ...(fresh ? { fresh: true } : {}) } });
+      setBalSymbol(r.nativeSymbol ?? "");
       setMainBal(r.balances?.[0]?.balanceWei ?? null);
     } catch {
       setMainBal(null);
@@ -171,7 +173,7 @@ export function FundWallets({ api, wallets, onDone }: { api: ReturnType<typeof u
     .filter((i) => run[i.walletId] && ["failed", "skipped"].includes(run[i.walletId].status))
     .map((i) => i.walletId as string);
   const sentCount = Object.values(run).filter((r) => r.status === "sent" || r.status === "confirmed").length;
-  const sym = quote?.nativeSymbol ?? "";
+  const sym = quote?.nativeSymbol ?? balSymbol;
 
   if (!main)
     return (
@@ -199,7 +201,7 @@ export function FundWallets({ api, wallets, onDone }: { api: ReturnType<typeof u
           ) : mainBal === null ? (
             <span className="muted">balance unavailable</span>
           ) : (
-            `Balance ${fmtEth(mainBal, 6)}`
+            `Balance ${fmtNative(mainBal, sym, 6)}`
           )}
         </span>
       </div>
@@ -242,7 +244,9 @@ export function FundWallets({ api, wallets, onDone }: { api: ReturnType<typeof u
                 <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {w.label} <span className="mono muted">{short(w.address)}</span>
                 </span>
-                {perPreview !== null && picked[w.id] && <span className="mono small muted">+{fmtEth(perPreview.toString(), 6)}</span>}
+                {perPreview !== null && picked[w.id] && (
+                  <span className="mono small muted">+{fmtNative(perPreview.toString(), sym, 6)}</span>
+                )}
               </label>
             ))}
           </div>
@@ -278,7 +282,7 @@ export function FundWallets({ api, wallets, onDone }: { api: ReturnType<typeof u
             {max
               ? "Max sends your Main balance minus the exact network fees for every transfer, split evenly. The exact amount per wallet is shown on review."
               : perPreview !== null
-                ? `${fmtEth(perPreview.toString(), 8)} per wallet × ${ids.length}${remPreview > 0n ? ` (${remPreview} wei rounding stays in Main)` : ""}. Network fees are added on review.`
+                ? `${fmtNative(perPreview.toString(), sym, 8)} per wallet × ${ids.length}${remPreview > 0n ? ` (${remPreview} wei rounding stays in Main)` : ""}. Network fees are added on review.`
                 : "Enter the total to split evenly across the selected wallets."}
           </p>
           {overBalance && <p className="bad">The amount is more than your Main balance on this chain.</p>}

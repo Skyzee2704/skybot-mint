@@ -200,7 +200,7 @@ export default function WalletsPage() {
                     balances[w.id] === "error" ? (
                       <span className="muted">unavailable</span>
                     ) : (
-                      Number(balances[w.id]).toFixed(5)
+                      `${Number(balances[w.id]).toFixed(5)} ${bal.data?.nativeSymbol ?? ""}`.trim()
                     )
                   ) : (
                     <span className="skeleton" style={{ width: 70 }} />

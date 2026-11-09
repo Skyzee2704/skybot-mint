@@ -227,6 +227,8 @@ export default function MintPage() {
           ? fmt(s.start)
           : "";
   const sym = t?.chain?.nativeSymbol ?? "";
+  const priceLabel = (s: { priceWei?: string | null; paymentSymbol?: string | null }) =>
+    s?.priceWei == null ? "Unknown" : s.priceWei === "0" ? "Free" : `${fmtEth(s.priceWei)} ${s.paymentSymbol || sym}`;
   // One source of truth: every stage some wallet can still mint. Not the checker's target stage, and not
   // the current checkboxes (those are filled in from the stage the member picks).
   const options = useMemo(
@@ -234,6 +236,7 @@ export default function MintPage() {
     [t, elig, now],
   );
   const { option: chosen, fellBack } = pickTimingOption(options, timing);
+  const paySym: string | null = chosen?.stage?.paymentSymbol || null;
   const chosenIds = new Set(chosen?.walletIds ?? []);
   const stageKey = chosen?.key ?? null;
   const supplyRemaining = (() => {
@@ -359,7 +362,7 @@ export default function MintPage() {
                   <tr key={i}>
                     <td>{s.name}</td>
                     <td className="hide-sm">{STAGE_TYPE[s.type] ?? s.type}</td>
-                    <td>{s.priceWei == null ? "Unknown" : s.priceWei === "0" ? "Free" : `${fmtEth(s.priceWei)} ${sym}`}</td>
+                    <td>{priceLabel(s)}</td>
                     <td className="hide-sm">{s.maxPerWallet ?? "—"}</td>
                     <td className={s.status === "active" ? "ok" : s.status === "upcoming" ? "warn" : "muted"}>
                       {s.status === "active" ? (
@@ -576,7 +579,10 @@ export default function MintPage() {
             </button>
             <span className="spacer" />
             <span className="muted">
-              {selRows.length} selected · {totalNfts} NFT(s) · ~{fmtEth(totalWei.toString())} {sym}
+              {selRows.length} selected · {totalNfts} NFT(s) ·{" "}
+              {paySym
+                ? `~${fmtEth(selRows.reduce((a: bigint, r: any) => a + BigInt(viewFor(r).unitPriceWei ?? r.unitPriceWei ?? "0") * BigInt(qtyFor(r)), 0n).toString())} ${paySym} + ~${fmtEth(selRows.reduce((a: bigint, r: any) => a + BigInt(r.gasCostWei ?? "0"), 0n).toString())} ${sym} gas`
+                : `~${fmtEth(totalWei.toString())} ${sym}`}
             </span>
           </div>
           {hiddenCount > 0 && <p className="muted small">{hiddenCount} not eligible hidden</p>}
@@ -655,7 +661,11 @@ export default function MintPage() {
                       <div className="muted small">{view.maxQty > 0 ? `max ${view.maxQty}` : "none left"}</div>
                       {view.reason && <div className="bad small">{view.reason}</div>}
                     </td>
-                    <td className="mono col-cost">~{fmtEth(rowCostWei(r).toString())}</td>
+                    <td className="mono col-cost">
+                      {paySym
+                        ? `~${fmtEth((BigInt(viewFor(r).unitPriceWei ?? r.unitPriceWei ?? "0") * BigInt(qtyFor(r))).toString())} ${paySym} + ${fmtEth(r.gasCostWei ?? "0")} ${sym}`
+                        : `~${fmtEth(rowCostWei(r).toString())} ${sym}`}
+                    </td>
                     <td className="hide-sm">
                       <span className={BigInt(r.balanceWei ?? "0") >= rowCostWei(r) ? "ok" : "warn"}>
                         {fmtEth(r.balanceWei, 5)} {sym}
@@ -733,7 +743,7 @@ export default function MintPage() {
             </div>
             <div className="kv">
               <b>Daily / Cap</b>
-              {sim.summary.dailySpent} / {sim.summary.dailyCap}
+              {sim.summary.dailySpent} / {sim.summary.dailyCap} {sym}
             </div>
           </div>
           {sim.summary.stage && (
@@ -844,7 +854,7 @@ const tinyAddr = (a?: string | null) => (a ? `${a.slice(0, 4)}…${a.slice(-2)}`
 
 function stageMeta(s: any, sym: string, when: (s: any) => string) {
   return [
-    s?.priceWei != null ? (s.priceWei === "0" ? "Free" : `${fmtEth(s.priceWei)} ${sym}`) : null,
+    s?.priceWei != null ? (s.priceWei === "0" ? "Free" : `${fmtEth(s.priceWei)} ${s.paymentSymbol || sym}`) : null,
     s?.maxPerWallet ? `max ${s.maxPerWallet}/wallet` : null,
     when(s),
   ]

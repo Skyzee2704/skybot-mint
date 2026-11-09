@@ -79,7 +79,7 @@ export interface PlanItem {
  * Gas check for one wallet on one chain (pure, unit-tested): include transfers in order while the wallet's native
  * balance covers their summed network fees; the rest are skipped with a clear reason instead of failing on-chain.
  */
-export function planWalletGas(balance: bigint, gasPrice: bigint, items: PlanItem[], symbol = "ETH") {
+export function planWalletGas(balance: bigint, gasPrice: bigint, items: PlanItem[], symbol: string) {
   let spent = 0n;
   const out: { key: string; fee: bigint; ok: boolean; skip: string | null }[] = [];
   for (const it of items) {

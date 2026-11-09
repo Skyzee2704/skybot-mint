@@ -214,9 +214,10 @@ export const balancesKey = (chain: string) => `balances:${chain}`;
 export const balancesFetcher =
   (api: Api, chain: string, fresh = false) =>
   () =>
-    api<{ chain: string; asOf?: string; balances: { walletId: string; balance: string | null }[] }>("/api/wallets/balances", {
-      body: fresh ? { chain, fresh: true } : { chain },
-    });
+    api<{ chain: string; nativeSymbol?: string; asOf?: string; balances: { walletId: string; balance: string | null }[] }>(
+      "/api/wallets/balances",
+      { body: fresh ? { chain, fresh: true } : { chain } },
+    );
 export const balancesAsOf = (d: { asOf?: string }) => (d?.asOf ? Date.parse(d.asOf) : null);
 export const NFTS_KEY = "nfts";
 export const nftsFetcher = (api: Api) => () => api<any>("/api/nfts");

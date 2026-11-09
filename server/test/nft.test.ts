@@ -98,16 +98,21 @@ describe("NFT transfer building + verification", () => {
   });
   it("gas plan skips transfers the wallet can't pay for", async () => {
     const { planWalletGas } = await import("../src/core/nft/transfer.js");
-    const p = planWalletGas(215n, 1n, [
-      { key: "a", gasLimit: 100n, l1Fee: 0n },
-      { key: "b", gasLimit: 100n, l1Fee: 10n },
-      { key: "c", gasLimit: 100n, l1Fee: 0n },
-    ]);
+    const p = planWalletGas(
+      215n,
+      1n,
+      [
+        { key: "a", gasLimit: 100n, l1Fee: 0n },
+        { key: "b", gasLimit: 100n, l1Fee: 10n },
+        { key: "c", gasLimit: 100n, l1Fee: 0n },
+      ],
+      "ETH",
+    );
     expect(p.items.map((i) => i.ok)).toEqual([true, true, false]);
     expect(p.items[2].skip).toMatch(/gas/);
     expect(p.totalFee).toBe(210n);
     expect(p.needed).toBe(310n);
-    expect(planWalletGas(0n, 1n, [{ key: "a", gasLimit: 1n, l1Fee: 0n }]).items[0].ok).toBe(false);
+    expect(planWalletGas(0n, 1n, [{ key: "a", gasLimit: 1n, l1Fee: 0n }], "ETH").items[0].ok).toBe(false);
   });
   it("only broadcasts the exact quoted transfer", async () => {
     const t = await import("../src/core/nft/transfer.js");
