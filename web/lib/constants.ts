@@ -6,5 +6,5 @@
  */
 export const SKYBOT_TOKEN_ADDRESS = "0x4b030f9eDf2D6456B1014939E88F17afD9F6c502";
 
-/** Public Volta.family site. Do not point this at a token-specific path. */
-export const VOLTA_FAMILY_URL = "https://volta.family";
+/** $SKYBOT page on Volta.family. The path is the published contract address. */
+export const VOLTA_TOKEN_URL = `https://www.volta.family/token/${SKYBOT_TOKEN_ADDRESS}`;
