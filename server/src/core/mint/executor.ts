@@ -192,8 +192,15 @@ export async function prepareAll(
       } catch (e: any) {
         // 422 right around the start can mean the chosen stage isn't live on OpenSea's side yet: retry briefly.
         const earlyNotEligible =
-          e instanceof MintBuildError && e.code === "NOT_ELIGIBLE" && Boolean(req.stage) && Date.now() < (fireAt ?? 0) + NOT_ELIGIBLE_GRACE_MS;
-        if (e instanceof MintBuildError && (e.code === "NOT_ACTIVE" || e.code === "RETRY" || earlyNotEligible) && Date.now() < buildDeadline) {
+          e instanceof MintBuildError &&
+          e.code === "NOT_ELIGIBLE" &&
+          Boolean(req.stage) &&
+          Date.now() < (fireAt ?? 0) + NOT_ELIGIBLE_GRACE_MS;
+        if (
+          e instanceof MintBuildError &&
+          (e.code === "NOT_ACTIVE" || e.code === "RETRY" || earlyNotEligible) &&
+          Date.now() < buildDeadline
+        ) {
           await sleep(e.code === "RETRY" ? 50 : nextRetryDelay(Date.now(), fireAt));
           if (await cancelled()) throw new JobCancelledError();
           continue;
