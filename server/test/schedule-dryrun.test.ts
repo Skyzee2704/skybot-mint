@@ -47,7 +47,8 @@ export interface DryWallet {
 }
 
 export interface DryRun {
-  strategy: "seadrop_public" | "generic" | "opensea_api";
+  /** direct_contract: mintAllowList or mintSigned calldata already in hand before the presign window. */
+  strategy: "seadrop_public" | "generic" | "opensea_api" | "direct_contract";
   prepStart: number;
   firstSend: number;
   lastSend: number;
@@ -62,6 +63,8 @@ export interface DryRun {
  * opensea_api holds the real build until T0, retries 409 every NOT_ACTIVE_RETRY_MS, and caps a late gas
  * estimate at GAS_ESTIMATE_BUDGET_MS. Broadcast is gated on waitUntil(T0) then beginBroadcast.
  */
+const LOCAL = new Set<DryRun["strategy"]>(["seadrop_public", "generic", "direct_contract"]);
+
 export function dryRun(strategy: DryRun["strategy"], p: DryPhases): DryRun {
   const wake = -JOB_LEAD_MS + p.qstashLate;
   const runStart = wake + p.coldStart;
@@ -69,7 +72,7 @@ export function dryRun(strategy: DryRun["strategy"], p: DryPhases): DryRun {
   const setupDone = prepStart + p.setup;
 
   const readyAt: number[] = [];
-  if (strategy === "opensea_api") {
+  if (!LOCAL.has(strategy)) {
     // Setup (resolve, fees, nonces) runs in the presign window. The mint build itself is held until T0,
     // or until setup finishes if that is already after T0. A 409 costs one round trip plus NOT_ACTIVE_RETRY_MS.
     let attempt = Math.max(0, setupDone);
@@ -166,6 +169,16 @@ describe("scheduled mint dry run", () => {
     expect(r.firstMempool).toBe(366 + 40);
   });
 
+  it("direct contract with the proof or signature already in hand matches SeaDrop public and beats the API", () => {
+    const direct = dryRun("direct_contract", base);
+    const api = dryRun("opensea_api", base);
+    expect(direct.firstMempool).toBe(65);
+    expect(direct.wallets.every((w) => w.ready < 0)).toBe(true);
+    expect(api.firstMempool).toBe(525);
+    expect(api.wallets.every((w) => w.ready > 0)).toBe(true);
+    expect(api.firstMempool - direct.firstMempool).toBe(460);
+  });
+
   it("OpenSea: nothing is signed before T0; 409 retries add 300ms after each round trip", () => {
     const open = dryRun("opensea_api", { ...base, wallets: 1 });
     expect(open.wallets[0]!.ready).toBe(0 + 120 + Math.min(40, 400) + 300);
@@ -208,7 +221,7 @@ describe("scheduled mint dry run", () => {
       { ...base, wallets: 40, privySign: 50 },
     ];
     for (const c of cases) {
-      for (const s of ["seadrop_public", "generic", "opensea_api"] as const) {
+      for (const s of ["seadrop_public", "generic", "direct_contract", "opensea_api"] as const) {
         const r = dryRun(s, c);
         expect(r.firstSend).toBeGreaterThanOrEqual(0);
         expect(r.wallets.every((w) => w.sendStart >= 0)).toBe(true);
