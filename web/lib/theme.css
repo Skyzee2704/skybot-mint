@@ -554,17 +554,41 @@ html.tg-mini-app body {
   padding: 3px;
   gap: 2px;
 }
-.segmented button {
+.segmented button,
+.segmented a {
   background: transparent;
   color: var(--cream-dim);
   padding: 7px 14px;
 }
-.segmented button.on {
-  background: var(--orange);
-  color: #120800;
+/* Selected option: a tinted chip, not the solid orange of a primary action. */
+.segmented button.on,
+.segmented a.on {
+  background: rgba(255, 107, 26, 0.14);
+  color: var(--orange);
+  box-shadow: inset 0 0 0 1px var(--orange);
 }
-.segmented button:hover {
+.segmented button:hover,
+.segmented a:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--cream);
   box-shadow: none;
+}
+@media (max-width: 720px) {
+  .segmented {
+    max-width: 100%;
+  }
+  .segmented button,
+  .segmented a {
+    padding: 7px 10px;
+    font-size: 13px;
+    white-space: nowrap;
+  }
+}
+.segmented button.on:hover,
+.segmented a.on:hover {
+  background: rgba(255, 107, 26, 0.22);
+  color: var(--orange-hot);
+  box-shadow: inset 0 0 0 1px var(--orange);
 }
 .wallet-pick {
   display: grid;
@@ -831,6 +855,60 @@ html.tg-mini-app body {
 }
 .stage-group details {
   padding-left: 22px;
+}
+
+/* Mint wallet table: checkbox, name, qty, cost — fits a 390px Mini App without sideways scroll. */
+.mint-wallets {
+  table-layout: fixed;
+  width: 100%;
+}
+.mint-wallets th,
+.mint-wallets td {
+  padding: 8px 4px;
+}
+.mint-wallets .col-check {
+  width: 26px;
+  padding-left: 0;
+  padding-right: 0;
+}
+.mint-wallets .col-qty {
+  width: 92px;
+}
+.mint-wallets .col-cost {
+  width: 78px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.mint-wallets .wallet-line {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  white-space: nowrap;
+}
+.mint-wallets .wallet-line .name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.mint-wallets .wallet-line .addr {
+  flex: none;
+  font-size: 11px;
+}
+.mint-wallets .stepper button {
+  width: 22px;
+  height: 26px;
+  padding: 0;
+}
+.mint-wallets .stepper input {
+  width: 28px;
+  padding: 2px;
+}
+@media (max-width: 720px) {
+  table.mint-wallets {
+    display: table;
+    overflow: visible;
+  }
 }
 
 /* ───────── Navigation ───────── */
@@ -1385,10 +1463,6 @@ html.tg-mini-app .confirm-action {
   padding: 7px 16px;
   border-radius: 999px;
   text-decoration: none;
-}
-.admin-tabs a.on {
-  background: var(--orange);
-  color: #120800;
 }
 
 /* Admin Gallery */
