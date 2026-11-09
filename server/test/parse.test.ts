@@ -48,7 +48,7 @@ describe("chains", () => {
     expect(getChain("5042")?.key).toBe("arc");
     expect(getChain(99901)?.key).toBe("elysium");
     expect(getChain("elysium")?.nativeSymbol).toBe("HYPE");
-    expect(getChain("elysium")?.openseaChain).toBeUndefined();
+    expect(getChain("elysium")?.openseaChain).toBe("elysium");
     expect(getChain("elysium")?.seadrop).toBe(true);
   });
   it("private RPC env takes priority, public fallback kept, send-only appended", () => {

@@ -161,7 +161,8 @@ export const CHAINS: ChainConfig[] = [
     name: "Elysium",
     nativeSymbol: "HYPE",
     explorer: "https://elysium.kinetiq.xyz/explorer",
-    // OpenSea has no verified chain slug for Elysium (unauthenticated lookups 401 for every slug, including unknown ones).
+    // GET /api/v2/collections/skittersnfts (no key) returns contracts[].chain "elysium" (verified 2026-11-09).
+    openseaChain: "elysium",
     publicRpcs: ["https://rpc.elysium.kinetiq.xyz"],
     // Blockscout-compatible API (getabi returned Multicall3's ABI). Not on the Etherscan v2 chainlist.
     blockscoutApi: "https://elysium.kinetiq.xyz/explorer/api",
