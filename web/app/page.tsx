@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePrivy } from "@privy-io/react-auth";
 import { Send } from "lucide-react";
+import { TokenContract } from "@/components/TokenContract";
 import { telegramBotUsername, useIsWebBrowser, useTelegram } from "@/lib/telegram";
 
 /** Public landing page. Always reachable, signed in or not (no redirect); signed-in users get "Open Dashboard". */
@@ -56,6 +57,7 @@ export default function Landing() {
             </>
           )}
         </div>
+        <TokenContract />
         <div className="features">
           <div className="card">
             <h3>OpenSea + Any Contract</h3>
