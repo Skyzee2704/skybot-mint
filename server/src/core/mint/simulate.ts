@@ -131,7 +131,9 @@ export async function simulateMint(t: ResolvedTarget, reqIn: MintRequest, userId
       try {
         tx = await buildMintTx(t, req, w.address, wq.quantity, undefined, userId);
       } catch (e: any) {
-        const notActive = e.code === "NOT_ACTIVE";
+        // Before the start OpenSea's mint API can answer 422 for a wallet that IS on the chosen stage's list
+        // (the stage isn't live yet). Wallets reaching here already passed the saved per-stage eligibility check.
+        const notActive = e.code === "NOT_ACTIVE" || (e.code === "NOT_ELIGIBLE" && beforeStart && choice !== null);
         const unfundedOnly = e.code === "INSUFFICIENT_FUNDS"; // OpenSea checked the allowlist first and only balance failed
         const gl = BigInt(req.gasLimit ?? fallbackGas(req.strategy, wq.quantity));
         const expected = notActive && beforeStart;

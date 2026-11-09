@@ -48,6 +48,8 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** Stage-not-open retry interval for the mint build (OpenSea 409 / NOT_ACTIVE). */
 export const NOT_ACTIVE_RETRY_MS = 300;
+/** How long after the start a 422 "not eligible" from the mint API is retried for a chosen stage. */
+export const NOT_ELIGIBLE_GRACE_MS = 5000;
 /** Max time a gas estimate may add after the start before the fallback/hint gas is used instead. */
 export const GAS_ESTIMATE_BUDGET_MS = 400;
 /** Parallel build/sign per job (keeps OpenSea and Privy below their burst limits). */
@@ -188,8 +190,11 @@ export async function prepareAll(
           mintTimeoutMs: MINT_API_TIMEOUT_MS,
         });
       } catch (e: any) {
-        if (e instanceof MintBuildError && (e.code === "NOT_ACTIVE" || e.code === "RETRY") && Date.now() < buildDeadline) {
-          await sleep(e.code === "NOT_ACTIVE" ? nextRetryDelay(Date.now(), fireAt) : 50);
+        // 422 right around the start can mean the chosen stage isn't live on OpenSea's side yet: retry briefly.
+        const earlyNotEligible =
+          e instanceof MintBuildError && e.code === "NOT_ELIGIBLE" && Boolean(req.stage) && Date.now() < (fireAt ?? 0) + NOT_ELIGIBLE_GRACE_MS;
+        if (e instanceof MintBuildError && (e.code === "NOT_ACTIVE" || e.code === "RETRY" || earlyNotEligible) && Date.now() < buildDeadline) {
+          await sleep(e.code === "RETRY" ? 50 : nextRetryDelay(Date.now(), fireAt));
           if (await cancelled()) throw new JobCancelledError();
           continue;
         }
