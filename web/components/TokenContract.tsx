@@ -16,10 +16,6 @@ export function TokenContract() {
         <a href={VOLTA_TOKEN_URL} target="_blank" rel="noopener noreferrer">
           Volta.family
         </a>
-        .{" "}
-        <a href={VOLTA_TOKEN_URL} target="_blank" rel="noopener noreferrer">
-          View on Volta.family
-        </a>
       </p>
       <div className="token-ca-row">
         <code className="token-ca-addr">{SKYBOT_TOKEN_ADDRESS}</code>
