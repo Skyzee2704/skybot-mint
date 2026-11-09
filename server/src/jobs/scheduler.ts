@@ -28,7 +28,15 @@ import {
   type JobRecord,
 } from "../core/jobs/repo.js";
 import type { MintRequest } from "../core/mint/types.js";
-import { broadcastAndTrack, prepareAll, trackReceipts, waitUntil, type Prepared, type WalletResult } from "../core/mint/executor.js";
+import {
+  broadcastAndTrack,
+  prepareAll,
+  trackReceipts,
+  waitUntil,
+  warmMint,
+  type Prepared,
+  type WalletResult,
+} from "../core/mint/executor.js";
 import { notifyJobDone } from "../bot/notify.js";
 import { getChain } from "../config/chains.js";
 import { log } from "../util/log.js";
@@ -190,9 +198,17 @@ export async function runJob(id: string, budgetMs = env.jobMaxDurationSec * 1000
       }
     }
     const buildDeadline = Math.min(Math.max(fireAt + 30_000, Date.now() + 30_000), deadline - 5_000);
-    // Every strategy starts preparing PRESIGN_LEAD_MS early (chain, target, fees, wallets, nonces). The OpenSea mint
-    // API only builds once the stage is open, so for it the build call itself is held until fireAt (see prepareAll);
-    // building it earlier could return a tx for the previous stage.
+    // Resolve the drop and fees as soon as this function is awake (~T−60s). Nonces, signing, and the OpenSea
+    // build stay in the last few seconds: a signed stage cannot be built until it opens, and a nonce read too
+    // early goes stale. The OpenSea mint API is held until fireAt (see prepareAll).
+    if (fireAt - Date.now() > 1_000) {
+      try {
+        await warmMint(req);
+        await appendJobLog(id, `warmed drop and fees (${Math.max(0, Math.round((fireAt - Date.now()) / 1000))}s before start)`);
+      } catch (e: any) {
+        await appendJobLog(id, `warm-up failed, will retry at presign: ${String(e?.message ?? e).slice(0, 160)}`).catch(() => {});
+      }
+    }
     const presignAt = fireAt - PRESIGN_LEAD_MS;
     // Pre-sign wait: re-check for a cancel about once a second.
     let lastCheck = Date.now();

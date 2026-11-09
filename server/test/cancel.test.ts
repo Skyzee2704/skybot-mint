@@ -20,6 +20,7 @@ vi.mock("../src/core/mint/executor.js", async (orig) => ({
   ...(await orig<any>()),
   prepareAll: hooks.prepareAll,
   broadcastAndTrack: hooks.broadcastAndTrack,
+  warmMint: async () => {},
 }));
 
 const req = (runAt: string | null) =>

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /**
  * Copy-address button. By default copies the FULL EIP-55 checksummed address. Pass `exact` to copy the string
- * verbatim (the published $SKYBOT contract address must keep its given checksum casing). Tries the async Clipboard
+ * verbatim. Tries the async Clipboard
  * API, then a hidden textarea + execCommand("copy") (Telegram in-app webviews often block the Clipboard API), and
  * finally shows the address in a selectable toast so the user can copy it by hand. Never triggers the surrounding
  * row / label / summary.

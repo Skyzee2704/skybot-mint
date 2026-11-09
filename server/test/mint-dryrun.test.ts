@@ -32,7 +32,10 @@ vi.mock("../src/core/rpc/pool.js", () => ({
 }));
 vi.mock("../src/core/resolver/cache.js", () => ({ getResolved: async () => ({ stages: [] }) }));
 vi.mock("../src/core/mint/stage.js", () => ({ stagePriceWei: () => sim.price }));
-vi.mock("../src/core/mint/fees.js", () => ({ getFees: async () => ({ maxFeePerGas: 1n, maxPriorityFeePerGas: 1n }) }));
+vi.mock("../src/core/mint/fees.js", () => ({
+  getFees: async () => ({ maxFeePerGas: 1n, maxPriorityFeePerGas: 1n }),
+  jobFeesIfFresh: () => null,
+}));
 vi.mock("../src/users/service.js", () => ({
   getWallet: async (_u: string, id: string) => ({ address: "0x" + id.padStart(40, "0"), privyWalletId: "pw-" + id }),
 }));

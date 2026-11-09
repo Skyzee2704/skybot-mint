@@ -74,15 +74,17 @@ export class OpenSeaClient {
     return Boolean(this.apiKey);
   }
 
-  private async req<T>(method: "GET" | "POST", path: string, body?: unknown, allowNoKey = false): Promise<T> {
+  private async req<T>(method: "GET" | "POST", path: string, body?: unknown, allowNoKey = false, timeoutMs = 10_000): Promise<T> {
     if (!this.apiKey && !allowNoKey) throw new OpenSeaUnavailable("OPENSEA_API_KEY not set — OpenSea features disabled");
     const headers: Record<string, string> = { accept: "application/json", "user-agent": "nft-mint-bot/0.1" };
     if (this.apiKey) headers["x-api-key"] = this.apiKey;
     if (body) headers["content-type"] = "application/json";
+    // A short timeout is one attempt: the caller retries. The default keeps the longer interactive lookup.
+    const fast = timeoutMs < 10_000;
     let lastErr: unknown;
-    for (let attempt = 0; attempt < 3; attempt++) {
+    for (let attempt = 0; attempt < (fast ? 1 : 3); attempt++) {
       const ctrl = new AbortController();
-      const t = setTimeout(() => ctrl.abort(), 10_000);
+      const t = setTimeout(() => ctrl.abort(), timeoutMs);
       try {
         const res = await this.fetchImpl(BASE + path, {
           method,
@@ -99,7 +101,7 @@ export class OpenSeaClient {
         }
         if (res.ok) return json as T;
         const msg = (json?.errors?.join?.("; ") ?? json?.detail ?? json?.message ?? text ?? "").toString().slice(0, 300);
-        if ((res.status === 429 || res.status >= 500) && attempt < 2) {
+        if (!fast && (res.status === 429 || res.status >= 500) && attempt < 2) {
           const ra = Number(res.headers.get("retry-after"));
           await new Promise((r) => setTimeout(r, Number.isFinite(ra) && ra > 0 ? Math.min(ra, 5) * 1000 : 500 * 2 ** attempt));
           lastErr = new OpenSeaHttpError(res.status, msg);
@@ -109,6 +111,7 @@ export class OpenSeaClient {
       } catch (e) {
         if (e instanceof OpenSeaHttpError) throw e;
         lastErr = e;
+        if (fast) throw e;
         if (attempt < 2) await new Promise((r) => setTimeout(r, 500 * 2 ** attempt));
       } finally {
         clearTimeout(t);
@@ -132,8 +135,8 @@ export class OpenSeaClient {
    * Build a ready-to-sign mint tx (official). 200 = eligible now; 409 = stage not active;
    * 422 = not eligible (allowlist / limit / funds) with a reason message. Read-only: nothing is minted.
    */
-  buildMint(slug: string, minter: string, quantity: number) {
-    return this.req<OsMintTx>("POST", `/api/v2/drops/${encodeURIComponent(slug)}/mint`, { minter, quantity });
+  buildMint(slug: string, minter: string, quantity: number, timeoutMs?: number) {
+    return this.req<OsMintTx>("POST", `/api/v2/drops/${encodeURIComponent(slug)}/mint`, { minter, quantity }, false, timeoutMs ?? 10_000);
   }
 }
 

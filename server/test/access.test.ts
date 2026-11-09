@@ -5,7 +5,9 @@ import {
   SEADROP_ERRORS,
   classifyRevert,
   decodeRevert,
+  allowListTxFromInfo,
   merkleAccess,
+  merkleProof,
   merkleRoot,
   parseAllowList,
   seadropLeaf,
@@ -55,6 +57,11 @@ describe("merkle allowlist", () => {
     const root = merkleRoot(leaves);
     const h = (x: string, y: string) => keccak256(x.toLowerCase() < y.toLowerCase() ? x + y.slice(2) : y + x.slice(2));
     expect(root).toBe(h(h(leaves[0], leaves[1]), leaves[2]));
+    for (let i = 0; i < leaves.length; i++) {
+      let acc = leaves[i]!;
+      for (const p of merkleProof(leaves, i)) acc = h(acc, p);
+      expect(acc).toBe(root);
+    }
   });
   it("parses plaintext lists and refuses PGP", () => {
     expect(parseAllowList("-----BEGIN PGP MESSAGE-----\nabc")).toBeNull();
@@ -67,6 +74,7 @@ describe("merkle allowlist", () => {
     const info: any = { root: "0x1", uri: "ipfs://x", state: "plaintext", members, rootVerified: true };
     expect(merkleAccess(info, A)!.status).toBe("yes");
     expect(merkleAccess(info, B)!.status).toBe("no");
+    expect(allowListTxFromInfo({ ...info, rootVerified: false }, A, A, 1, A)).toBeNull();
     expect(merkleAccess({ ...info, state: "encrypted", members: undefined }, A)!.status).toBe("unknown");
     expect(merkleAccess({ ...info, rootVerified: false }, A)!.status).toBe("unknown");
   });
