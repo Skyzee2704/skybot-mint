@@ -4,6 +4,7 @@ import { requireChain } from "../../config/chains.js";
 import { OpenSeaClient, OpenSeaHttpError } from "../resolver/opensea.js";
 import { ResolvedTarget } from "../resolver/resolver.js";
 import { SEADROP_ADDRESS, encodeMintPublic } from "../resolver/seadrop.js";
+import { readableAllowListTx } from "./access.js";
 import { isDangerousFunctionName, assertSafeMintTx } from "../safety/safety.js";
 import { osStage } from "./stage.js";
 import { stageEndedAt } from "./stageEligibility.js";
@@ -41,11 +42,13 @@ export async function buildMintTx(
   quantity: number,
   os = new OpenSeaClient(),
   userId = "system",
+  call: { mintTimeoutMs?: number } = {},
 ): Promise<BuiltTx> {
   const chain = requireChain(t.chain.key);
   const chosen = req.stage ? (t.stages.find((s) => s.name === req.stage) ?? null) : null;
   if (chosen && stageEndedAt(chosen, Date.now())) throw new MintBuildError(`The ${chosen.name} stage has ended`, "STAGE_ENDED");
   let tx: BuiltTx;
+  let builtLocal = false;
   switch (req.strategy) {
     case "seadrop_public": {
       const sd = t.seadrop;
@@ -59,11 +62,24 @@ export async function buildMintTx(
       break;
     }
     case "opensea_api": {
+      // A readable merkle list can be proven locally. Signed GTD/FCFS cannot: only OpenSea's signer has the key.
+      if (chosen?.type === "allowlist" && t.seadrop?.feeRecipient) {
+        try {
+          const local = await readableAllowListTx(chain, t.contract, wallet, quantity, t.seadrop.feeRecipient);
+          if (local) {
+            tx = { to: SEADROP_ADDRESS, data: local.data, value: local.value };
+            builtLocal = true;
+            break;
+          }
+        } catch {
+          /* fall through to the mint API */
+        }
+      }
       const slug = req.slug ?? t.slug;
       if (!slug) throw new MintBuildError("OpenSea slug unknown for this contract — cannot use OpenSea mint API");
       if (!os.available) throw new MintBuildError("OPENSEA_API_KEY not set — OpenSea mint API unavailable");
       try {
-        const r = await os.buildMint(slug, wallet, quantity);
+        const r = await os.buildMint(slug, wallet, quantity, call.mintTimeoutMs);
         const value = BigInt(r.value || "0x0");
         tx = { to: getAddress(r.to), data: r.data, value };
         if (r.chain && r.chain !== chain.openseaChain && r.chain !== chain.key)
@@ -73,6 +89,8 @@ export async function buildMintTx(
           const code = osErrorCode(e.status, e.message);
           throw new MintBuildError(`OpenSea: ${e.message || e.status}`, code);
         }
+        if (call.mintTimeoutMs && /abort|timeout/i.test(`${e?.name ?? ""} ${e?.message ?? e}`))
+          throw new MintBuildError("OpenSea mint timed out", "RETRY");
         throw e;
       }
       break;
@@ -114,7 +132,7 @@ export async function buildMintTx(
       throw new MintBuildError(`Unknown strategy ${(req as any).strategy}`);
   }
   // Price guard: the chosen stage's price when the member picked one, else the stage OpenSea mints into now.
-  const osPrice = req.strategy === "opensea_api" ? (chosen?.priceWei ?? osStage(t).priceWei) : null;
+  const osPrice = req.strategy === "opensea_api" && !builtLocal ? (chosen?.priceWei ?? osStage(t).priceWei) : null;
   await assertSafeMintTx(
     { ...tx, chainId: chain.chainId },
     {

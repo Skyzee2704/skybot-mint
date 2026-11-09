@@ -33,6 +33,18 @@ export function computeFees(baseFee: bigint, suggestedTip: bigint, mode: GasMode
   return { maxFeePerGas: maxFee, maxPriorityFeePerGas: tip, baseFee, capped };
 }
 
+/** Fees read when a scheduled job wakes, reused through the presign window (the 12s quote cache is too short). */
+const JOB_FEE_TTL_MS = 90_000;
+const jobFees = new Map<string, { at: number; fees: Fees }>();
+export function rememberJobFees(chainKey: string, mode: GasMode, fees: Fees) {
+  jobFees.set(`${chainKey}:${mode}`, { at: Date.now(), fees });
+}
+export function jobFeesIfFresh(chainKey: string, mode: GasMode): Fees | null {
+  const hit = jobFees.get(`${chainKey}:${mode}`);
+  if (!hit || Date.now() - hit.at > JOB_FEE_TTL_MS) return null;
+  return hit.fees;
+}
+
 export async function getFees(pool: RpcPool, mode: GasMode = env.gasMode): Promise<Fees> {
   const { baseFee, tip } = await pool.read(async (p) => {
     const [block, tipHex] = await Promise.all([p.getBlock("latest"), p.send("eth_maxPriorityFeePerGas", []).catch(() => null)]);

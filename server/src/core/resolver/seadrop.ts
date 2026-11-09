@@ -116,3 +116,27 @@ export async function seadropMintedBy(pool: RpcPool, nft: string, wallet: string
 export function encodeMintPublic(nft: string, feeRecipient: string, quantity: number): string {
   return seadropIface.encodeFunctionData("mintPublic", [nft, feeRecipient, ZeroAddress, BigInt(quantity)]);
 }
+
+const ALLOWLIST_IFACE = new Interface([
+  "function mintAllowList(address nftContract, address feeRecipient, address minterIfNotPayer, uint256 quantity, tuple(uint256 mintPrice, uint256 maxTotalMintableByWallet, uint256 startTime, uint256 endTime, uint256 dropStageIndex, uint256 maxTokenSupplyForStage, uint256 feeBps, bool restrictFeeRecipients) mintParams, bytes32[] proof) payable",
+]);
+
+/** Local calldata for a readable merkle allowlist. `proof` is the sorted-pair path for this minter's leaf. */
+export function encodeMintAllowList(
+  nft: string,
+  feeRecipient: string,
+  quantity: number,
+  mintParams: {
+    mintPrice: bigint;
+    maxTotalMintableByWallet: bigint;
+    startTime: bigint;
+    endTime: bigint;
+    dropStageIndex: bigint;
+    maxTokenSupplyForStage: bigint;
+    feeBps: bigint;
+    restrictFeeRecipients: boolean;
+  },
+  proof: string[],
+): string {
+  return ALLOWLIST_IFACE.encodeFunctionData("mintAllowList", [nft, feeRecipient, ZeroAddress, BigInt(quantity), mintParams, proof]);
+}

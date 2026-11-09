@@ -1,15 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { formatEther, toQuantity } from "ethers";
+import { Contract, ZeroHash, formatEther, toQuantity } from "ethers";
 import { explorerTx, requireChain } from "../../config/chains.js";
 import { getPool } from "../rpc/pool.js";
 import { getResolved } from "../resolver/cache.js";
+import { SEADROP_ABI, SEADROP_ADDRESS } from "../resolver/seadrop.js";
+import { getMerkleInfo } from "./access.js";
 import { getWallet } from "../../users/service.js";
 import { assertDailyBudget, recordSpend, settleSpend } from "../safety/safety.js";
 import { appendJobLog, jobStatus, JobCancelledError, patchJob, recordMinted, type JobRecord } from "../jobs/repo.js";
 import { buildMintTx, MintBuildError } from "./build.js";
 import { stagePriceWei } from "./stage.js";
 import type { BuiltTx } from "./types.js";
-import { getFees } from "./fees.js";
+import { getFees, jobFeesIfFresh, rememberJobFees } from "./fees.js";
 import { parseMintedTokenIds, waitForReceipt } from "./receipts.js";
 import { fallbackGas } from "./simulate.js";
 import { broadcastRejectedMessage, buildFailureMessage, revertedOnChainMessage, signFailureMessage } from "./jobErrors.js";
@@ -49,6 +51,16 @@ export const NOT_ACTIVE_RETRY_MS = 300;
 export const GAS_ESTIMATE_BUDGET_MS = 400;
 /** Parallel build/sign per job (keeps OpenSea and Privy below their burst limits). */
 export const BUILD_CONCURRENCY = 8;
+/** Simulation gas hint is raised by this much so a slightly heavier live stage still fits. */
+export function gasFromHint(hint: bigint): bigint {
+  if (hint <= 0n) return 0n;
+  return (hint * 130n) / 100n;
+}
+
+/** After T0 the OpenSea mint call must not sit on a 10s timeout. */
+export const MINT_API_TIMEOUT_MS = 1_500;
+/** How long before the start we re-read nonces for an already signed local transaction. */
+const NONCE_REFRESH_LEAD_MS = 1_200;
 const maxBig = (a: bigint, b: bigint) => (a > b ? a : b);
 
 /** Run `fn` over items with at most `limit` in flight; rejects with the first thrown error. */
@@ -96,6 +108,24 @@ async function setResults(job: JobRecord, results: WalletResult[]) {
 }
 
 /**
+ * Drop, fees, and a readable merkle list. Called when the scheduled function wakes (~T−60s), so the last
+ * few seconds are only nonce, sign, and broadcast. Failures are the caller's to log; prepareAll retries.
+ */
+export async function warmMint(req: MintRequest): Promise<void> {
+  const chain = requireChain(req.chain);
+  const pool = getPool(chain);
+  const mode = req.gasMode ?? "normal";
+  const [t, fees] = await Promise.all([getResolved(chain.key, req.contract, req.input), getFees(pool, mode)]);
+  rememberJobFees(chain.key, mode, fees);
+  if (t.kind !== "seadrop" || !t.seadrop?.hasAllowList) return;
+  const root = await pool.read(
+    (p) => new Contract(SEADROP_ADDRESS, SEADROP_ABI, p).getAllowListMerkleRoot(t.contract) as Promise<string>,
+    "merkleRoot",
+  );
+  if (root && root !== ZeroHash) await getMerkleInfo(chain, t.contract, root);
+}
+
+/**
  * Prepare (build + nonce + fees + sign via Privy) all wallet txs.
  * Signing uses Privy's wallet API with the app authorization key — we never hold private keys.
  *
@@ -112,12 +142,14 @@ export async function prepareAll(
 ): Promise<{ prepared: Prepared[]; results: WalletResult[] }> {
   const chain = requireChain(req.chain);
   const pool = getPool(chain);
-  const [, t, fees, walletRows] = await Promise.all([
+  const mode = req.gasMode ?? "normal";
+  const [, t, walletRows] = await Promise.all([
     pool.checkChainId(),
     getResolved(chain.key, req.contract, req.input),
-    getFees(pool, req.gasMode),
     Promise.all(req.wallets.map((w) => getWallet(job.userId, w.walletId))),
   ]);
+  // Fees were read at wake when the job was scheduled ahead. A mint-now job, or a missed warm-up, reads them here.
+  const fees = jobFeesIfFresh(chain.key, mode) ?? (await getFees(pool, mode));
   // Nonces don't depend on the build: fetch now (in parallel) so signing doesn't wait on another RPC round trip.
   const nonces = walletRows.map((w) => pool.read((p) => p.getTransactionCount(w.address, "pending"), "nonce"));
   nonces.forEach((n) => n.catch(() => {}));
@@ -151,10 +183,12 @@ export async function prepareAll(
   const buildWithRetry = async (i: number): Promise<BuiltTx> => {
     for (;;) {
       try {
-        return await buildMintTx(t, req, results[i].address, req.wallets[i].quantity, undefined, job.userId);
+        return await buildMintTx(t, req, results[i].address, req.wallets[i].quantity, undefined, job.userId, {
+          mintTimeoutMs: MINT_API_TIMEOUT_MS,
+        });
       } catch (e: any) {
-        if (e instanceof MintBuildError && e.code === "NOT_ACTIVE" && Date.now() < buildDeadline) {
-          await sleep(nextRetryDelay(Date.now(), fireAt));
+        if (e instanceof MintBuildError && (e.code === "NOT_ACTIVE" || e.code === "RETRY") && Date.now() < buildDeadline) {
+          await sleep(e.code === "NOT_ACTIVE" ? nextRetryDelay(Date.now(), fireAt) : 50);
           if (await cancelled()) throw new JobCancelledError();
           continue;
         }
@@ -163,21 +197,40 @@ export async function prepareAll(
     }
   };
 
-  /** Gas: exact estimate (+25%), but after the start it may not cost more than GAS_ESTIMATE_BUDGET_MS. */
-  const gasFor = async (tx: BuiltTx, i: number): Promise<bigint> => {
-    if (req.gasLimit) return BigInt(req.gasLimit);
-    const fb = maxBig(BigInt(gasHints[req.wallets[i].walletId] ?? 0), fallbackGas(req.strategy, req.wallets[i].quantity));
-    const est = pool
-      .read((p) => p.estimateGas({ from: results[i].address, to: tx.to, data: tx.data, value: tx.value }), "estimateGas")
-      .then((g) => (g * 125n) / 100n);
-    const late = fireAt !== undefined && Date.now() >= fireAt - GAS_ESTIMATE_BUDGET_MS;
+  const hintOf = (i: number): bigint => {
+    const raw = gasHints[req.wallets[i].walletId];
+    return raw && /^\d+$/.test(String(raw)) ? BigInt(raw) : 0n;
+  };
+  const bufferedHint = (i: number) => gasFromHint(hintOf(i));
+  const fallbackBuffered = (i: number) => (fallbackGas(req.strategy, req.wallets[i].quantity) * 130n) / 100n;
+  /** Full estimate before T0. After T0 this is only the no-hint OpenSea fallback, and it is raced against 400ms. */
+  const estimateGas = async (tx: BuiltTx, i: number): Promise<bigint> => {
+    const fb = maxBig(bufferedHint(i), fallbackBuffered(i));
     try {
-      return late ? await Promise.race([est, sleep(GAS_ESTIMATE_BUDGET_MS).then(() => fb)]) : await est;
+      const g = await pool.read(
+        (p) => p.estimateGas({ from: results[i].address, to: tx.to, data: tx.data, value: tx.value }),
+        "estimateGas",
+      );
+      return (g * 125n) / 100n;
     } catch (e: any) {
       const why = await describeTxError(e, { chain, contracts: [req.contract] }).catch(() => null);
       void jobLog(job, `gas estimate ${results[i].address.slice(0, 8)}: ${why?.message ?? "failed"} (using fallback gas)`).catch(() => {});
       return fb;
     }
+  };
+  const gasFor = async (tx: BuiltTx, i: number): Promise<bigint> => {
+    if (req.gasLimit) return BigInt(req.gasLimit);
+    const hint = bufferedHint(i);
+    const afterStart = fireAt !== undefined && Date.now() >= fireAt;
+    if (req.strategy !== "opensea_api") {
+      if (hint) return hint;
+      if (afterStart) return fallbackBuffered(i);
+      return estimateGas(tx, i);
+    }
+    if (hint) return hint;
+    if (!afterStart) return estimateGas(tx, i);
+    const fb = maxBig(hint, fallbackBuffered(i));
+    return Promise.race([estimateGas(tx, i), sleep(GAS_ESTIMATE_BUDGET_MS).then(() => fb)]);
   };
 
   const sign = async (i: number, tx: BuiltTx, gasLimit: bigint, nonce: number) => {
@@ -202,7 +255,9 @@ export async function prepareAll(
   if (opts.buildNotBefore !== undefined && Date.now() < opts.buildNotBefore - 500) {
     await mapLimit(req.wallets, BUILD_CONCURRENCY, async (_w, i) => {
       try {
-        const tx = await buildMintTx(t, req, results[i].address, req.wallets[i].quantity, undefined, job.userId);
+        const tx = await buildMintTx(t, req, results[i].address, req.wallets[i].quantity, undefined, job.userId, {
+          mintTimeoutMs: MINT_API_TIMEOUT_MS,
+        });
         const gas = await gasFor(tx, i);
         const nonce = await nonces[i];
         pre[i] = { tx, gas, nonce, raw: await sign(i, tx, gas, nonce) };
@@ -263,9 +318,31 @@ export async function prepareAll(
     }
   };
 
+  const chosenPrice = (): bigint | null => {
+    const stage = req.stage ? t.stages.find((s) => s.name === req.stage) : null;
+    if (stage?.priceWei != null) return BigInt(stage.priceWei);
+    return stagePriceWei(t, req.strategy);
+  };
+  /** True when this wallet cannot cover price + gas. Leaves a clear skip on the result and does not sign. */
+  const skipForBalance = async (i: number, value: bigint, gas: bigint): Promise<boolean> => {
+    const bal = await pool.read((p) => p.getBalance(results[i].address), "balance").catch(() => null);
+    if (bal === null) return false;
+    const need = value + gas * fees.maxFeePerGas;
+    if (bal >= need) return false;
+    results[i].status = "failed";
+    results[i].error = `Not enough balance (have ${formatEther(bal)}, need ~${formatEther(need)}). Skipped.`;
+    void jobLog(job, `skip ${results[i].address.slice(0, 8)}: balance ${formatEther(bal)} < ~${formatEther(need)}`).catch(() => {});
+    return true;
+  };
+
   // Per-wallet pipeline (bounded concurrency): build → gas → sign → (stream) send. One slow wallet never holds the rest.
   await mapLimit(req.wallets, BUILD_CONCURRENCY, async (_w, i) => {
     const w = walletRows[i];
+    const quoted = chosenPrice();
+    if (req.strategy === "opensea_api" && quoted !== null) {
+      const guess = bufferedHint(i) || fallbackBuffered(i);
+      if (await skipForBalance(i, quoted * BigInt(req.wallets[i].quantity), guess)) return;
+    }
     let s = Date.now();
     let tx: BuiltTx;
     try {
@@ -297,6 +374,20 @@ export async function prepareAll(
         raws[i] = await sign(i, tx, gasLimits[i], nonce);
         timing[i].sign = Date.now() - s;
       }
+      if (await skipForBalance(i, tx.value, gasLimits[i])) {
+        raws[i] = null;
+        return;
+      }
+      // Local calldata was signed a few seconds early. Re-read the nonce just before the start and re-sign only if it moved.
+      if (req.strategy !== "opensea_api" && fireAt && Date.now() < fireAt - NONCE_REFRESH_LEAD_MS) {
+        await waitUntil(fireAt - NONCE_REFRESH_LEAD_MS, cancelled);
+        const nowNonce = await pool.read((p) => p.getTransactionCount(results[i].address, "pending"), "nonce").catch(() => nonce);
+        if (nowNonce !== nonce) {
+          raws[i] = await sign(i, tx, gasLimits[i], nowNonce);
+          timing[i].path = "resigned";
+          void jobLog(job, `nonce changed for ${results[i].address.slice(0, 8)}, re-signed`).catch(() => {});
+        }
+      }
     } catch (e: any) {
       results[i].status = "failed";
       results[i].error =
@@ -305,7 +396,7 @@ export async function prepareAll(
           : await signFailureMessage(e, w.address, { chain, contract: req.contract });
       return;
     }
-    if (streaming) await finish(i);
+    if (streaming && raws[i]) await finish(i);
   });
 
   const reserve = built.map((tx, i) => (tx ? tx.value + gasLimits[i] * fees.maxFeePerGas : 0n));

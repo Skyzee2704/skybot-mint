@@ -9,11 +9,11 @@
  *     (OpenSea-hosted allowlists are PGP-encrypted to OpenSea, so this usually yields "encrypted".)
  *  3. OpenSea mint API classification is done in eligibility.ts (it checks allowlist before balance).
  */
-import { AbiCoder, Interface, getAddress, keccak256, toQuantity, ZeroHash } from "ethers";
-import type { RpcPool } from "../rpc/pool.js";
+import { AbiCoder, Contract, Interface, getAddress, keccak256, toQuantity, ZeroHash } from "ethers";
+import { getPool, type RpcPool } from "../rpc/pool.js";
 import type { ChainConfig } from "../../config/chains.js";
 import { env } from "../../config/env.js";
-import { SEADROP_ADDRESS } from "../resolver/seadrop.js";
+import { encodeMintAllowList, SEADROP_ABI, SEADROP_ADDRESS } from "../resolver/seadrop.js";
 import { decodeRevertData, explainRevert } from "../tx/revert.js";
 
 export type AllowStatus = "yes" | "no" | "unknown" | "public" | "n/a";
@@ -198,6 +198,79 @@ export function merkleRoot(leaves: string[]): string {
     layer = next;
   }
   return layer[0];
+}
+
+/** Sorted-pair proof for `leaves[index]`, matching `merkleRoot`. */
+export function merkleProof(leaves: string[], index: number): string[] {
+  if (index < 0 || index >= leaves.length) throw new Error("merkle leaf out of range");
+  const proof: string[] = [];
+  let layer = leaves.slice();
+  let idx = index;
+  while (layer.length > 1) {
+    const next: string[] = [];
+    for (let i = 0; i < layer.length; i += 2) {
+      if (i + 1 < layer.length) {
+        if (i === idx || i + 1 === idx) proof.push(i === idx ? layer[i + 1]! : layer[i]!);
+        next.push(hashPair(layer[i]!, layer[i + 1]!));
+      } else next.push(layer[i]!);
+    }
+    idx = Math.floor(idx / 2);
+    layer = next;
+  }
+  return proof;
+}
+
+/** Calldata for mintAllowList when the published list matches the on-chain root. Null if we cannot prove it. */
+export function allowListTxFromInfo(
+  info: MerkleInfo,
+  nft: string,
+  wallet: string,
+  quantity: number,
+  feeRecipient: string,
+): { data: string; value: bigint } | null {
+  if (info.state !== "plaintext" || !info.members || info.rootVerified === false || !info.root || info.root === ZeroHash) return null;
+  const entries = [...info.members.values()].filter((e) => e.mintParams);
+  if (!entries.length || entries.length !== info.members.size) return null;
+  let leaves: string[];
+  try {
+    leaves = entries.map((e) => seadropLeaf(e.address, e.mintParams));
+  } catch {
+    return null;
+  }
+  if (merkleRoot(leaves).toLowerCase() !== info.root.toLowerCase()) return null;
+  const idx = entries.findIndex((e) => e.address.toLowerCase() === wallet.toLowerCase());
+  if (idx < 0) return null;
+  const mp = entries[idx]!.mintParams;
+  const mintParams = {
+    mintPrice: BigInt(mp.mintPrice ?? 0),
+    maxTotalMintableByWallet: BigInt(mp.maxTotalMintableByWallet ?? 0),
+    startTime: BigInt(mp.startTime ?? 0),
+    endTime: BigInt(mp.endTime ?? 0),
+    dropStageIndex: BigInt(mp.dropStageIndex ?? 0),
+    maxTokenSupplyForStage: BigInt(mp.maxTokenSupplyForStage ?? 0),
+    feeBps: BigInt(mp.feeBps ?? 0),
+    restrictFeeRecipients: Boolean(mp.restrictFeeRecipients),
+  };
+  return {
+    data: encodeMintAllowList(nft, feeRecipient, quantity, mintParams, merkleProof(leaves, idx)),
+    value: mintParams.mintPrice * BigInt(quantity),
+  };
+}
+
+/** On-chain root plus the cached allowlist file. Null when the list is missing, encrypted, or does not match. */
+export async function readableAllowListTx(
+  chain: ChainConfig,
+  nft: string,
+  wallet: string,
+  quantity: number,
+  feeRecipient: string,
+): Promise<{ data: string; value: bigint } | null> {
+  const root = await getPool(chain).read(
+    (p) => new Contract(SEADROP_ADDRESS, SEADROP_ABI, p).getAllowListMerkleRoot(nft) as Promise<string>,
+    "merkleRoot",
+  );
+  if (!root || root === ZeroHash) return null;
+  return allowListTxFromInfo(await getMerkleInfo(chain, nft, root), nft, wallet, quantity, feeRecipient);
 }
 
 /** Parse a plaintext allowlist: JSON array of addresses or of {address, ...mintParams}, or CSV/lines with addresses. */
