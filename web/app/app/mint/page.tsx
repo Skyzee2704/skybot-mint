@@ -660,7 +660,7 @@ export default function MintPage() {
                         </button>
                       </div>
                       <div className="muted small">{view.maxQty > 0 ? `max ${view.maxQty}` : "none left"}</div>
-                      {view.reason && <div className="bad small">{view.reason}</div>}
+                      {view.reason && <div className={view.reason.startsWith("⚠️") ? "warn small" : "bad small"}>{view.reason}</div>}
                     </td>
                     <td className="mono col-cost">
                       {paySym

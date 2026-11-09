@@ -1,14 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
-import { Interface, parseEther } from "ethers";
+import { Interface } from "ethers";
 import { parseInput } from "../src/core/resolver/parseInput.js";
-import { decideDrop, kalosReserveWei, stageClock, wantOf } from "../src/core/kalos/decide.js";
+import { decideDrop, stageClock, wantOf } from "../src/core/kalos/decide.js";
 import { encodeMintAllowList, kalosIface } from "../src/core/kalos/calldata.js";
 import { chooseSeaDrop } from "../src/core/kalos/source.js";
 import { kalosStages } from "../src/core/kalos/target.js";
 import { KALOS_SEADROP, OPENSEA_SEADROP, type KalosDrop, type KalosEligibility } from "../src/core/kalos/types.js";
-import { requireChain } from "../src/config/chains.js";
 
 const drops = JSON.parse(readFileSync(new URL("./fixtures/kalos/drops.json", import.meta.url), "utf8")).drops as KalosDrop[];
 const elyantElig = JSON.parse(readFileSync(new URL("./fixtures/kalos/elyant-eligible.json", import.meta.url), "utf8")) as KalosEligibility;
@@ -86,12 +85,21 @@ describe("Kalos drops", () => {
     expect(data.startsWith(new Interface([kalosIface.getFunction("mintAllowList")]).getFunction("mintAllowList")!.selector)).toBe(true);
   });
 
-  it("keeps 1 HYPE free on Elysium and prefers the SeaDrop the contract allows", () => {
-    expect(kalosReserveWei(requireChain("elysium"), {})).toBe(parseEther("1"));
-    expect(kalosReserveWei(requireChain("elysium"), { KALOS_MINT_RESERVE: "0" })).toBe(0n);
+  it("a short balance does not remove allowlist eligibility, and SeaDrop choice follows the contract", () => {
+    const now = 1794240000;
+    const colony = decideDrop({
+      drop: elyant,
+      elig: elyantElig,
+      minted: 1,
+      nowSec: now,
+      balanceWei: 0n,
+      gasWei: 1n,
+    }).find((r) => r.name === "Colony")!;
+    expect(colony.eligible).toBe(true);
+    expect(colony.reason).toBe("insufficient balance");
     expect(chooseSeaDrop([KALOS_SEADROP], false).use).toBe("kalos");
     expect(chooseSeaDrop([OPENSEA_SEADROP], true).use).toBe("opensea");
-    const stages = kalosStages(elyant, 1794240000);
+    const stages = kalosStages(elyant, now);
     expect(stages.find((s) => s.name === "Colony")).toMatchObject({ source: "kalos", priceWei: "8000000000000000", kalosIndex: 2 });
     expect(stages.find((s) => s.name === "Public")?.type).toBe("public");
   });

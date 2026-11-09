@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { Contract, ZeroHash, formatEther, toQuantity } from "ethers";
 import { explorerTx, requireChain } from "../../config/chains.js";
-import { nativeText } from "../../util/native.js";
-import { kalosReserveWei } from "../kalos/decide.js";
 import { getPool } from "../rpc/pool.js";
 import { getResolved } from "../resolver/cache.js";
 import { SEADROP_ABI, SEADROP_ADDRESS } from "../resolver/seadrop.js";
@@ -332,37 +330,11 @@ export async function prepareAll(
     }
   };
 
-  const chosenPrice = (): bigint | null => {
-    const stage = req.stage ? t.stages.find((s) => s.name === req.stage) : null;
-    if (stage?.priceWei != null) return BigInt(stage.priceWei);
-    return stagePriceWei(t, req.strategy);
-  };
-  /** True when this wallet cannot cover price + gas. Leaves a clear skip on the result and does not sign. */
-  const skipForBalance = async (i: number, value: bigint, gas: bigint): Promise<boolean> => {
-    const bal = await pool.read((p) => p.getBalance(results[i].address), "balance").catch(() => null);
-    if (bal === null) return false;
-    const reserve = req.strategy === "kalos" ? kalosReserveWei(chain) : 0n;
-    const need = value + gas * fees.maxFeePerGas + reserve;
-    if (bal >= need) return false;
-    results[i].status = "failed";
-    const reserveNote = reserve > 0n ? ` Keeps ${nativeText(reserve, chain.nativeSymbol)} free after the mint.` : "";
-    results[i].error =
-      `Not enough balance (have ${nativeText(bal, chain.nativeSymbol)}, need ~${nativeText(need, chain.nativeSymbol)}).${reserveNote} Skipped.`;
-    void jobLog(
-      job,
-      `skip ${results[i].address.slice(0, 8)}: balance ${nativeText(bal, chain.nativeSymbol)} < ~${nativeText(need, chain.nativeSymbol)}${reserveNote}`,
-    ).catch(() => {});
-    return true;
-  };
-
   // Per-wallet pipeline (bounded concurrency): build → gas → sign → (stream) send. One slow wallet never holds the rest.
+  // A low balance is not a reason to skip: the wallet may be topped up before the start. If the network rejects
+  // the broadcast for insufficient funds, that wallet is reported failed then.
   await mapLimit(req.wallets, BUILD_CONCURRENCY, async (_w, i) => {
     const w = walletRows[i];
-    const quoted = chosenPrice();
-    if (req.strategy === "opensea_api" && quoted !== null) {
-      const guess = bufferedHint(i) || fallbackBuffered(i);
-      if (await skipForBalance(i, quoted * BigInt(req.wallets[i].quantity), guess)) return;
-    }
     let s = Date.now();
     let tx: BuiltTx;
     try {
@@ -393,10 +365,6 @@ export async function prepareAll(
         s = Date.now();
         raws[i] = await sign(i, tx, gasLimits[i], nonce);
         timing[i].sign = Date.now() - s;
-      }
-      if (await skipForBalance(i, tx.value, gasLimits[i])) {
-        raws[i] = null;
-        return;
       }
       // Local calldata was signed a few seconds early. Re-read the nonce just before the start and re-sign only if it moved.
       if (req.strategy !== "opensea_api" && fireAt && Date.now() < fireAt - NONCE_REFRESH_LEAD_MS) {

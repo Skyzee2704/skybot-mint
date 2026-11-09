@@ -111,10 +111,6 @@ export const env = {
   get maxDailySpend() {
     return str("MAX_DAILY_SPEND") ?? "0.25";
   },
-  /** Overrides the per-chain Kalos free-balance reserve (native units). "0" disables it. */
-  get kalosMintReserve() {
-    return str("KALOS_MINT_RESERVE");
-  },
   get maxGasPriceGwei() {
     return num("MAX_GAS_PRICE_GWEI", 200);
   },

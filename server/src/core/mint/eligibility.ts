@@ -511,7 +511,7 @@ export async function checkEligibility(
     // Balance is a mint-readiness check only (never an eligibility blocker); cost for the final suggested qty.
     const cost = price * BigInt(Math.max(1, d.suggestedQty)) + gasCost;
     const balanceOk = balance >= cost;
-    const balanceNote = `insufficient balance (need ~${nativeText(cost, t.chain.nativeSymbol)})`;
+    const balanceNote = `insufficient balance (need ~${nativeText(cost, t.chain.nativeSymbol)}, have ${nativeText(balance, t.chain.nativeSymbol)})`;
     return {
       walletId: w.id,
       label: w.label,
@@ -535,7 +535,7 @@ export async function checkEligibility(
       simulation,
       balanceOk,
       eligibleIgnoringBalance,
-      eligible: eligibleIgnoringBalance && balanceOk,
+      eligible: eligibleIgnoringBalance,
       reasons: balanceOk ? reasons : [...reasons, balanceNote],
       allowlist: legacy,
       stages,

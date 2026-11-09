@@ -53,6 +53,20 @@ export interface StageGroup<S extends StageLike = StageLike> {
 
 export const isPublicStage = (s: StageLike) => s.type === "public" || /\bpublic\b/i.test(s.name);
 
+/** "⚠️ Not enough HYPE for price + gas (have 0.01 HYPE, need ~0.04 HYPE)" from an eligibility reason, or null. */
+export function fundingWarning(reasons: readonly string[] | null | undefined): string | null {
+  const raw = (reasons ?? []).find((x) => x.startsWith("insufficient balance"));
+  if (!raw) return null;
+  const m = /need ~([^,)]+)(?:, have ([^)]+))?/.exec(raw);
+  if (!m) return "⚠️ Not enough for price + gas";
+  const need = m[1].trim();
+  const sym = need.split(" ").slice(1).join(" ");
+  const have = m[2]?.trim();
+  return have
+    ? `⚠️ Not enough ${sym} for price + gas (have ${have}, need ~${need})`
+    : `⚠️ Not enough ${sym} for price + gas (need ~${need})`;
+}
+
 const norm = (x: string | null | undefined) => (x ?? "").trim().toLowerCase();
 
 /** Wallet verdict for one stage, from the OpenSea per-stage result or, for the stage being checked, the access result. */
@@ -291,6 +305,7 @@ export function stageWalletView(
     const access: StageAccess = status === "yes" || status === "no" || status === "public" || status === "n/a" ? status : "unknown";
     const eligible = access === "yes" || access === "public" || access === "n/a";
     const maxQty = r.maxQty ?? capFor(null, r.mintedSoFar, supplyRemaining);
+    const warn = fundingWarning(r.reasons);
     const other = (r.reasons ?? []).filter((x) => !x.startsWith("insufficient balance"));
     return {
       walletId: r.walletId,
@@ -298,13 +313,14 @@ export function stageWalletView(
       eligible,
       maxQty,
       suggestedQty: maxQty > 0 ? maxQty : 0,
-      reason: eligible ? (other.find((x) => !x.startsWith("not allowlisted")) ?? null) : (other[0] ?? null),
+      reason: eligible ? (warn ?? other.find((x) => !x.startsWith("not allowlisted")) ?? null) : (other[0] ?? null),
       access,
       unitPriceWei: price,
     };
   }
   if (isPublicStage(stage)) {
     const maxQty = capFor(stage.maxPerWallet ?? null, r.mintedSoFar, supplyRemaining);
+    const warn = fundingWarning(r.reasons);
     const capped = maxQty <= 0;
     return {
       walletId: r.walletId,
@@ -312,12 +328,13 @@ export function stageWalletView(
       eligible: !capped,
       maxQty,
       suggestedQty: maxQty > 0 ? maxQty : 0,
-      reason: capped ? "cap reached" : null,
+      reason: capped ? "cap reached" : warn,
       access: "public",
       unitPriceWei: price,
     };
   }
   const v = walletStageVerdict(r, stage, targetStage);
+  const warn = fundingWarning(r.reasons);
   const maxQty = capFor(v.max ?? stage.maxPerWallet ?? null, r.mintedSoFar, supplyRemaining);
   const eligible = v.state === "eligible";
   return {
@@ -326,7 +343,7 @@ export function stageWalletView(
     eligible,
     maxQty,
     suggestedQty: maxQty > 0 ? maxQty : 0,
-    reason: v.state === "not_eligible" ? allowlistReason(r, stage, targetStage) : v.note,
+    reason: eligible ? (warn ?? v.note) : allowlistReason(r, stage, targetStage),
     access: eligible ? "yes" : v.state === "not_eligible" ? "no" : "unknown",
     unitPriceWei: price,
   };

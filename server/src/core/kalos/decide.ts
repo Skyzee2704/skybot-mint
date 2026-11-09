@@ -1,7 +1,4 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { parseEther } from "ethers";
-import type { ChainConfig } from "../../config/chains.js";
-import { nativeText } from "../../util/native.js";
 import type { KalosAllowStage, KalosDrop, KalosEligibility, KalosEntry, KalosWindow } from "./types.js";
 
 export type StageClock = "upcoming" | "active" | "ended";
@@ -17,15 +14,6 @@ export function stageClock(start: number, end: number, nowSec: number): StageClo
 export function wantOf(cap: number, minted: number): number {
   if (!Number.isFinite(cap) || cap <= 0) return 0;
   return Math.max(0, cap - Math.max(0, minted));
-}
-
-export function kalosReserveWei(chain: ChainConfig, e: NodeJS.ProcessEnv = process.env): bigint {
-  const raw = e.KALOS_MINT_RESERVE ?? chain.safety?.kalosReserve ?? "0";
-  try {
-    return parseEther(raw.trim() || "0");
-  } catch {
-    return 0n;
-  }
 }
 
 export interface StageDecision {
@@ -60,8 +48,6 @@ export function decideStage(opts: {
   nowSec: number;
   balanceWei?: bigint;
   gasWei?: bigint;
-  reserveWei?: bigint;
-  symbol?: string;
 }): StageDecision {
   const clock = stageClock(opts.window.start, opts.window.end, opts.nowSec);
   const cap = opts.window.maxPerWallet;
@@ -75,13 +61,8 @@ export function decideStage(opts: {
   if (want <= 0) return { ...base, eligible: false, reason: "cap reached" };
   if (opts.balanceWei !== undefined) {
     const price = BigInt(priceWei || "0");
-    const need = price * BigInt(want) + (opts.gasWei ?? 0n) + (opts.reserveWei ?? 0n);
-    if (opts.balanceWei < need) {
-      const sym = opts.symbol ?? "HYPE";
-      const reserve = opts.reserveWei ?? 0n;
-      const why = reserve > 0n ? `insufficient ${sym} (keeping ${nativeText(reserve, sym)} free after the mint)` : `insufficient ${sym}`;
-      return { ...base, eligible: true, reason: why };
-    }
+    const need = price * BigInt(want) + (opts.gasWei ?? 0n);
+    if (opts.balanceWei < need) return { ...base, eligible: true, reason: "insufficient balance" };
   }
   return { ...base, eligible: true, reason: clock === "upcoming" ? null : null };
 }
@@ -93,8 +74,6 @@ export function decideDrop(opts: {
   nowSec: number;
   balanceWei?: bigint;
   gasWei?: bigint;
-  reserveWei?: bigint;
-  symbol?: string;
 }): StageDecision[] {
   const common = {
     minted: opts.minted,
@@ -102,8 +81,6 @@ export function decideDrop(opts: {
     nowSec: opts.nowSec,
     balanceWei: opts.balanceWei,
     gasWei: opts.gasWei,
-    reserveWei: opts.reserveWei,
-    symbol: opts.symbol,
   };
   const out: StageDecision[] = [];
   for (const s of opts.drop.stages ?? []) {

@@ -6,9 +6,9 @@
 import { isValidTimeZone } from "../util/time.js";
 import type { ResolvedTarget } from "../core/resolver/resolver.js";
 import type { EligibilityRow } from "../core/mint/eligibility.js";
-import { groupByStage, nameList, summarizeGroup } from "../core/mint/stageEligibility.js";
+import { groupByStage, fundingWarning, nameList, summarizeGroup } from "../core/mint/stageEligibility.js";
 
-import { displayStages, dropHeader, esc, fmtInt, shortAddr, stageHeadLine, stageTimeLine } from "./format.js";
+import { displayStages, dropHeader, esc, fmtInt, isPublicStage, shortAddr, stageHeadLine, stageTimeLine } from "./format.js";
 export { esc };
 
 const CHAIN_WORD = /^[a-z][a-z0-9-]{1,20}$/i;
@@ -41,7 +41,7 @@ export function parseCheckArgs(text: string): { input: string; chain?: string } 
 function verdict(r: EligibilityRow): { label: "Eligible" | "Not eligible" | "Unknown"; why: string } {
   if (r.needsOpenSeaLogin && r.access.status === "unknown") return { label: "Unknown", why: "not verified yet" };
   const a = r.access;
-  const other = r.reasons.filter((x) => !x.startsWith("insufficient balance") && !x.startsWith("not allowlisted"));
+  const other = r.reasons.filter((x) => !/^insufficient\b/i.test(x) && !x.startsWith("not allowlisted"));
   if (a.status === "no") return { label: "Not eligible", why: "" };
   if (other.length) return { label: "Not eligible", why: other[0] };
   if (a.status === "yes" || a.status === "public") return { label: "Eligible", why: "" };
@@ -78,14 +78,28 @@ export function formatCheck(v: CheckView): string[] {
   const tz = isValidTimeZone(v.timeZone ?? undefined) ? v.timeZone! : null;
   const t = v.target;
   const sym = t.chain.nativeSymbol;
+  const kalos = t.dropSource === "kalos";
   const groups = v.rows.length ? groupByStage(t.stages, v.rows, v.targetStage) : [];
   const grouped = new Set(groups.map((g) => g.stage));
   const blocks: string[][] = [];
+  const rowById = new Map(v.rows.map((r) => [r.walletId, r]));
+  const shownMax = (stage: { maxPerWallet?: number | null }, w: { walletId: string; max: number | null }) => {
+    const cap = w.max ?? stage.maxPerWallet ?? null;
+    if (cap == null) return null;
+    if (!kalos) return w.max;
+    return Math.max(0, cap - (rowById.get(w.walletId)?.mintedSoFar ?? 0));
+  };
+  const fundingLine = (rows: EligibilityRow[]) => {
+    const notes = rows.map((r) => fundingWarning(r.reasons)).filter((x): x is string => Boolean(x));
+    if (!notes.length) return null;
+    if (notes.length === 1) return notes[0];
+    return `⚠️ ${notes.length} not enough ${sym} for price + gas`;
+  };
 
   const head: string[] = [];
   if (!v.rows.length) head.push("<b>No wallets yet</b> — add wallets in SkyBOT to check eligibility.");
   else if (groups.length) head.push(`<b>${groups.map((g) => esc(headCount(g))).join(" · ")}</b>`);
-  else {
+  else if (!kalos) {
     const ok = v.rows.filter((r) => verdict(r).label === "Eligible").length;
     head.push(`<b>${ok} of ${plural(v.rows.length, "wallet")} eligible</b>`);
   }
@@ -96,10 +110,12 @@ export function formatCheck(v: CheckView): string[] {
     const s = g.stage;
     const sum = summarizeGroup(g);
     const b = ["", stageHeadLine(s, sym), stageTimeLine(s, tz, now)];
-    for (const w of sum.eligible)
+    for (const w of sum.eligible) {
+      const max = shownMax(s, w);
       b.push(
-        `✅ ${esc(w.label)} <code>${shortAddr(w.address)}</code>${w.max ? ` (max ${fmtInt(w.max)})` : ""}${w.note ? ` · ${esc(w.note)}` : ""}`,
+        `✅ ${esc(w.label)} <code>${shortAddr(w.address)}</code>${max ? ` (max ${fmtInt(max)})` : ""}${w.note ? ` · ${esc(w.note)}` : ""}`,
       );
+    }
     if (sum.notEligible.length) {
       if (!sum.eligible.length && !sum.unknown.length)
         b.push(g.total === 1 ? `❌ Not eligible: ${esc(sum.notEligible[0]!.label)}` : `❌ None of your ${g.total} wallets are eligible`);
@@ -113,15 +129,24 @@ export function formatCheck(v: CheckView): string[] {
           : "unknown";
       b.push(`❔ ${sum.unknown.length} ${what}${esc(nameList(sum.unknown))}`);
     }
+    const low = fundingLine(sum.eligible.map((w) => rowById.get(w.walletId)!).filter(Boolean));
+    if (low) b.push(low);
     blocks.push(b);
   }
 
   // Everything that isn't a phase section (Public, ended, or no wallets yet): same two-line block per stage.
   const rest = displayStages(t.stages).filter((s) => !grouped.has(s));
   if (rest.length && groups.length) blocks.push(["", "<b>Other stages</b>"]);
-  for (const s of rest) blocks.push(["", stageHeadLine(s, sym), stageTimeLine(s, tz, now)]);
+  for (const s of rest) {
+    const b = ["", stageHeadLine(s, sym), stageTimeLine(s, tz, now)];
+    if (isPublicStage(s)) {
+      const low = fundingLine(v.rows);
+      if (low) b.push(low);
+    }
+    blocks.push(b);
+  }
 
-  if (!groups.length && v.rows.length) {
+  if (!groups.length && v.rows.length && !kalos) {
     const b = ["", "<b>Wallets</b>"];
     for (const r of v.rows) {
       const x = verdict(r);

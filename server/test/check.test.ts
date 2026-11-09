@@ -191,6 +191,130 @@ describe("/check formatting", () => {
       expect(p.split("<b>").length).toBe(p.split("</b>").length);
     }
   });
+
+  it("Kalos ended allowlist + live public uses stage lines, not the flat wallet list", () => {
+    const at = Date.parse("2026-11-09T18:00:00Z");
+    const t = {
+      ...target,
+      name: "Bitizens",
+      dropSource: "kalos",
+      chain: { key: "elysium", name: "Elysium", nativeSymbol: "HYPE" },
+      contract: "0xA3aE6dBF763Aa58C41f3a3Ae9746eA13e357b722",
+      kind: "seadrop",
+      standard: "erc721",
+      supply: { total: "309", max: "4000" },
+      stages: [
+        {
+          name: "WL phase",
+          type: "allowlist",
+          source: "kalos",
+          priceWei: "12000000000000000",
+          start: "2026-11-09T08:00:00Z",
+          end: "2026-11-09T17:00:00Z",
+          maxPerWallet: 1,
+          status: "ended",
+        },
+        {
+          name: "Public",
+          type: "public",
+          source: "kalos",
+          priceWei: "22000000000000000",
+          start: "2026-11-09T17:00:00Z",
+          end: "2026-11-10T11:00:00Z",
+          maxPerWallet: 2,
+          status: "active",
+        },
+      ],
+    };
+    const low = (label: string) =>
+      row(
+        label,
+        { status: "public", source: "Kalos" },
+        {
+          reasons: ["insufficient balance (need ~0.044 HYPE, have 0.0000079 HYPE)"],
+          mintedSoFar: 0,
+          stages: [{ label: "Public", type: "public", eligible: true, maxPerWallet: 2 }],
+        },
+      );
+    const [msg] = formatCheck({
+      target: t,
+      rows: [low("wallet-2"), low("Wallet 3")] as any,
+      targetStage: { label: "Public", type: "public", start: "2026-11-09T17:00:00Z", active: true },
+      timeZone: "Asia/Makassar",
+      now: at,
+    });
+    expect(msg).not.toContain("<b>Wallets</b>");
+    expect(msg).not.toContain("0 of 2 wallets eligible");
+    expect(msg).not.toMatch(/not eligible \(insufficient/);
+    expect(msg).toContain("<b>Bitizens</b> · Elysium");
+    expect(msg).toContain("Kalos · ERC-721");
+    expect(msg).toContain("<b>Public</b> · 0.022 HYPE · max 2");
+    expect(msg).toContain("🟢 Live");
+    expect(msg).toContain("<b>WL phase</b> · 0.012 HYPE · max 1");
+    expect(msg).toContain("Ended");
+    expect(msg).toContain("⚠️ 2 not enough HYPE for price + gas");
+    expect(msg).toContain("<i>Times in Asia/Makassar. Read-only check, nothing was sent.</i>");
+  });
+
+  it("Kalos upcoming allowlist lists eligible wallets with remaining want", () => {
+    const at = Date.parse("2026-11-09T18:00:00Z");
+    const t = {
+      ...target,
+      name: "Elyant",
+      dropSource: "kalos",
+      chain: { key: "elysium", name: "Elysium", nativeSymbol: "HYPE" },
+      kind: "seadrop",
+      standard: "erc721",
+      supply: { total: "10", max: "1111" },
+      stages: [
+        {
+          name: "Colony",
+          type: "allowlist",
+          source: "kalos",
+          priceWei: "8000000000000000",
+          start: "2026-11-09T20:00:00Z",
+          end: "2026-11-10T20:00:00Z",
+          maxPerWallet: 2,
+          status: "upcoming",
+        },
+        {
+          name: "Public",
+          type: "public",
+          source: "kalos",
+          priceWei: "8000000000000000",
+          start: "2026-11-10T20:00:00Z",
+          end: null,
+          maxPerWallet: 3,
+          status: "upcoming",
+        },
+      ],
+    };
+    const mk = (label: string, eligible: boolean, minted: number) =>
+      row(
+        label,
+        { status: eligible ? "yes" : "no", source: "Kalos" },
+        {
+          mintedSoFar: minted,
+          reasons: eligible ? ["insufficient balance (need ~0.02 HYPE, have 0 HYPE)"] : ["Colony: not on list"],
+          stages: [{ label: "Colony", type: "allowlist", eligible, maxPerWallet: 2 }],
+        },
+      );
+    const [msg] = formatCheck({
+      target: t,
+      rows: [mk("wallet-2", true, 1), mk("Wallet 3", true, 0), mk("wallet-4", false, 0)] as any,
+      targetStage: { label: "Colony", type: "allowlist", start: "2026-11-09T20:00:00Z", active: false },
+      timeZone: "Asia/Makassar",
+      now: at,
+    });
+    expect(msg.split("\n")[0]).toBe("<b>Colony: 2/3 eligible</b>");
+    expect(msg).toContain("✅ wallet-2 <code>0x668B…27A0</code> (max 1)");
+    expect(msg).toContain("✅ Wallet 3 <code>0x668B…27A0</code> (max 2)");
+    expect(msg).toContain("❌ 1 not eligible");
+    expect(msg).toContain("⚠️ 2 not enough HYPE for price + gas");
+    expect(msg).not.toMatch(/not eligible \(insufficient/);
+    expect(msg).toContain("<b>Other stages</b>");
+    expect(msg).toContain("<b>Public</b> · 0.008 HYPE · max 3");
+  });
 });
 
 describe("stage order", () => {

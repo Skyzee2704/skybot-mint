@@ -11,7 +11,7 @@ import type { EligibilityRow } from "../mint/eligibility.js";
 import type { ResolvedTarget } from "../resolver/resolver.js";
 import { kalosIface } from "./calldata.js";
 import { fetchKalosEligibility, mapPool } from "./client.js";
-import { decideDrop, kalosReserveWei } from "./decide.js";
+import { decideDrop } from "./decide.js";
 import type { KalosDrop, KalosEligibility } from "./types.js";
 
 const GAS_UNITS = 180_000n;
@@ -26,7 +26,7 @@ function reasonText(d: { reason: string | null; want: number; clock: string }): 
   return d.reason;
 }
 
-/** Eligibility for a Kalos drop: API proof per wallet, shared getMintStats counter, HYPE including the reserve. */
+/** Eligibility for a Kalos drop: API proof per wallet and the shared getMintStats counter. Balance is a warning, not an allowlist result. */
 export async function checkKalosEligibility(
   t: ResolvedTarget,
   userId: string,
@@ -39,7 +39,6 @@ export async function checkKalosEligibility(
   const list = (await listWallets(userId)).filter((w) => !walletIds || walletIds.includes(w.id));
   const fees = await getFeesCached(pool);
   const gasWei = GAS_UNITS * fees.maxFeePerGas;
-  const reserve = kalosReserveWei(chain);
   const nowSec = Math.floor(Date.now() / 1000);
   const balances = await nativeBalancesBatch(
     pool,
@@ -74,26 +73,19 @@ export async function checkKalosEligibility(
       nowSec,
       balanceWei: bal,
       gasWei,
-      reserveWei: reserve,
-      symbol: sym,
     });
     const openish = decisions.filter((d) => d.clock !== "ended");
     const best = openish.find((d) => d.eligible && d.clock === "active") ?? openish.find((d) => d.eligible) ?? openish[0] ?? null;
-    const reasons = decisions.filter((d) => d.reason && d.clock !== "upcoming").map((d) => `${d.name}: ${reasonText(d)}`);
-    if (best?.reason && best.clock === "active") {
-      const line = `${best.name}: ${reasonText(best)}`;
-      if (!reasons.includes(line)) reasons.unshift(line);
-    }
-    const insufficient = decisions.some((d) => d.reason?.startsWith("insufficient") && d.clock === "active" && d.eligible);
-    if (insufficient && bal !== undefined && best) {
+    const reasons = decisions
+      .filter((d) => d.reason && d.reason !== "insufficient balance" && d.clock !== "upcoming")
+      .map((d) => `${d.name}: ${reasonText(d)}`);
+    const short = decisions.some((d) => d.reason === "insufficient balance" && d.eligible && d.clock !== "ended");
+    if (short && bal !== undefined && best) {
       const price = BigInt(best.priceWei || "0");
-      const need = price * BigInt(Math.max(best.want, 1)) + gasWei + reserve;
-      reasons.unshift(
-        reserve > 0n
-          ? `insufficient ${sym} (have ${nativeText(bal, sym)}, need ~${nativeText(need, sym)} including ${nativeText(reserve, sym)} left free)`
-          : `insufficient ${sym} (have ${nativeText(bal, sym)}, need ~${nativeText(need, sym)})`,
-      );
+      const need = price * BigInt(Math.max(best.want, 1)) + gasWei;
+      reasons.unshift(`insufficient balance (need ~${nativeText(need, sym)}, have ${nativeText(bal, sym)})`);
     }
+    const allowed = Boolean(best?.eligible);
     return {
       walletId: w.id,
       label: w.label,
@@ -104,22 +96,22 @@ export async function checkKalosEligibility(
       maxPerWallet: best?.cap ?? null,
       remainingForWallet: best ? best.want : null,
       maxQty: best ? best.want : 0,
-      suggestedQty: best && best.eligible && !best.reason?.startsWith("insufficient") ? best.want : 0,
+      suggestedQty: allowed ? best!.want : 0,
       unitPriceWei: best?.priceWei ?? "0",
       gasCostWei: gasWei.toString(),
       estCostWei: best ? (BigInt(best.priceWei || "0") * BigInt(Math.max(best.want, 0)) + gasWei).toString() : gasWei.toString(),
       estCost: best ? nativeText(BigInt(best.priceWei || "0") * BigInt(Math.max(best.want, 0)) + gasWei, "").trim() : "0",
       access: {
-        status: best?.kind === "public" && best.eligible ? "public" : best?.eligible ? "yes" : "no",
+        status: best?.kind === "public" && allowed ? "public" : allowed ? "yes" : "no",
         source: "Kalos",
-        detail: best ? `${best.name}${best.reason ? `: ${best.reason}` : ""}` : "no stage",
+        detail: best ? `${best.name}${best.reason && best.reason !== "insufficient balance" ? `: ${best.reason}` : ""}` : "no stage",
       } as EligibilityRow["access"],
       simulation: null,
-      balanceOk: !insufficient,
-      eligibleIgnoringBalance: Boolean(best?.eligible),
-      eligible: Boolean(best?.eligible) && !insufficient,
+      balanceOk: !short,
+      eligibleIgnoringBalance: allowed,
+      eligible: allowed,
       reasons: [...new Set(reasons.filter(Boolean) as string[])],
-      allowlist: best?.kind === "public" ? "n/a" : best?.eligible ? "eligible" : "not_eligible",
+      allowlist: best?.kind === "public" ? "n/a" : allowed ? "eligible" : "not_eligible",
       stages: decisions.map((d) => ({
         uuid: d.index === null ? null : String(d.index),
         label: d.name,
@@ -142,10 +134,7 @@ export async function checkKalosEligibility(
     targetStage: live ? { label: live.name, type: live.kind === "public" ? "public" : "allowlist", start: null, active: true } : null,
     priceWei: live?.priceWei ?? null,
     maxFeePerGas: fees.maxFeePerGas.toString(),
-    notes: [
-      `Kalos · ${drop.slug}`,
-      reserve > 0n ? `Leaves ${nativeText(reserve, sym)} free after each mint (KALOS_MINT_RESERVE or the chain default).` : "",
-    ].filter(Boolean),
+    notes: [`Kalos · ${drop.slug}`],
     noteItems: [],
     allowlistInfo: { source: "kalos", slug: drop.slug },
   };
