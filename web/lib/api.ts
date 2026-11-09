@@ -61,4 +61,9 @@ export function fmtEth(wei: string | null | undefined, digits = 6) {
   const frac = (a % 10n ** 18n).toString().padStart(18, "0").slice(0, digits).replace(/0+$/, "");
   return `${neg ? "-" : ""}${whole}${frac ? "." + frac : ""}`;
 }
+/** Native amount with that chain's symbol. An empty symbol leaves the number alone. */
+export function fmtNative(wei: string | null | undefined, symbol: string, digits = 6) {
+  const n = fmtEth(wei, digits);
+  return symbol ? `${n} ${symbol}` : n;
+}
 export const short = (a?: string | null) => (a ? `${a.slice(0, 6)}…${a.slice(-4)}` : "");

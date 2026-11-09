@@ -9,7 +9,8 @@
  *
  * Rounding: every destination gets floor(total / N) wei; the remainder (< N wei) stays in Main.
  */
-import { formatEther, toBeHex } from "ethers";
+import { toBeHex } from "ethers";
+import { nativeText } from "../util/native.js";
 import type { ChainConfig } from "../config/chains.js";
 import type { RpcPool } from "./rpc/pool.js";
 import { EOA_TRANSFER_GAS, L1_FEE_BUFFER_PCT, l1SizedTx, opL1Fee, signQuote, type Amount, type UnsignedWithdrawTx } from "./withdraw.js";
@@ -25,6 +26,8 @@ export interface FundPlanInput {
   /** Reserved network fee per transfer (wei), one entry per destination. */
   fees: bigint[];
   amount: Amount;
+  /** Native symbol for error text. Omitted only by unit tests of the split math. */
+  symbol?: string;
 }
 export interface FundPlan {
   /** Amount each destination receives. */
@@ -51,12 +54,13 @@ export function planFund(i: FundPlanInput): FundPlan {
     error,
   });
   if (n === 0n) return fail("Select at least one wallet to fund.");
+  const amt = (w: bigint) => nativeText(w, i.symbol ?? "");
   let total: bigint;
   if (i.amount.kind === "max") {
     total = i.balance - totalFee;
     if (total <= 0n)
       return fail(
-        `Main balance ${formatEther(i.balance)} does not cover the network fees ~${formatEther(totalFee)} for ${n} transfer${n === 1n ? "" : "s"}.`,
+        `Main balance ${amt(i.balance)} does not cover the network fees ~${amt(totalFee)} for ${n} transfer${n === 1n ? "" : "s"}.`,
       );
   } else total = i.amount.wei;
   if (total <= 0n) return fail("Amount must be greater than 0.");
@@ -65,9 +69,7 @@ export function planFund(i: FundPlanInput): FundPlan {
   const totalValue = perWallet * n;
   const remainder = total - totalValue;
   if (totalValue + totalFee > i.balance)
-    return fail(
-      `Insufficient Main balance: ${formatEther(totalValue)} + network fees ~${formatEther(totalFee)} > ${formatEther(i.balance)}.`,
-    );
+    return fail(`Insufficient Main balance: ${amt(totalValue)} + network fees ~${amt(totalFee)} > ${amt(i.balance)}.`);
   return { perWallet, totalValue, totalFee, remainder, leftover: i.balance - totalValue - totalFee, error: null };
 }
 
@@ -153,7 +155,7 @@ export async function quoteFund(opts: {
     l1Reserve = l1 > 0n ? (l1 * L1_FEE_BUFFER_PCT + 99n) / 100n : 0n;
   }
   const fees = gasLimits.map((g) => g * gasPrice + l1Reserve);
-  const plan = planFund({ balance, fees, amount: opts.amount });
+  const plan = planFund({ balance, fees, amount: opts.amount, symbol: chain.nativeSymbol });
   if (plan.error) throw Object.assign(httpError(plan.error, 400, "FUND_PLAN"), { balanceWei: balance.toString() });
   const exp = (opts.now ?? Date.now()) + QUOTE_TTL_MS;
   const items: FundQuoteItem[] = targets.map((t, k) => {

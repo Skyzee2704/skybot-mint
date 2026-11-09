@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { Contract, ZeroHash, formatEther, toQuantity } from "ethers";
 import { explorerTx, requireChain } from "../../config/chains.js";
+import { nativeText } from "../../util/native.js";
 import { getPool } from "../rpc/pool.js";
 import { getResolved } from "../resolver/cache.js";
 import { SEADROP_ABI, SEADROP_ADDRESS } from "../resolver/seadrop.js";
@@ -330,8 +331,12 @@ export async function prepareAll(
     const need = value + gas * fees.maxFeePerGas;
     if (bal >= need) return false;
     results[i].status = "failed";
-    results[i].error = `Not enough balance (have ${formatEther(bal)}, need ~${formatEther(need)}). Skipped.`;
-    void jobLog(job, `skip ${results[i].address.slice(0, 8)}: balance ${formatEther(bal)} < ~${formatEther(need)}`).catch(() => {});
+    results[i].error =
+      `Not enough balance (have ${nativeText(bal, chain.nativeSymbol)}, need ~${nativeText(need, chain.nativeSymbol)}). Skipped.`;
+    void jobLog(
+      job,
+      `skip ${results[i].address.slice(0, 8)}: balance ${nativeText(bal, chain.nativeSymbol)} < ~${nativeText(need, chain.nativeSymbol)}`,
+    ).catch(() => {});
     return true;
   };
 

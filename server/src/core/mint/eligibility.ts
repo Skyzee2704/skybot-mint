@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { Contract, Interface, formatEther } from "ethers";
+import { nativeText } from "../../util/native.js";
 import { requireChain } from "../../config/chains.js";
 import { getPool } from "../rpc/pool.js";
 import { OpenSeaClient } from "../resolver/opensea.js";
@@ -108,6 +109,7 @@ export function decide(input: {
   minted: number | null;
   supplyRemaining: bigint | null;
   stageEnded: boolean;
+  symbol?: string;
 }) {
   const reasons: string[] = [];
   let remaining: number | null = null;
@@ -121,7 +123,7 @@ export function decide(input: {
   if (input.supplyRemaining === 0n) reasons.push("sold out");
   const q = Math.max(qty, 1);
   const cost = input.priceWei * BigInt(q) + input.gasCostWei;
-  if (input.balance < cost) reasons.push(`insufficient balance (need ~${formatEther(cost)})`);
+  if (input.balance < cost) reasons.push(`insufficient balance (need ~${nativeText(cost, input.symbol ?? "")})`);
   return { suggestedQty: Math.max(0, qty), remaining, cost, reasons };
 }
 
@@ -348,6 +350,7 @@ export async function checkEligibility(
       minted,
       supplyRemaining,
       stageEnded,
+      symbol: t.chain.nativeSymbol,
     });
     const reasons = d.reasons.filter((r) => !r.startsWith("insufficient balance"));
     const qty = Math.max(1, d.suggestedQty);
@@ -501,7 +504,7 @@ export async function checkEligibility(
     // Balance is a mint-readiness check only (never an eligibility blocker); cost for the final suggested qty.
     const cost = price * BigInt(Math.max(1, d.suggestedQty)) + gasCost;
     const balanceOk = balance >= cost;
-    const balanceNote = `insufficient balance (need ~${formatEther(cost)})`;
+    const balanceNote = `insufficient balance (need ~${nativeText(cost, t.chain.nativeSymbol)})`;
     return {
       walletId: w.id,
       label: w.label,

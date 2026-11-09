@@ -16,7 +16,8 @@
  * Signing happens in the user's browser (Privy embedded wallet). The server only quotes, validates and broadcasts.
  */
 import { createHmac } from "node:crypto";
-import { Contract, Signature, Transaction, ZeroAddress, formatEther, getAddress, isAddress, toBeHex } from "ethers";
+import { Contract, Signature, Transaction, ZeroAddress, getAddress, isAddress, toBeHex } from "ethers";
+import { nativeText } from "../util/native.js";
 import type { ChainConfig } from "../config/chains.js";
 import type { RpcPool } from "./rpc/pool.js";
 import { getFees } from "./mint/fees.js";
@@ -38,6 +39,8 @@ export interface SweepInput {
   gasPrice: bigint;
   /** Quoted L1 data fee (OP Stack), before buffer. */
   l1Fee?: bigint;
+  /** Native symbol for skip text. Omitted only by unit tests of the fee math. */
+  symbol?: string;
   amount: Amount;
 }
 export interface SweepResult {
@@ -64,7 +67,7 @@ export function computeSweep(i: SweepInput): SweepResult {
         l1Reserve,
         fee,
         leftover: i.balance,
-        skip: `balance ${formatEther(i.balance)} does not cover the network fee ~${formatEther(fee)}`,
+        skip: `balance ${nativeText(i.balance, i.symbol ?? "")} does not cover the network fee ~${nativeText(fee, i.symbol ?? "")}`,
       };
     return { value: i.balance - fee, gasFee, l1Reserve, fee, leftover: 0n, skip: null };
   }
@@ -76,7 +79,7 @@ export function computeSweep(i: SweepInput): SweepResult {
       l1Reserve,
       fee,
       leftover: i.balance,
-      skip: `insufficient balance: ${formatEther(i.amount.wei)} + fee ~${formatEther(fee)} > ${formatEther(i.balance)}`,
+      skip: `insufficient balance: ${nativeText(i.amount.wei, i.symbol ?? "")} + fee ~${nativeText(fee, i.symbol ?? "")} > ${nativeText(i.balance, i.symbol ?? "")}`,
     };
   return { value: i.amount.wei, gasFee, l1Reserve, fee, leftover: i.balance - i.amount.wei - fee, skip: null };
 }
@@ -194,7 +197,7 @@ export async function quoteWallet(
   if (chain.stack === "op") {
     l1Fee = await opL1Fee(pool, l1SizedTx({ to, value: balance, nonce, gasLimit, gasPrice, chainId: chain.chainId }));
   }
-  const r = computeSweep({ balance, gasLimit, gasPrice, l1Fee, amount });
+  const r = computeSweep({ balance, gasLimit, gasPrice, l1Fee, amount, symbol: chain.nativeSymbol });
   const tx: UnsignedWithdrawTx | null = r.skip
     ? null
     : {

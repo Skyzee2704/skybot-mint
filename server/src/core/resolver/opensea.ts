@@ -30,6 +30,7 @@ export interface OsStage {
   label?: string;
   price?: string;
   price_currency_address?: string;
+  price_currency?: { symbol?: string; address?: string; decimals?: number };
   start_time?: string;
   end_time?: string;
   max_per_wallet?: string;

@@ -14,6 +14,7 @@ export interface StageLike {
   status?: string | null;
   maxPerWallet?: number | null;
   priceWei?: string | null;
+  paymentSymbol?: string | null;
 }
 
 export interface RowLike {
