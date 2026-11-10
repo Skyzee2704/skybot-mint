@@ -1,27 +1,36 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { generateKeyPairSync } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
-import { Wallet, formatEther, getAddress } from "ethers";
+import { Wallet, getAddress } from "ethers";
 import { normalizeAuthKey } from "../src/auth/authKey.js";
+import { CHAINS, getChain } from "../src/config/chains.js";
+import { validateDestination } from "../src/core/withdraw.js";
 import {
-  TEST_SEND_DESTINATION,
-  TEST_SEND_ETH_USD,
-  TEST_SEND_VALUE_WEI,
-  TEST_SEND_WALLET_ID,
-  assertSendValue,
+  TEST_SEND_DEFAULT_WALLET_ID,
   assertSignedNativeTransfer,
-  assertSourceWalletAddress,
+  assertTestSendRpc,
   assertTestSendToken,
+  assertWalletAllowed,
+  parseTestSendAmount,
+  parseTestSendBody,
+  resolveTestSendChain,
   runTestNativeSend,
   siweTestAuthorizationContext,
+  testSendChainOptions,
   testSendFailure,
+  testSendWalletAllowlist,
 } from "../src/testsend/nativeSend.js";
 
 const prevEnv = {
   TEST_SEND_TOKEN: process.env.TEST_SEND_TOKEN,
+  TEST_SEND_WALLET_IDS: process.env.TEST_SEND_WALLET_IDS,
   PRIVY_SIWE_AUTH_PRIVATE_KEY: process.env.PRIVY_SIWE_AUTH_PRIVATE_KEY,
   PRIVY_SIWE_KEY_QUORUM_ID: process.env.PRIVY_SIWE_KEY_QUORUM_ID,
   PRIVY_AUTH_PRIVATE_KEY: process.env.PRIVY_AUTH_PRIVATE_KEY,
+  DISABLE_PUBLIC_RPCS_ETHEREUM: process.env.DISABLE_PUBLIC_RPCS_ETHEREUM,
+  RPC_ETHEREUM: process.env.RPC_ETHEREUM,
+  RPC_URL_ETHEREUM: process.env.RPC_URL_ETHEREUM,
+  RPC_URLS_ETHEREUM: process.env.RPC_URLS_ETHEREUM,
 };
 
 afterEach(() => {
@@ -31,24 +40,93 @@ afterEach(() => {
   }
 });
 
-const matchingAddress = getAddress(`0xB22${"0".repeat(33)}4D2F`);
+const DEST = "0xdd911fA75E72b3c11e75DCAbfaE9f60D65903877";
 
-describe("test send constants", () => {
-  it("keeps the destination checksum and the $0.10 wei amount", () => {
-    expect(TEST_SEND_DESTINATION).toBe("0xdd911fA75E72b3c11e75DCAbfaE9f60D65903877");
-    expect(getAddress(TEST_SEND_DESTINATION)).toBe(TEST_SEND_DESTINATION);
-    expect(TEST_SEND_VALUE_WEI).toBe(48646650191668n);
-    expect(formatEther(TEST_SEND_VALUE_WEI)).toBe("0.000048646650191668");
-    const priceCents = BigInt(TEST_SEND_ETH_USD.replace(".", ""));
-    const cents = (TEST_SEND_VALUE_WEI * priceCents + 10n ** 18n / 2n) / 10n ** 18n;
-    expect(cents).toBe(10n);
+describe("test send chains", () => {
+  it("uses the repo registry, including the symbols the request left open", () => {
+    expect(testSendChainOptions().map((c) => c.chainId)).toEqual(CHAINS.map((c) => c.chainId));
+    expect(getChain(4663)?.nativeSymbol).toBe("ETH");
+    expect(getChain(4663)?.name).toBe("Robinhood Chain");
+    expect(getChain(5042)?.nativeSymbol).toBe("USDC");
+    expect(getChain(99901)?.nativeSymbol).toBe("HYPE");
+    expect(getChain(56)?.name).toBe("BNB Smart Chain");
+    expect(getChain(56)?.nativeSymbol).toBe("BNB");
+    expect(getChain(137)?.nativeSymbol).toBe("POL");
+    expect(getChain(42161)?.name).toBe("Arbitrum One");
+    expect(resolveTestSendChain(1).key).toBe("ethereum");
+    expect(() => resolveTestSendChain(999)).toThrow(/Unsupported chain/);
+  });
+
+  it("reports a missing RPC instead of inventing one", () => {
+    const eth = getChain(1)!;
+    expect(() => assertTestSendRpc({ ...eth, key: "norpc", publicRpcs: [] })).toThrow(/RPC not configured for chain Ethereum \(1\)/);
+  });
+});
+
+describe("test send amount and destination", () => {
+  it("accepts any positive decimal and rejects zero or junk", () => {
+    expect(parseTestSendAmount("0.0005")).toBe(500000000000000n);
+    expect(parseTestSendAmount("10")).toBe(10n * 10n ** 18n);
+    expect(() => parseTestSendAmount("0")).toThrow(/greater than 0/);
+    expect(() => parseTestSendAmount("max")).toThrow(/greater than 0/);
+    expect(() => parseTestSendAmount("1e2")).toThrow(/Invalid amount/);
+    expect(() => parseTestSendAmount("-1")).toThrow(/Invalid amount/);
+  });
+
+  it("checksums a one-case address and rejects a bad checksum", () => {
+    expect(validateDestination(DEST.toLowerCase())).toBe(DEST);
+    expect(() => validateDestination("0xdd911fA75E72b3c11e75DCAbfaE9f60D65903878")).toThrow(/checksum/i);
+    const body = parseTestSendBody({
+      walletId: TEST_SEND_DEFAULT_WALLET_ID,
+      chainId: 8453,
+      amount: "0.0005",
+      destination: DEST.toLowerCase(),
+    });
+    expect(body.chainId).toBe(8453);
+    expect(body.amount).toBe("0.0005");
+    expect(() =>
+      parseTestSendBody({
+        walletId: "abc",
+        chainId: "nope",
+        amount: 1,
+        destination: "",
+      }),
+    ).toThrow(/Chain is required/);
+  });
+});
+
+describe("test send allowlist", () => {
+  it("defaults to the original wallet and rejects anything else", () => {
+    delete process.env.TEST_SEND_WALLET_IDS;
+    expect(testSendWalletAllowlist()).toEqual([TEST_SEND_DEFAULT_WALLET_ID]);
+    expect(() => assertWalletAllowed("other-wallet")).toThrow(/TEST_SEND_WALLET_IDS/);
+    process.env.TEST_SEND_WALLET_IDS = " alpha , beta,alpha ,, ";
+    expect(testSendWalletAllowlist()).toEqual(["alpha", "beta"]);
+    expect(() => assertWalletAllowed("alpha")).not.toThrow();
+    expect(() => assertWalletAllowed(TEST_SEND_DEFAULT_WALLET_ID)).toThrow(/TEST_SEND_WALLET_IDS/);
+  });
+
+  it("does not call Privy for a wallet outside the allowlist", async () => {
+    const { privateKey } = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
+    process.env.PRIVY_SIWE_AUTH_PRIVATE_KEY = privateKey.export({ type: "pkcs8", format: "pem" }).toString();
+    process.env.PRIVY_SIWE_KEY_QUORUM_ID = "siwe-quorum-id";
+    process.env.TEST_SEND_TOKEN = "desk-token-value";
+    delete process.env.TEST_SEND_WALLET_IDS;
+    await expect(
+      runTestNativeSend("desk-token-value", {
+        walletId: "not-on-the-list",
+        chainId: 1,
+        amount: "0.0005",
+        destination: DEST,
+      }),
+    ).rejects.toMatchObject({ code: "WALLET_NOT_ALLOWLISTED", statusCode: 400 });
   });
 });
 
 describe("test send gate", () => {
   it("is disabled when TEST_SEND_TOKEN is unset and does not call Privy", async () => {
     delete process.env.TEST_SEND_TOKEN;
-    await expect(runTestNativeSend("anything")).rejects.toMatchObject({ code: "TEST_SEND_DISABLED", statusCode: 503 });
+    await expect(runTestNativeSend("anything", {})).rejects.toMatchObject({ code: "TEST_SEND_DISABLED", statusCode: 503 });
     expect(() => assertTestSendToken("x")).toThrow(/TEST_SEND_TOKEN is not set/);
   });
 
@@ -57,7 +135,7 @@ describe("test send gate", () => {
     process.env.PRIVY_AUTH_PRIVATE_KEY = "mint-key-present";
     delete process.env.PRIVY_SIWE_AUTH_PRIVATE_KEY;
     delete process.env.PRIVY_SIWE_KEY_QUORUM_ID;
-    await expect(runTestNativeSend("desk-token-value")).rejects.toMatchObject({
+    await expect(runTestNativeSend("desk-token-value", {})).rejects.toMatchObject({
       code: "TEST_SEND_SIGNING_NOT_CONFIGURED",
       statusCode: 503,
     });
@@ -93,37 +171,17 @@ describe("test send gate", () => {
   });
 });
 
-describe("source wallet address", () => {
-  it("accepts only 0xB22…4D2F", () => {
-    expect(assertSourceWalletAddress(matchingAddress)).toBe(matchingAddress);
-    expect(assertSourceWalletAddress(matchingAddress.toLowerCase())).toBe(matchingAddress);
-    expect(() => assertSourceWalletAddress("0x" + "ab".repeat(20))).toThrow(/0xB22/);
-    expect(() => assertSourceWalletAddress(`0xB22${"0".repeat(33)}4D2E`)).toThrow(/4D2F/);
-    expect(() => assertSourceWalletAddress("0xB224D2F")).toThrow(/20-byte/);
-    expect(TEST_SEND_WALLET_ID).toBe("tloqxjloa5jloj6dv38n0fmf");
-  });
-});
-
-describe("value cap", () => {
-  it("allows only the hardcoded wei amount", () => {
-    expect(() => assertSendValue(TEST_SEND_VALUE_WEI)).not.toThrow();
-    expect(() => assertSendValue(TEST_SEND_VALUE_WEI + 1n)).toThrow(/above the hardcoded cap/);
-    expect(() => assertSendValue(10n ** 18n)).toThrow(/cap/);
-    expect(() => assertSendValue(TEST_SEND_VALUE_WEI - 1n)).toThrow(/only allowed amount/);
-    expect(() => assertSendValue(0n)).toThrow(/cap/);
-  });
-});
-
 describe("signed native transfer", () => {
   const signer = Wallet.createRandom();
   const from = signer.address;
+  const value = 10n * 10n ** 18n;
 
   async function sign(over: Partial<{ value: bigint; to: string; data: string; chainId: number }>) {
     return signer.signTransaction({
       type: 2,
-      chainId: over.chainId ?? 1,
-      to: over.to ?? TEST_SEND_DESTINATION,
-      value: over.value ?? TEST_SEND_VALUE_WEI,
+      chainId: over.chainId ?? 8453,
+      to: over.to ?? DEST,
+      value: over.value ?? value,
       data: over.data ?? "0x",
       nonce: 0,
       gasLimit: 21_000n,
@@ -132,20 +190,15 @@ describe("signed native transfer", () => {
     });
   }
 
-  it("accepts the exact native transfer and rejects every other shape", async () => {
+  it("accepts the requested amount with no wei ceiling and rejects a different payload", async () => {
+    const expected = { from: getAddress(from), to: getAddress(DEST), value, chainId: 8453 };
     const ok = await sign({});
-    expect(assertSignedNativeTransfer(ok, from)).toMatchObject({
-      from: getAddress(from),
-      to: TEST_SEND_DESTINATION,
-      value: TEST_SEND_VALUE_WEI,
-      data: "0x",
-      chainId: 1,
-    });
-    await expect(sign({ value: TEST_SEND_VALUE_WEI + 1n }).then((raw) => assertSignedNativeTransfer(raw, from))).rejects.toThrow(/cap/);
-    await expect(sign({ to: from }).then((raw) => assertSignedNativeTransfer(raw, from))).rejects.toThrow(/Refusing to broadcast to/);
-    await expect(sign({ data: "0xa9059cbb" }).then((raw) => assertSignedNativeTransfer(raw, from))).rejects.toThrow(/calldata/);
-    await expect(sign({ chainId: 8453 }).then((raw) => assertSignedNativeTransfer(raw, from))).rejects.toThrow(/chain id/);
-    expect(() => assertSignedNativeTransfer(ok, matchingAddress)).toThrow(/does not match/);
+    expect(assertSignedNativeTransfer(ok, expected)).toMatchObject({ ...expected, data: "0x" });
+    await expect(sign({ value: value + 1n }).then((raw) => assertSignedNativeTransfer(raw, expected))).rejects.toThrow(/request amount/);
+    await expect(sign({ to: from }).then((raw) => assertSignedNativeTransfer(raw, expected))).rejects.toThrow(/Refusing to broadcast to/);
+    await expect(sign({ data: "0xa9059cbb" }).then((raw) => assertSignedNativeTransfer(raw, expected))).rejects.toThrow(/calldata/);
+    await expect(sign({ chainId: 1 }).then((raw) => assertSignedNativeTransfer(raw, expected))).rejects.toThrow(/chain id/);
+    expect(() => assertSignedNativeTransfer(ok, { ...expected, from: getAddress(DEST) })).toThrow(/does not match/);
   });
 });
 

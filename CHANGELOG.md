@@ -7,7 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
-- **Draft test, do not merge.** `/test/server-sign-native-send` and `POST /api/test/server-sign-native-send` send one hardcoded native ETH transfer on Ethereum mainnet, signed with `PRIVY_SIWE_AUTH_PRIVATE_KEY` (the SIWE quorum key). The mint signer is not used. Disabled unless `TEST_SEND_TOKEN` is set. Not part of production behavior.
+- **Draft test, do not merge.** `/test/server-sign-native-send` and `POST /api/test/server-sign-native-send` send one native transfer on a SkyBOT chain, signed with `PRIVY_SIWE_AUTH_PRIVATE_KEY`. The page chooses an allowlisted wallet (`TEST_SEND_WALLET_IDS`), a chain, a positive amount, and a destination. There is no server-side amount cap. The mint signer is not used. Disabled unless `TEST_SEND_TOKEN` is set.
 
 - **$SKYBOT contract address** on the public landing page: the token contract, with a copy button and a link to its Volta.family token page. The copy button works in the browser and the Telegram Mini App.
 
