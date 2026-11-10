@@ -73,8 +73,8 @@ describe("/check formatting", () => {
     expect(msg).toContain("<b>Kabuki &lt;Killers&gt;</b> · Ethereum\n<code>0x0399…bF97</code>");
     expect(msg).toContain("✅ Main <code>0x668B…27A0</code> (max 2)");
     expect(msg).toContain("❌ 1 not eligible: Alt");
-    expect(msg).toContain("❔ 1 not verified yet: New");
-    expect(msg).toContain("Not verified: New. SkyBOT couldn't sign these wallets in to OpenSea yet.");
+    expect(msg).toContain("❔ 1 belum terverifikasi — lihat alasan di bawah: New");
+    expect(msg).toContain("❔ Belum terverifikasi: New. SkyBOT belum bisa menandatangani dompet ini ke OpenSea.");
     expect(msg).not.toContain("Open SkyBOT once and future checks");
     // Public: one summary line only, no wallet section; stage details never repeated.
     expect(msg).toContain("<b>Other stages</b>\n\n<b>Public</b> · Free\n🕒 Fri, 23 Oct · 19:30 (UTC+5:30) · in 1d 23h");
@@ -146,7 +146,7 @@ describe("/check formatting", () => {
     expect(gtd).toContain("✅ wallet-1 <code>0x668B…27A0</code> (max 2)");
     expect(gtd).toContain("✅ wallet-2 ");
     expect(gtd).toContain("❌ 22 not eligible\n");
-    expect(gtd).toContain("❔ 1 not verified yet: wallet-25");
+    expect(gtd).toContain("❔ 1 belum terverifikasi — lihat alasan di bawah: wallet-25");
     expect(msg.slice(pos[0], pos[1])).toContain("❌ 24 not eligible");
     expect(msg).not.toMatch(/<b>Public Mint<\/b> · \d+\/25/);
     expect(msg).toContain("\n<b>Public</b> · 0.000000000000000001 ETH · max 5\n🕒 ");

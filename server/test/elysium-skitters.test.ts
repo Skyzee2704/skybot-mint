@@ -20,8 +20,11 @@ const COLLECTION = {
  * itself requires an API key and returned 401 here. Marketplace offers on the public offers
  * endpoint are denominated in WHYPE; this mint price is native HYPE (currency address zero).
  */
-const START = "2026-11-09T18:50:05.000Z";
-const END = "2026-11-10T18:50:05.000Z";
+// Relative to now so the public stage is always live when the test runs (fixed dates expire).
+// Whole seconds so the on-chain round-trip (seconds -> ISO) matches exactly.
+const NOW_S = Math.floor(Date.now() / 1000) * 1000;
+const START = new Date(NOW_S - 60_000).toISOString();
+const END = new Date(NOW_S + 24 * 60 * 60_000).toISOString();
 const DROP = {
   collection_slug: "skittersnfts",
   collection_name: "SKITTERS",
@@ -91,8 +94,8 @@ function provider() {
       if (sig === seadrop.getFunction("getPublicDrop").selector)
         return seadrop.encodeFunctionResult("getPublicDrop", [
           180000000000000000n,
-          BigInt(Date.parse(START) / 1000),
-          BigInt(Date.parse(END) / 1000),
+          BigInt(Math.floor(Date.parse(START) / 1000)),
+          BigInt(Math.floor(Date.parse(END) / 1000)),
           15,
           1000,
           true,

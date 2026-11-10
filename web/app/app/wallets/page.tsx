@@ -27,6 +27,7 @@ export default function WalletsPage() {
   const { t } = useLang();
   const { createWallet } = useCreateWallet();
   const { importWallet } = useImportWallet();
+  const { exportWallet } = useExportWallet();
   const { wallets: privyWallets } = useWallets();
   const { user, authenticated } = usePrivy();
   const { connectPrivy, userId } = useShell();
@@ -47,6 +48,7 @@ export default function WalletsPage() {
   const pageWallets = filteredWallets.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
   const removedList = list.removedWallets as any[];
   const [removal, setRemoval] = useState<{ w: any; chk: any | null; loading: boolean } | null>(null);
+  const [exportingId, setExportingId] = useState<string | null>(null);
   const load = list.reload;
   const [err, setErr] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
@@ -353,6 +355,34 @@ export default function WalletsPage() {
                       {t("Set Main")}
                     </button>
                   )}
+                  <button
+                    className="ghost"
+                    disabled={
+                      busy ||
+                      exportingId === w.id ||
+                      !authenticated ||
+                      !(privyWallets ?? []).some((x: any) => x.address?.toLowerCase() === w.address.toLowerCase())
+                    }
+                    title={
+                      authenticated && (privyWallets ?? []).some((x: any) => x.address?.toLowerCase() === w.address.toLowerCase())
+                        ? ""
+                        : t("Connect with Privy in this browser to export")
+                    }
+                    onClick={async () => {
+                      setErr(null);
+                      setExportingId(w.id);
+                      try {
+                        // Opens Privy's own export window; SkyBOT never sees the key.
+                        await exportWallet({ address: w.address });
+                      } catch (e: any) {
+                        setErr(e?.message ?? t("Export failed"));
+                      } finally {
+                        setExportingId(null);
+                      }
+                    }}
+                  >
+                    {exportingId === w.id ? t("Exporting…") : t("Export")}
+                  </button>
                   <button className="danger" disabled={busy} onClick={() => startRemoval(w)}>
                     {t("Remove")}
                   </button>
@@ -541,7 +571,7 @@ export default function WalletsPage() {
               </button>
               <p className="muted" style={{ fontSize: 12 }}>
                 {t(
-                  "Keys are exported only in Privy's own window (Export Private Key in the remove dialog, or home.privy.io); SkyBOT never sees them.",
+                  "Keys are exported only in Privy's own window (the Export button on each wallet, or home.privy.io); SkyBOT never sees them.",
                 )}
               </p>
               <p className="muted" style={{ fontSize: 12 }}>

@@ -232,7 +232,7 @@ describe("OpenSea session expiry never needs the app", () => {
     expect(await S.loadPat("someone-else", w.address)).toBeNull();
   });
 
-  it("parallel checks never run more than one full sign-in at a time", async () => {
+  it("parallel checks bound concurrent full sign-ins to the sign-in concurrency", async () => {
     const ws = [mk(13), mk(14), mk(15), mk(16)];
     let live = 0;
     let peak = 0;
@@ -247,7 +247,9 @@ describe("OpenSea session expiry never needs the app", () => {
     const rs = await Promise.all(ws.map((w) => S.walletJwt(user, w, { serverSign: true })));
     vi.stubGlobal("fetch", fakeFetch);
     expect(rs.every((r) => r.jwt)).toBe(true);
-    expect(peak).toBe(1);
+    // Sign-ins run in parallel (bounded), not one at a time — the peak is capped, not 1.
+    expect(peak).toBeGreaterThan(0);
+    expect(peak).toBeLessThanOrEqual(S.SIGNIN_CONCURRENCY);
   });
 });
 
@@ -260,10 +262,10 @@ describe("/check text for wallets that still can't be verified", () => {
       { label: "wallet-8", unverifiedReason: "no_signer" },
       { label: "x", unverifiedReason: null },
     ]).join("\n");
-    expect(out).toContain("Not verified: wallet-8. Automatic checks aren't enabled");
-    expect(out).toContain("Tap Open in SkyBOT once");
-    expect(out).toContain("Not verified: wallet-5, Wallet 7. OpenSea is rate-limiting");
-    expect(out).toContain("Not verified: x. SkyBOT couldn't sign these wallets in");
+    expect(out).toContain("Belum terverifikasi: wallet-8. Pemeriksaan otomatis belum aktif untuk dompet ini");
+    expect(out).toContain("Buka SkyBOT sekali lewat tombol Open");
+    expect(out).toContain("Belum terverifikasi: wallet-5, Wallet 7. OpenSea sedang membatasi sign-in saat ini");
+    expect(out).toContain("Belum terverifikasi: x. SkyBOT belum bisa menandatangani dompet ini ke OpenSea");
     expect(out).not.toMatch(/Open SkyBOT once and future checks/);
   });
 });

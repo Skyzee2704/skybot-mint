@@ -75,8 +75,8 @@ const ID_STRINGS: Record<string, string> = {
     "Impor dompet berjalan di dalam Privy, jadi perlu sesi Privy. Hubungkan dengan Telegram untuk melanjutkan.",
   "Import via Privy": "Impor via Privy",
   "Imported via Privy": "Diimpor via Privy",
-  "Keys are exported only in Privy's own window (Export Private Key in the remove dialog, or home.privy.io); SkyBOT never sees them.":
-    "Key hanya bisa diekspor di jendela Privy sendiri (Export Private Key di dialog hapus, atau home.privy.io); SkyBOT tidak pernah melihatnya.",
+  "Keys are exported only in Privy's own window (the Export button on each wallet, or home.privy.io); SkyBOT never sees them.":
+    "Key hanya bisa diekspor di jendela Privy sendiri (tombol Export di tiap dompet, atau home.privy.io); SkyBOT tidak pernah melihatnya.",
   "Signed in as {account} · {count} Privy wallet(s) connected": "Masuk sebagai {account} · {count} dompet Privy terhubung",
   "This wallet is already in your Privy account: added it back to SkyBOT Mint.":
     "Dompet ini sudah ada di akun Privy Anda: ditambahkan kembali ke SkyBOT Mint.",
@@ -119,6 +119,8 @@ const ID_STRINGS: Record<string, string> = {
   "Connect with Privy in a browser to export, or use home.privy.io.":
     "Hubungkan dengan Privy di browser untuk mengekspor, atau gunakan home.privy.io.",
   "Export failed": "Ekspor gagal",
+  Export: "Ekspor",
+  "Exporting…": "Mengekspor…",
   "New Main wallet": "Dompet utama baru",
   "I understand funds and NFTs left in this wallet will no longer be accessible from SkyBOT.":
     "Saya mengerti dana dan NFT yang tersisa di dompet ini tidak akan bisa lagi diakses dari SkyBOT.",

@@ -163,7 +163,7 @@ export type JwtResult = { jwt: string; via: "cache" | "pat" | "signin"; reason?:
  * and a sign-in that still fails just leaves that wallet cold — the next eligibility check
  * signs it in on demand. Tune down if OpenSea's auth endpoints start rate-limiting hard.
  */
-const SIGNIN_CONCURRENCY = 10;
+export const SIGNIN_CONCURRENCY = 10;
 let signInRunning = 0;
 const signInWaiters: Array<() => void> = [];
 async function signInSlot<T>(fn: () => Promise<T>): Promise<T> {

@@ -355,7 +355,7 @@ export default function MintPage() {
         <div className="row">
           <input
             style={{ flex: 1, minWidth: 260 }}
-            placeholder="https://opensea.io/collection/… · 0x… · collection name"
+            placeholder="https://opensea.io/collection/… · kalos.fun/drops/… · 0x… · collection name"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && doResolve()}
@@ -373,7 +373,7 @@ export default function MintPage() {
         <div className="card">
           <h2>
             {t.name ?? tr("Contract")} {t.symbol && <span className="muted">({t.symbol})</span>}{" "}
-            {t.dropSource !== "kalos" && <span className="pill">{t.kind}</span>} <span className="pill">{t.standard}</span>
+            <span className="pill">{t.dropSource === "kalos" ? "Kalos" : t.kind}</span> <span className="pill">{t.standard}</span>
           </h2>
           <div className="grid">
             <div className="kv">
