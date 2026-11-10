@@ -7,6 +7,7 @@
  */
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { LANGS, useLang } from "@/lib/i18n";
 import { telegramBotLinkProps, telegramBotUsername, useIsWebBrowser, useTelegram } from "@/lib/telegram";
 import {
   ArrowUpRight,
@@ -39,6 +40,20 @@ const ADMIN: Item = { href: "/app/admin", label: "Admin", icon: ShieldCheck };
 
 const isActive = (path: string, href: string) => path === href || path.startsWith(href + "/");
 
+/** English / Bahasa Indonesia switch (default English, choice saved in localStorage). */
+function LangSwitch() {
+  const { lang, setLang, t } = useLang();
+  return (
+    <span className="lang-switch" role="group" aria-label={t("Language")}>
+      {LANGS.map((l) => (
+        <button key={l.code} type="button" className={lang === l.code ? "active" : ""} onClick={() => setLang(l.code)}>
+          {l.code.toUpperCase()}
+        </button>
+      ))}
+    </span>
+  );
+}
+
 export function ShellNav(props: {
   path: string;
   isAdmin: boolean;
@@ -48,6 +63,7 @@ export function ShellNav(props: {
   botUsername?: string | null;
 }) {
   const { path, isAdmin, account, onSignOut } = props;
+  const { t } = useLang();
   const [sheet, setSheet] = useState(false);
   const secondary = isAdmin ? [...SECONDARY, ADMIN] : SECONDARY;
   const desktop = [PRIMARY[0], PRIMARY[1], PRIMARY[3], PRIMARY[2], ...secondary];
@@ -82,15 +98,16 @@ export function ShellNav(props: {
             className={isActive(path, n.href) ? "active" : ""}
             aria-current={isActive(path, n.href) ? "page" : undefined}
           >
-            {n.label}
+            {t(n.label)}
           </Link>
         ))}
         <span className="spacer" />
         {botLink && (
           <a {...botLink} className="tg-bot-link" title={`Open @${bot} in Telegram`}>
-            <Send size={15} aria-hidden /> Telegram Bot
+            <Send size={15} aria-hidden /> {t("Telegram Bot")}
           </a>
         )}
+        <LangSwitch />
         <span className="account-chip" title={account}>
           <span className="avatar" aria-hidden>
             {initial}
@@ -99,7 +116,7 @@ export function ShellNav(props: {
         </span>
         {onSignOut && (
           <button className="ghost" onClick={onSignOut}>
-            Sign Out
+            {t("Sign Out")}
           </button>
         )}
       </nav>
@@ -123,7 +140,7 @@ export function ShellNav(props: {
           return (
             <Link key={n.href} href={n.href} className={on ? "tab active" : "tab"} aria-current={on ? "page" : undefined}>
               <Icon size={22} strokeWidth={on ? 2.4 : 1.9} aria-hidden />
-              <span>{n.label}</span>
+              <span>{t(n.label)}</span>
             </Link>
           );
         })}
@@ -135,14 +152,14 @@ export function ShellNav(props: {
           onClick={() => setSheet((s) => !s)}
         >
           <Menu size={22} strokeWidth={moreActive || sheet ? 2.4 : 1.9} aria-hidden />
-          <span>More</span>
+          <span>{t("More")}</span>
         </button>
       </nav>
       {sheet && (
         <div className="sheet-backdrop" onClick={() => setSheet(false)}>
-          <div className="sheet" role="dialog" aria-modal="true" aria-label="More" onClick={(e) => e.stopPropagation()}>
+          <div className="sheet" role="dialog" aria-modal="true" aria-label={t("More")} onClick={(e) => e.stopPropagation()}>
             <div className="sheet-head">
-              <b>More</b>
+              <b>{t("More")}</b>
               <button type="button" className="sheet-close" aria-label="Close" onClick={() => setSheet(false)}>
                 <X size={20} aria-hidden />
               </button>
@@ -153,23 +170,27 @@ export function ShellNav(props: {
               return (
                 <Link key={n.href} href={n.href} className={on ? "sheet-item active" : "sheet-item"} aria-current={on ? "page" : undefined}>
                   <Icon size={20} aria-hidden />
-                  <span>{n.label}</span>
+                  <span>{t(n.label)}</span>
                 </Link>
               );
             })}
             {botLink && (
               <a {...botLink} className="sheet-item">
                 <Send size={20} aria-hidden />
-                <span>Telegram Bot</span>
+                <span>{t("Telegram Bot")}</span>
                 <span className="muted small" style={{ marginLeft: "auto" }}>
                   @{bot}
                 </span>
               </a>
             )}
+            <div className="lang-row">
+              <span>{t("Language")}</span>
+              <LangSwitch />
+            </div>
             {onSignOut && (
               <button type="button" className="sheet-item signout" onClick={onSignOut}>
                 <LogOut size={20} aria-hidden />
-                <span>Sign Out</span>
+                <span>{t("Sign Out")}</span>
               </button>
             )}
           </div>

@@ -1,6 +1,7 @@
 "use client";
 // SPDX-License-Identifier: AGPL-3.0-only
 import { useCallback, useState } from "react";
+import { useLang } from "@/lib/i18n";
 import { useTelegram } from "@/lib/telegram";
 
 /**
@@ -19,6 +20,7 @@ export function ConfirmBox({
 }) {
   const [checked, setChecked] = useState(false);
   const [busy, setBusy] = useState(false);
+  const { t } = useLang();
   const { haptic } = useTelegram();
   const go = useCallback(async () => {
     if (!checked || busy) return;
@@ -39,7 +41,7 @@ export function ConfirmBox({
         <span>{statement}</span>
       </label>
       <button className="danger confirm-action" disabled={!checked || busy} onClick={go}>
-        {busy ? "Sending…" : label}
+        {busy ? t("Sending…") : label}
       </button>
     </div>
   );

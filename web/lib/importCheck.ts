@@ -29,6 +29,21 @@ export async function signImportCheck(privateKey: `0x${string}`) {
 export const BULK_IMPORT_MAX_KEYS = 50;
 
 /**
+ * Next free number for labels like `PREFIX-1`, `PREFIX-2`, ... given the labels already in use.
+ * If `WL-1`..`WL-3` exist, returns 4; if none match, returns 1.
+ */
+export function nextLabelIndex(labels: string[], prefix: string): number {
+  const escaped = prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp(`^${escaped}-(\\d+)$`);
+  let max = 0;
+  for (const label of labels) {
+    const m = label.match(re);
+    if (m) max = Math.max(max, Number(m[1]));
+  }
+  return max + 1;
+}
+
+/**
  * Split pasted bulk keys: one per line; commas and spaces also split a line.
  * Trims, drops empties, dedupes (case-insensitive, ignoring a 0x prefix).
  * Returned keys are left as pasted (normalizePrivateKey validates each later).

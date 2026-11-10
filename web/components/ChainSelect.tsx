@@ -1,6 +1,7 @@
 "use client";
 // SPDX-License-Identifier: AGPL-3.0-only
 import { useEffect, useState } from "react";
+import { useLang } from "@/lib/i18n";
 import { useApi } from "./AppShell";
 export function useChains() {
   const api = useApi();
@@ -14,9 +15,10 @@ export function useChains() {
 }
 export function ChainSelect({ value, onChange, allowAuto = false }: { value: string; onChange: (v: string) => void; allowAuto?: boolean }) {
   const chains = useChains();
+  const { t } = useLang();
   return (
     <select value={value} onChange={(e) => onChange(e.target.value)} style={{ width: "auto", minWidth: 140 }}>
-      {allowAuto && <option value="">Auto-detect</option>}
+      {allowAuto && <option value="">{t("Auto-detect")}</option>}
       {chains.map((c) => (
         <option key={c.key} value={c.key}>
           {c.name}

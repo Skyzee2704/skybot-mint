@@ -12,10 +12,19 @@ import { ChainSelect } from "@/components/ChainSelect";
 import Link from "next/link";
 import { FundWallets } from "@/components/FundWallets";
 import { usePersistedChain } from "@/lib/chainPref";
-import { BULK_IMPORT_MAX_KEYS, explainImportError, normalizePrivateKey, parseBulkKeys, signImportCheck } from "@/lib/importCheck";
+import { useLang } from "@/lib/i18n";
+import {
+  BULK_IMPORT_MAX_KEYS,
+  explainImportError,
+  nextLabelIndex,
+  normalizePrivateKey,
+  parseBulkKeys,
+  signImportCheck,
+} from "@/lib/importCheck";
 
 export default function WalletsPage() {
   const api = useApi();
+  const { t } = useLang();
   const { createWallet } = useCreateWallet();
   const { importWallet } = useImportWallet();
   const { wallets: privyWallets } = useWallets();
@@ -124,7 +133,7 @@ export default function WalletsPage() {
     }));
     try {
       const r = await api(`/api/wallets/${w.id}`, { method: "DELETE", body: { confirm: "DELETE", mode, ...opts } });
-      setMsg(r.message ?? "Wallet removed.");
+      setMsg(r.message ?? t("Wallet removed."));
       setRemoval(null);
     } catch (e: any) {
       goneIds.current.delete(w.id);
@@ -158,11 +167,11 @@ export default function WalletsPage() {
   const bulkImport = async () => {
     const keys = parseBulkKeys(bulkKeys);
     if (!keys.length) {
-      setErr("Paste at least one private key.");
+      setErr(t("Paste at least one private key."));
       return;
     }
     if (keys.length > BULK_IMPORT_MAX_KEYS) {
-      setErr(`Bulk import is limited to ${BULK_IMPORT_MAX_KEYS} keys at a time.`);
+      setErr(t("Bulk import is limited to {max} keys at a time.", { max: BULK_IMPORT_MAX_KEYS }));
       return;
     }
     setErr(null);
@@ -172,8 +181,15 @@ export default function WalletsPage() {
     setBulkProgress({ done: 0, total: keys.length });
     const toSync: any[] = [];
     const results: { line: number; address: string; label: string; status: "imported" | "already" | "failed"; detail: string }[] = [];
+    // Continue the label numbering from the labels already in use (WL-1..WL-3 exist -> start at WL-4).
+    const startAt = bulkPrefix
+      ? nextLabelIndex(
+          (list.wallets as any[]).map((w) => String(w.label ?? "")),
+          bulkPrefix,
+        )
+      : 1;
     for (let i = 0; i < keys.length; i++) {
-      const label = bulkPrefix ? `${bulkPrefix}-${i + 1}` : "";
+      const label = bulkPrefix ? `${bulkPrefix}-${startAt + i}` : "";
       let address = "";
       try {
         const pk = normalizePrivateKey(keys[i]);
@@ -190,7 +206,7 @@ export default function WalletsPage() {
             address: chk.address,
             label,
             status: "already",
-            detail: "Already in your Privy account — added back.",
+            detail: t("Already in your Privy account — added back."),
           });
         } else {
           let w: any;
@@ -209,7 +225,7 @@ export default function WalletsPage() {
             source: "imported",
             restore: true,
           });
-          results.push({ line: i + 1, address: addr, label, status: "imported", detail: "Imported via Privy." });
+          results.push({ line: i + 1, address: addr, label, status: "imported", detail: t("Imported via Privy.") });
         }
       } catch (e: any) {
         results.push({ line: i + 1, address, label, status: "failed", detail: e?.message ?? "Import failed." });
@@ -221,7 +237,12 @@ export default function WalletsPage() {
       try {
         await api("/api/wallets/sync", { body: { wallets: toSync } });
       } catch (e: any) {
-        setErr(`Imported ${toSync.length} wallet(s) in Privy, but syncing them to SkyBOT failed: ${e?.message ?? e}`);
+        setErr(
+          t("Imported {count} wallet(s) in Privy, but syncing them to SkyBOT failed: {error}", {
+            count: toSync.length,
+            error: e?.message ?? e,
+          }),
+        );
       }
     }
     setBulkKeys(""); // don't leave pasted keys in the page
@@ -229,7 +250,7 @@ export default function WalletsPage() {
     setBulkProgress(null);
     const ok = results.filter((r) => r.status !== "failed").length;
     const failed = results.length - ok;
-    setMsg(`Bulk import finished: ${ok} imported/added back, ${failed} failed.`);
+    setMsg(t("Bulk import finished: {ok} imported/added back, {failed} failed.", { ok, failed }));
     await load();
   };
 
@@ -239,30 +260,30 @@ export default function WalletsPage() {
       {msg && <div className="notice">{msg}</div>}
       <div className="card">
         <h2>
-          Wallets ({list.loading ? "…" : data.wallets.length}){" "}
+          {list.loading ? t("Wallets ({count})", { count: "…" }) : t("Wallets ({count})", { count: data.wallets.length })}{" "}
           {list.refreshing && !list.loading && (
             <span className="muted" style={{ fontSize: 13, fontWeight: 400 }}>
-              updating…
+              {t("updating…")}
             </span>
           )}
         </h2>
-        <p className="muted">Wallets are held by Privy. SkyBOT never sees your private keys. Removing a wallet never moves funds.</p>
+        <p className="muted">{t("Wallets are held by Privy. SkyBOT never sees your private keys. Removing a wallet never moves funds.")}</p>
         <div className="row" style={{ marginBottom: 10 }}>
           <ChainSelect value={chain} onChange={setChain} />
           <button className="ghost" disabled={balLoading} onClick={refreshBalances}>
-            {manual ? "Refreshing…" : "Refresh Balances"}
+            {manual ? t("Refreshing…") : t("Refresh Balances")}
           </button>
           <span className="muted small" style={{ minWidth: 120 }}>
-            {bal.at ? `Updated ${ago(bal.at, now)}` : ""}
-            {bal.validating && bal.data ? " · checking…" : ""}
+            {bal.at ? t("Updated {time}", { time: ago(bal.at, now) }) : ""}
+            {bal.validating && bal.data ? ` · ${t("checking…")}` : ""}
           </span>
         </div>
         <table className="cards">
           <thead>
             <tr>
-              <th>Label</th>
-              <th>Address</th>
-              <th>Balance</th>
+              <th>{t("Label")}</th>
+              <th>{t("Address")}</th>
+              <th>{t("Balance")}</th>
               <th></th>
             </tr>
           </thead>
@@ -270,12 +291,12 @@ export default function WalletsPage() {
             {data.wallets.map((w) => (
               <tr key={w.id}>
                 <td>
-                  {w.label} {w.isMain && <span className="pill accent">Main</span>}{" "}
+                  {w.label} {w.isMain && <span className="pill accent">{t("Main")}</span>}{" "}
                   <span
                     className="tag"
-                    title={w.source === "imported" ? "Imported with a private key (held by Privy)" : "Created by Privy"}
+                    title={w.source === "imported" ? t("Imported with a private key (held by Privy)") : t("Created by Privy")}
                   >
-                    {w.source === "imported" ? "Imported" : "Created"}
+                    {w.source === "imported" ? t("Imported") : t("Created")}
                   </span>
                 </td>
                 <td className="mono" title={w.address}>
@@ -286,7 +307,7 @@ export default function WalletsPage() {
                 <td className="mono">
                   {balances[w.id] !== undefined ? (
                     balances[w.id] === "error" ? (
-                      <span className="muted">unavailable</span>
+                      <span className="muted">{t("unavailable")}</span>
                     ) : (
                       `${Number(balances[w.id]).toFixed(5)} ${bal.data?.nativeSymbol ?? ""}`.trim()
                     )
@@ -305,14 +326,14 @@ export default function WalletsPage() {
                             await load(); // undo the optimistic reorder
                             throw e;
                           });
-                        }, "Main set")
+                        }, t("Main set"))
                       }
                     >
-                      Set Main
+                      {t("Set Main")}
                     </button>
                   )}
                   <button className="danger" disabled={busy} onClick={() => startRemoval(w)}>
-                    Remove
+                    {t("Remove")}
                   </button>
                 </td>
               </tr>
@@ -330,7 +351,7 @@ export default function WalletsPage() {
             {!list.loading && !data.wallets.length && (
               <tr>
                 <td colSpan={4} className="muted">
-                  No wallets yet.
+                  {t("No wallets yet.")}
                 </td>
               </tr>
             )}
@@ -348,8 +369,8 @@ export default function WalletsPage() {
         )}
         {removedList.length > 0 && (
           <details style={{ marginTop: 12 }}>
-            <summary className="muted">Removed wallets ({removedList.length})</summary>
-            <p className="muted small">Hidden from SkyBOT. They stay in your Privy account with their funds.</p>
+            <summary className="muted">{t("Removed wallets ({count})", { count: removedList.length })}</summary>
+            <p className="muted small">{t("Hidden from SkyBOT. They stay in your Privy account with their funds.")}</p>
             <table>
               <tbody>
                 {removedList.map((w: any) => (
@@ -368,11 +389,11 @@ export default function WalletsPage() {
                               goneIds.current.delete(w.id);
                               await api(`/api/wallets/${w.id}/restore`, { body: {} });
                             },
-                            `${w.label || "Wallet"} restored`,
+                            t("{label} restored", { label: w.label || "Wallet" }),
                           )
                         }
                       >
-                        Restore
+                        {t("Restore")}
                       </button>
                     </td>
                   </tr>
@@ -387,34 +408,39 @@ export default function WalletsPage() {
 
       <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(300px,1fr))" }}>
         <div className="card">
-          <h2>Create Wallets</h2>
-          <p className="muted">Creates Privy embedded wallets owned by you, then syncs them here.</p>
+          <h2>{t("Create Wallets")}</h2>
+          <p className="muted">{t("Creates Privy embedded wallets owned by you, then syncs them here.")}</p>
           <div className="row">
             <input type="number" min={1} max={50} value={genN} onChange={(e) => setGenN(Number(e.target.value))} style={{ width: 80 }} />
             <button
               disabled={busy}
               onClick={() =>
-                run(async () => {
-                  // Prefer server-side generation (needs Privy app secret); fall back to client createWallet loop.
-                  try {
-                    await api("/api/wallets/generate", { body: { count: genN } });
-                  } catch {
-                    for (let i = 0; i < genN; i++) await createWallet({ createAdditional: true });
-                  }
-                }, `Created ${genN}`)
+                run(
+                  async () => {
+                    // Prefer server-side generation (needs Privy app secret); fall back to client createWallet loop.
+                    try {
+                      await api("/api/wallets/generate", { body: { count: genN } });
+                    } catch {
+                      for (let i = 0; i < genN; i++) await createWallet({ createAdditional: true });
+                    }
+                  },
+                  t("Created {count}", { count: genN }),
+                )
               }
             >
-              Generate
+              {t("Generate")}
             </button>
           </div>
         </div>
         <div className="card">
-          <h2>Import Private Key</h2>
-          <p className="muted">Imported into Privy — SkyBOT only keeps the address + Privy wallet id.</p>
+          <h2>{t("Import Private Key")}</h2>
+          <p className="muted">{t("Imported into Privy — SkyBOT only keeps the address + Privy wallet id.")}</p>
           {!authenticated ? (
             <div style={{ display: "grid", gap: 8 }}>
-              <p className="muted">Wallet import runs inside Privy, so it needs a Privy session. Connect with Telegram to continue.</p>
-              <button onClick={connectPrivy}>Connect with Privy</button>
+              <p className="muted">
+                {t("Wallet import runs inside Privy, so it needs a Privy session. Connect with Telegram to continue.")}
+              </p>
+              <button onClick={connectPrivy}>{t("Connect with Privy")}</button>
             </div>
           ) : (
             <div style={{ display: "grid", gap: 8 }}>
@@ -425,7 +451,7 @@ export default function WalletsPage() {
                 value={key}
                 onChange={(e) => setKey(e.target.value)}
               />
-              <input placeholder="Label" value={label} onChange={(e) => setLabel(e.target.value)} />
+              <input placeholder={t("Label")} value={label} onChange={(e) => setLabel(e.target.value)} />
               <button
                 disabled={!key || busy}
                 onClick={() =>
@@ -443,7 +469,7 @@ export default function WalletsPage() {
                         body: { wallets: [{ privyWalletId: chk.privyWalletId ?? "", address: chk.address, label, restore: true }] },
                       });
                       setKey("");
-                      return "This wallet is already in your Privy account: added it back to SkyBOT Mint.";
+                      return t("This wallet is already in your Privy account: added it back to SkyBOT Mint.");
                     }
                     let w: any;
                     try {
@@ -466,31 +492,39 @@ export default function WalletsPage() {
                       },
                     });
                     setKey("");
-                  }, "Imported via Privy")
+                  }, t("Imported via Privy"))
                 }
               >
-                Import via Privy
+                {t("Import via Privy")}
               </button>
               <p className="muted" style={{ fontSize: 12 }}>
-                Keys are exported only in Privy&apos;s own window (Export Private Key in the remove dialog, or home.privy.io); SkyBOT never
-                sees them.
+                {t(
+                  "Keys are exported only in Privy's own window (Export Private Key in the remove dialog, or home.privy.io); SkyBOT never sees them.",
+                )}
               </p>
               <p className="muted" style={{ fontSize: 12 }}>
-                Signed in as {user?.email?.address ?? "—"} · {privyWallets?.length ?? 0} Privy wallet(s) connected
+                {t("Signed in as {account} · {count} Privy wallet(s) connected", {
+                  account: user?.email?.address ?? "—",
+                  count: privyWallets?.length ?? 0,
+                })}
               </p>
             </div>
           )}
         </div>
         <div className="card">
-          <h2>Bulk Import Private Keys</h2>
+          <h2>{t("Bulk Import Private Keys")}</h2>
           <p className="muted">
-            Paste many private keys, one per line (max {BULK_IMPORT_MAX_KEYS}). Each goes through the same Privy import as a single key —
-            SkyBOT only keeps the address + Privy wallet id.
+            {t(
+              "Paste many private keys, one per line (max {max}). Each goes through the same Privy import as a single key — SkyBOT only keeps the address + Privy wallet id.",
+              { max: BULK_IMPORT_MAX_KEYS },
+            )}
           </p>
           {!authenticated ? (
             <div style={{ display: "grid", gap: 8 }}>
-              <p className="muted">Wallet import runs inside Privy, so it needs a Privy session. Connect with Telegram to continue.</p>
-              <button onClick={connectPrivy}>Connect with Privy</button>
+              <p className="muted">
+                {t("Wallet import runs inside Privy, so it needs a Privy session. Connect with Telegram to continue.")}
+              </p>
+              <button onClick={connectPrivy}>{t("Connect with Privy")}</button>
             </div>
           ) : (
             <div style={{ display: "grid", gap: 8 }}>
@@ -503,31 +537,41 @@ export default function WalletsPage() {
                 onChange={(e) => setBulkKeys(e.target.value)}
                 style={{ fontFamily: "monospace", resize: "vertical" }}
               />
-              <input placeholder="Label prefix (optional, e.g. WL)" value={bulkPrefix} onChange={(e) => setBulkPrefix(e.target.value)} />
+              <input
+                placeholder={t("Label prefix (optional, e.g. WL)")}
+                value={bulkPrefix}
+                onChange={(e) => setBulkPrefix(e.target.value)}
+              />
               <button disabled={!bulkKeys.trim() || bulkBusy} onClick={bulkImport}>
-                {bulkBusy && bulkProgress ? `Importing ${bulkProgress.done}/${bulkProgress.total}…` : "Import All via Privy"}
+                {bulkBusy && bulkProgress
+                  ? t("Importing {done}/{total}…", { done: bulkProgress.done, total: bulkProgress.total })
+                  : t("Import All via Privy")}
               </button>
               {bulkResults.length > 0 && (
                 <div>
                   <p className="muted small" style={{ margin: "4px 0" }}>
-                    {bulkResults.filter((r) => r.status === "imported").length} imported ·{" "}
-                    {bulkResults.filter((r) => r.status === "already").length} already in account ·{" "}
-                    {bulkResults.filter((r) => r.status === "failed").length} failed
+                    {t("{imported} imported · {already} already in account · {failed} failed", {
+                      imported: bulkResults.filter((r) => r.status === "imported").length,
+                      already: bulkResults.filter((r) => r.status === "already").length,
+                      failed: bulkResults.filter((r) => r.status === "failed").length,
+                    })}
                   </p>
                   <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13 }}>
                     {bulkResults.map((r, i) => (
                       <li key={i}>
                         <span className="mono">{r.address ? short(r.address) : `line ${r.line}`}</span>
                         {r.label ? ` (${r.label})` : ""} —{" "}
-                        {r.status === "imported" ? "imported" : r.status === "already" ? "already in account" : "failed"}: {r.detail}
+                        {r.status === "imported" ? t("imported") : r.status === "already" ? t("already in account") : t("failed")}:{" "}
+                        {r.detail}
                       </li>
                     ))}
                   </ul>
                 </div>
               )}
               <p className="muted" style={{ fontSize: 12 }}>
-                Keys are sent only to Privy in your browser, never to SkyBOT&apos;s server. The pasted keys are cleared when the import
-                finishes.
+                {t(
+                  "Keys are sent only to Privy in your browser, never to SkyBOT's server. The pasted keys are cleared when the import finishes.",
+                )}
               </p>
             </div>
           )}
@@ -553,6 +597,7 @@ function RemovalPanel({
   onRemove: (mode: "delete" | "hide", opts: { acknowledge?: boolean; confirmLabel?: string; newMainId?: string }) => void;
 }) {
   const { w, chk, loading } = removal;
+  const { t } = useLang();
   const { exportWallet } = useExportWallet();
   const [ack, setAck] = useState(false);
   const [newMain, setNewMain] = useState<string>(others[0]?.id ?? "");
@@ -570,21 +615,21 @@ function RemovalPanel({
   const confirmed = !needsConfirm || ack;
   const mainOpts = w.isMain && others.length ? { newMainId: newMain || undefined } : {};
   return (
-    <div className="notice removal" role="dialog" aria-label={`Remove ${w.label}`} style={{ marginTop: 12 }}>
+    <div className="notice removal" role="dialog" aria-label={t("Remove {label}", { label: w.label })} style={{ marginTop: 12 }}>
       <b>
-        Remove {w.label || "wallet"} <span className="mono muted">{short(w.address)}</span>
+        {t("Remove {label}", { label: w.label || "wallet" })} <span className="mono muted">{short(w.address)}</span>
         {chk?.walletKind && chk.walletKind !== "unknown" && (
           <span className="pill" style={{ marginLeft: 6 }}>
-            {chk.walletKind === "imported" ? "Imported" : chk.walletKind === "primary" ? "Primary Privy wallet" : "Created"}
+            {chk.walletKind === "imported" ? t("Imported") : chk.walletKind === "primary" ? t("Primary Privy wallet") : t("Created")}
           </span>
         )}
       </b>
-      {loading && <p className="muted">Checking balances on all chains…</p>}
+      {loading && <p className="muted">{t("Checking balances on all chains…")}</p>}
       {chk && (
         <>
           {funded.length > 0 || unchecked.length > 0 || nfts > 0 ? (
             <div className="warn">
-              <p style={{ margin: "6px 0" }}>This wallet still holds:</p>
+              <p style={{ margin: "6px 0" }}>{t("This wallet still holds:")}</p>
               <ul style={{ margin: "0 0 6px 18px" }}>
                 {funded.map((f) => (
                   <li key={f.chain}>
@@ -592,25 +637,25 @@ function RemovalPanel({
                   </li>
                 ))}
                 {unchecked.map((u) => (
-                  <li key={u.chain}>Unknown balance on {u.chainName} (couldn&apos;t be read)</li>
+                  <li key={u.chain}>{t("Unknown balance on {chain} (couldn't be read)", { chain: u.chainName })}</li>
                 ))}
-                {nfts > 0 && <li>{nfts} NFT(s) per the last holdings scan</li>}
+                {nfts > 0 && <li>{t("{count} NFT(s) per the last holdings scan", { count: nfts })}</li>}
               </ul>
               <div className="row">
                 {funded.length > 0 && (
                   <Link className="button ghost" href={`/app/withdraw?wallet=${encodeURIComponent(w.id)}`}>
-                    Withdraw first
+                    {t("Withdraw first")}
                   </Link>
                 )}
                 {nfts > 0 && (
                   <Link className="button ghost" href="/app/nfts">
-                    Send NFTs first
+                    {t("Send NFTs first")}
                   </Link>
                 )}
               </div>
             </div>
           ) : (
-            <p>Empty on all {chk.balances.length} chains.</p>
+            <p>{t("Empty on all {count} chains.", { count: chk.balances.length })}</p>
           )}
           {(chk.warnings ?? []).map((n: string) => (
             <p key={n} className={chk.walletKind === "created" ? "bad" : ""} style={{ margin: "6px 0" }}>
@@ -622,19 +667,19 @@ function RemovalPanel({
               <button
                 className="ghost"
                 disabled={!canExport}
-                title={canExport ? "" : "Connect with Privy in this browser to export"}
+                title={canExport ? "" : t("Connect with Privy in this browser to export")}
                 onClick={async () => {
                   setExportErr(null);
                   try {
                     await exportWallet({ address: w.address });
                   } catch (e: any) {
-                    setExportErr(e?.message ?? "Export failed");
+                    setExportErr(e?.message ?? t("Export failed"));
                   }
                 }}
               >
-                Export Private Key (Privy)
+                {t("Export Private Key (Privy)")}
               </button>
-              {!canExport && <span className="muted small">Connect with Privy in a browser to export, or use home.privy.io.</span>}
+              {!canExport && <span className="muted small">{t("Connect with Privy in a browser to export, or use home.privy.io.")}</span>}
               {exportErr && <span className="bad small">{exportErr}</span>}
             </div>
           )}
@@ -645,7 +690,7 @@ function RemovalPanel({
           ))}
           {w.isMain && others.length > 0 && (
             <label className="row" style={{ gap: 8 }}>
-              <span>New Main wallet</span>
+              <span>{t("New Main wallet")}</span>
               <select value={newMain} onChange={(e) => setNewMain(e.target.value)} style={{ width: "auto" }}>
                 {others.map((o) => (
                   <option key={o.id} value={o.id}>
@@ -659,7 +704,7 @@ function RemovalPanel({
             <div style={{ margin: "8px 0" }}>
               <label className="confirm-check">
                 <input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} />
-                <span>I understand funds and NFTs left in this wallet will no longer be accessible from SkyBOT.</span>
+                <span>{t("I understand funds and NFTs left in this wallet will no longer be accessible from SkyBOT.")}</span>
               </label>
             </div>
           )}
@@ -669,18 +714,21 @@ function RemovalPanel({
                 className="danger"
                 disabled={busy || !confirmed}
                 onClick={() => {
-                  if (needsConfirm || confirm(`Remove ${w.label || "this wallet"} permanently? This can't be undone in SkyBOT.`))
+                  if (
+                    needsConfirm ||
+                    confirm(t("Remove {label} permanently? This can't be undone in SkyBOT.", { label: w.label || "this wallet" }))
+                  )
                     onRemove("delete", { ...(needsConfirm ? { acknowledge: ack } : {}), ...mainOpts });
                 }}
               >
-                {archive ? "Remove and Archive in Privy" : "Remove from SkyBOT"}
+                {archive ? t("Remove and Archive in Privy") : t("Remove from SkyBOT")}
               </button>
             )}
             <button className={hideOnly ? "" : "ghost"} disabled={busy} onClick={() => onRemove("hide", mainOpts)}>
-              Hide from SkyBOT (restorable)
+              {t("Hide from SkyBOT (restorable)")}
             </button>
             <button className="ghost" disabled={busy} onClick={onCancel}>
-              Cancel
+              {t("Cancel")}
             </button>
           </div>
         </>

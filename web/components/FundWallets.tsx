@@ -14,6 +14,7 @@ import { assertSignableChain, withSignTimeout } from "@/lib/signing";
 import { balancesAsOf, balancesFetcher, balancesKey, revalidate } from "@/lib/swr";
 import type { useApi } from "@/components/AppShell";
 import { usePersistedChain } from "@/lib/chainPref";
+import { useLang } from "@/lib/i18n";
 
 type W = { id: string; label: string; address: string; isMain: boolean };
 type Status = "queued" | "signing" | "sent" | "confirmed" | "failed" | "skipped";
@@ -30,6 +31,7 @@ export function toWei(v: string, decimals = 18): bigint | null {
 
 export function FundWallets({ api, wallets, onDone }: { api: ReturnType<typeof useApi>; wallets: W[]; onDone?: () => void }) {
   const { authenticated } = usePrivy();
+  const { t } = useLang();
   const { signTransaction } = useSignTransaction();
   const main = wallets.find((w) => w.isMain) ?? null;
   const others = useMemo(() => wallets.filter((w) => !w.isMain), [wallets]);
@@ -81,7 +83,7 @@ export function FundWallets({ api, wallets, onDone }: { api: ReturnType<typeof u
   const review = async (only?: string[], amountWei?: string) => {
     setErr(null);
     reset();
-    setBusy("Preparing transfers…");
+    setBusy(t("Preparing transfers…"));
     try {
       const q = await api("/api/fund/quote", {
         body: {
@@ -130,7 +132,7 @@ export function FundWallets({ api, wallets, onDone }: { api: ReturnType<typeof u
     // One sender, consecutive nonces: after a failure or Stop, later transfers would be stuck, so they are not sent.
     let halted: string | null = null;
     for (const it of items) {
-      if (stop.signal.aborted) halted ??= "stopped before signing";
+      if (stop.signal.aborted) halted ??= t("stopped before signing");
       if (halted) {
         setRun((r) => ({ ...r, [it.walletId]: { status: "skipped", error: halted! } }));
         continue;
@@ -154,7 +156,7 @@ export function FundWallets({ api, wallets, onDone }: { api: ReturnType<typeof u
           ),
           { signal: stop.signal, what: "Wallet signature" },
         );
-        if (stop.signal.aborted) throw new Error("Stopped. Nothing was sent.");
+        if (stop.signal.aborted) throw new Error(t("Stopped. Nothing was sent."));
         const r = await api("/api/fund/send", {
           body: { chain: quote.chain, walletId: it.walletId, tx: it.tx, quoteToken: it.quoteToken, signed: signature },
         });
@@ -162,7 +164,7 @@ export function FundWallets({ api, wallets, onDone }: { api: ReturnType<typeof u
         void poll(it.walletId, r.hash, quote.chain);
       } catch (e: any) {
         setRun((s) => ({ ...s, [it.walletId]: { status: "failed", error: String(e?.message ?? e).slice(0, 200) } }));
-        halted = "not sent because an earlier transfer did not go through";
+        halted = t("not sent because an earlier transfer did not go through");
       }
     }
     stopRef.current = null;
@@ -178,37 +180,38 @@ export function FundWallets({ api, wallets, onDone }: { api: ReturnType<typeof u
   if (!main)
     return (
       <div className="card">
-        <h2>Fund Wallets</h2>
-        <p className="muted">Set a Main wallet first. Fund Wallets always sends from your Main wallet.</p>
+        <h2>{t("Fund Wallets")}</h2>
+        <p className="muted">{t("Set a Main wallet first. Fund Wallets always sends from your Main wallet.")}</p>
       </div>
     );
 
   return (
     <div className="card">
-      <h2>Fund Wallets</h2>
+      <h2>{t("Fund Wallets")}</h2>
       <p className="muted">
-        Split native coin from your Main wallet evenly across your other wallets. Each transfer is signed by your Privy wallet in this
-        browser, and SkyBOT checks it matches what you reviewed before broadcasting.
+        {t(
+          "Split native coin from your Main wallet evenly across your other wallets. Each transfer is signed by your Privy wallet in this browser, and SkyBOT checks it matches what you reviewed before broadcasting.",
+        )}
       </p>
       <div className="row">
         <ChainSelect value={chain} onChange={setChain} />
         <span>
-          From <b>{main.label}</b> <span className="mono muted">{short(main.address)}</span> <CopyAddress address={main.address} />
+          {t("From")} <b>{main.label}</b> <span className="mono muted">{short(main.address)}</span> <CopyAddress address={main.address} />
         </span>
         <span className="mono">
           {mainBal === undefined ? (
             <span className="skeleton" style={{ width: 70 }} />
           ) : mainBal === null ? (
-            <span className="muted">balance unavailable</span>
+            <span className="muted">{t("balance unavailable")}</span>
           ) : (
-            `Balance ${fmtNative(mainBal, sym, 6)}`
+            t("Balance {amount}", { amount: fmtNative(mainBal, sym, 6) })
           )}
         </span>
       </div>
 
       {others.length === 0 ? (
         <p className="muted" style={{ marginTop: 10 }}>
-          Add another wallet to fund it from Main.
+          {t("Add another wallet to fund it from Main.")}
         </p>
       ) : (
         <>
@@ -223,12 +226,10 @@ export function FundWallets({ api, wallets, onDone }: { api: ReturnType<typeof u
                 }}
                 style={{ width: "auto" }}
               />
-              Send to all ({others.length})
+              {t("Send to all ({count})", { count: others.length })}
             </label>
             <span className="spacer" />
-            <span className="muted">
-              {ids.length} of {others.length} selected
-            </span>
+            <span className="muted">{t("{selected} of {total} selected", { selected: ids.length, total: others.length })}</span>
           </div>
           <div className="wallet-pick">
             {others.map((w) => (
@@ -253,7 +254,7 @@ export function FundWallets({ api, wallets, onDone }: { api: ReturnType<typeof u
           <div className="row" style={{ marginTop: 12 }}>
             <input
               inputMode="decimal"
-              placeholder={max ? "Max" : "Total amount to split"}
+              placeholder={max ? t("Max") : t("Total amount to split")}
               value={max ? "" : amount}
               disabled={max}
               onChange={(e) => {
@@ -270,22 +271,26 @@ export function FundWallets({ api, wallets, onDone }: { api: ReturnType<typeof u
                 reset();
               }}
               aria-pressed={max}
-              title="Main balance minus the network fees of all transfers"
+              title={t("Main balance minus the network fees of all transfers")}
             >
-              Max
+              {t("Max")}
             </button>
             <button disabled={!canReview || overBalance} onClick={() => review()}>
-              Review Funding
+              {t("Review Funding")}
             </button>
           </div>
           <p className="muted small" style={{ marginTop: 6 }}>
             {max
-              ? "Max sends your Main balance minus the exact network fees for every transfer, split evenly. The exact amount per wallet is shown on review."
+              ? t(
+                  "Max sends your Main balance minus the exact network fees for every transfer, split evenly. The exact amount per wallet is shown on review.",
+                )
               : perPreview !== null
-                ? `${fmtNative(perPreview.toString(), sym, 8)} per wallet × ${ids.length}${remPreview > 0n ? ` (${remPreview} wei rounding stays in Main)` : ""}. Network fees are added on review.`
-                : "Enter the total to split evenly across the selected wallets."}
+                ? `${fmtNative(perPreview.toString(), sym, 8)} ${t("per wallet")} × ${ids.length}${
+                    remPreview > 0n ? ` ${t("({amount} wei rounding stays in Main)", { amount: remPreview.toString() })}` : ""
+                  }. ${t("Network fees are added on review.")}`
+                : t("Enter the total to split evenly across the selected wallets.")}
           </p>
-          {overBalance && <p className="bad">The amount is more than your Main balance on this chain.</p>}
+          {overBalance && <p className="bad">{t("The amount is more than your Main balance on this chain.")}</p>}
         </>
       )}
       {busy && <p className="muted">{busy}</p>}
@@ -293,14 +298,14 @@ export function FundWallets({ api, wallets, onDone }: { api: ReturnType<typeof u
 
       {quote && (
         <div style={{ marginTop: 16 }}>
-          <h2>Confirm Funding</h2>
+          <h2>{t("Confirm Funding")}</h2>
           <div className="kv">
-            <b>From Main on {quote.chainName}</b>
+            <b>{t("From Main on {chain}", { chain: quote.chainName })}</b>
             <div className="mono" style={{ fontSize: 16, wordBreak: "break-all", padding: "8px 0" }}>
               {quote.main.address}
             </div>
             <span className="muted">
-              {quote.main.label} · balance {fmtEth(quote.main.balanceWei, 8)} {sym}
+              {quote.main.label} · {t("balance {amount}", { amount: fmtEth(quote.main.balanceWei, 8) })} {sym}
             </span>
           </div>
           {quote.warnings.map((w: string) => (
@@ -311,15 +316,16 @@ export function FundWallets({ api, wallets, onDone }: { api: ReturnType<typeof u
           <table style={{ marginTop: 10 }}>
             <thead>
               <tr>
-                <th>To</th>
-                <th>Amount</th>
-                <th>Network Fee</th>
-                <th>Status</th>
+                <th>{t("To")}</th>
+                <th>{t("Amount")}</th>
+                <th>{t("Network Fee")}</th>
+                <th>{t("Status")}</th>
               </tr>
             </thead>
             <tbody>
               {quote.items.map((i: any) => {
                 const st = run[i.walletId];
+                const stLabel = st ? t(st.status) : "";
                 return (
                   <tr key={i.walletId}>
                     <td>
@@ -333,18 +339,18 @@ export function FundWallets({ api, wallets, onDone }: { api: ReturnType<typeof u
                     </td>
                     <td>
                       {!st ? (
-                        <span className="muted">Ready</span>
+                        <span className="muted">{t("Ready")}</span>
                       ) : (
                         <span
                           className={
                             st.status === "confirmed" ? "ok" : st.status === "failed" ? "bad" : st.status === "skipped" ? "warn" : ""
                           }
                         >
-                          {st.status[0].toUpperCase() + st.status.slice(1)}
+                          {stLabel[0].toUpperCase() + stLabel.slice(1)}
                           {st.error ? `: ${st.error}` : ""}{" "}
                           {st.explorer && (
                             <a href={st.explorer} target="_blank" rel="noreferrer">
-                              View
+                              {t("View")}
                             </a>
                           )}
                         </span>
@@ -357,39 +363,39 @@ export function FundWallets({ api, wallets, onDone }: { api: ReturnType<typeof u
           </table>
           <div className="grid" style={{ marginTop: 12 }}>
             <div className="kv">
-              <b>Total Sent</b>
+              <b>{t("Total Sent")}</b>
               {fmtEth(quote.totals.valueWei, 8)} {sym}
             </div>
             <div className="kv">
-              <b>Total Network Fees</b>
+              <b>{t("Total Network Fees")}</b>
               {fmtEth(quote.totals.feeWei, 9)} {sym}
             </div>
             <div className="kv">
-              <b>Left in Main</b>~{fmtEth(quote.totals.leftoverWei, 9)} {sym}
+              <b>{t("Left in Main")}</b>~{fmtEth(quote.totals.leftoverWei, 9)} {sym}
             </div>
           </div>
           {signingNow && (
             <div className="row" style={{ marginTop: 12 }}>
-              <span className="muted">Waiting for your wallet signature (up to 60s per transfer)…</span>
+              <span className="muted">{t("Waiting for your wallet signature (up to 60s per transfer)…")}</span>
               <button className="ghost" onClick={() => stopRef.current?.abort()}>
-                Stop
+                {t("Stop")}
               </button>
             </div>
           )}
           {!signingNow && Object.keys(run).length > 0 && (
             <>
               <p className={unsent.length ? "warn" : "ok"} style={{ marginTop: 12 }}>
-                {sentCount} of {quote.items.length} transfer{quote.items.length === 1 ? "" : "s"} sent
-                {unsent.length ? ` · ${unsent.length} not sent` : ""}.
+                {t("{sent} of {total} transfers sent", { sent: sentCount, total: quote.items.length })}
+                {unsent.length ? ` · ${t("{count} not sent", { count: unsent.length })}` : ""}.
               </p>
               <div className="row">
                 {unsent.length > 0 && (
                   <button onClick={() => review(unsent, (BigInt(quote.perWalletWei) * BigInt(unsent.length)).toString())}>
-                    Retry {unsent.length} Unsent
+                    {t("Retry {count} Unsent", { count: unsent.length })}
                   </button>
                 )}
                 <button className="ghost" onClick={reset}>
-                  Close
+                  {t("Close")}
                 </button>
               </div>
             </>
@@ -398,15 +404,15 @@ export function FundWallets({ api, wallets, onDone }: { api: ReturnType<typeof u
             <>
               <label className="confirm-check" style={{ marginTop: 12 }}>
                 <input type="checkbox" checked={checked} onChange={(e) => setChecked(e.target.checked)} />
-                <span>I reviewed the amounts above. Transfers cannot be reversed.</span>
+                <span>{t("I reviewed the amounts above. Transfers cannot be reversed.")}</span>
               </label>
-              {!authenticated && <p className="muted">Transfers are signed with your Privy wallet. Connect with Privy to send.</p>}
+              {!authenticated && <p className="muted">{t("Transfers are signed with your Privy wallet. Connect with Privy to send.")}</p>}
               <div className="row" style={{ marginTop: 8 }}>
                 <button disabled={!checked || !authenticated || !quote.items.length} onClick={send}>
-                  Send {quote.items.length} Transfer{quote.items.length === 1 ? "" : "s"}
+                  {quote.items.length === 1 ? t("Send 1 Transfer") : t("Send {count} Transfers", { count: quote.items.length })}
                 </button>
                 <button className="ghost" onClick={reset}>
-                  Cancel
+                  {t("Cancel")}
                 </button>
               </div>
             </>
