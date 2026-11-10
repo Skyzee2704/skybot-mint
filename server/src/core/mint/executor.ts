@@ -32,6 +32,8 @@ export interface WalletResult {
   costWei?: string;
   error?: string;
   acceptedBy?: number;
+  /** Milliseconds spent in eth_sendRawTransaction. */
+  broadcastMs?: number;
 }
 export interface Prepared {
   walletId: string;
@@ -45,8 +47,12 @@ export interface Prepared {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-/** Stage-not-open retry interval for the mint build (OpenSea 409 / NOT_ACTIVE). */
-export const NOT_ACTIVE_RETRY_MS = 300;
+/** Stage-not-open retry interval for the mint build (OpenSea 409 / NOT_ACTIVE). Tight so a 409 does not cost 300ms. */
+export const NOT_ACTIVE_RETRY_MS = 75;
+/** First OpenSea mint-signature attempt is this far before T0; 409s then retry until the stage opens. */
+export const OPENSEA_LEAD_MS = 150;
+/** Backoff when OpenSea answers 429. Wait at least this long, or Retry-After when that is longer, and never more than 2s. */
+export const RATE_LIMIT_RETRY_MS = 500;
 /** How long after the start a 422 "not eligible" from the mint API is retried for a chosen stage. */
 export const NOT_ELIGIBLE_GRACE_MS = 5000;
 /** Max time a gas estimate may add after the start before the fallback/hint gas is used instead. */
@@ -166,6 +172,8 @@ export async function prepareAll(
   let lastCheck = 0;
   let lastCheckP: Promise<boolean> = Promise.resolve(false);
   const cancelled = () => {
+    // After T0 the hot path does not touch the database. A cancel in that window is seen on the next read.
+    if (hotAt !== undefined && Date.now() >= hotAt) return lastCheckP;
     if (Date.now() - lastCheck >= 1000) {
       lastCheck = Date.now();
       lastCheckP = jobStatus(job.id).then(
@@ -177,13 +185,33 @@ export async function prepareAll(
   };
 
   const fireAt = opts.fireAt ?? opts.buildNotBefore;
+  const hotAt = fireAt !== undefined ? fireAt - OPENSEA_LEAD_MS : undefined;
+  const deferredLogs: string[] = [];
+  const jobLogHot = async (msg: string) => {
+    log.info(`[job ${job.id.slice(0, 8)}] ${msg}`);
+    if (hotAt !== undefined && Date.now() >= hotAt) {
+      deferredLogs.push(msg);
+      return;
+    }
+    await appendJobLog(job.id, msg);
+  };
   const t0 = Date.now();
-  const timing = req.wallets.map(() => ({ build: -1, gas: -1, sign: -1, ready: -1, path: "post" as "post" | "presigned" | "resigned" }));
+  const timing = req.wallets.map(() => ({
+    build: -1,
+    gas: -1,
+    sign: -1,
+    ready: -1,
+    attempts: 0,
+    firstAttemptAt: -1,
+    path: "post" as "post" | "presigned" | "resigned",
+  }));
   const sameTx = (a: BuiltTx, b: BuiltTx) =>
     a.to.toLowerCase() === b.to.toLowerCase() && a.data.toLowerCase() === b.data.toLowerCase() && a.value === b.value;
 
   const buildWithRetry = async (i: number): Promise<BuiltTx> => {
     for (;;) {
+      timing[i].attempts++;
+      if (timing[i].firstAttemptAt < 0) timing[i].firstAttemptAt = Date.now();
       try {
         return await buildMintTx(t, req, results[i].address, req.wallets[i].quantity, undefined, job.userId, {
           mintTimeoutMs: MINT_API_TIMEOUT_MS,
@@ -197,10 +225,16 @@ export async function prepareAll(
           Date.now() < (fireAt ?? 0) + NOT_ELIGIBLE_GRACE_MS;
         if (
           e instanceof MintBuildError &&
-          (e.code === "NOT_ACTIVE" || e.code === "RETRY" || earlyNotEligible) &&
+          (e.code === "NOT_ACTIVE" || e.code === "RETRY" || e.code === "RATE_LIMIT" || earlyNotEligible) &&
           Date.now() < buildDeadline
         ) {
-          await sleep(e.code === "RETRY" ? 50 : nextRetryDelay(Date.now(), fireAt));
+          const wait =
+            e.code === "RATE_LIMIT"
+              ? Math.min(2_000, Math.max(RATE_LIMIT_RETRY_MS, e.retryAfterMs ?? RATE_LIMIT_RETRY_MS))
+              : e.code === "RETRY"
+                ? 50
+                : nextRetryDelay(Date.now(), fireAt);
+          await sleep(wait);
           if (await cancelled()) throw new JobCancelledError();
           continue;
         }
@@ -226,7 +260,7 @@ export async function prepareAll(
       return (g * 125n) / 100n;
     } catch (e: any) {
       const why = await describeTxError(e, { chain, contracts: [req.contract] }).catch(() => null);
-      void jobLog(job, `gas estimate ${results[i].address.slice(0, 8)}: ${why?.message ?? "failed"} (using fallback gas)`).catch(() => {});
+      void jobLogHot(`gas estimate ${results[i].address.slice(0, 8)}: ${why?.message ?? "failed"} (using fallback gas)`).catch(() => {});
       return fb;
     }
   };
@@ -373,7 +407,7 @@ export async function prepareAll(
         if (nowNonce !== nonce) {
           raws[i] = await sign(i, tx, gasLimits[i], nowNonce);
           timing[i].path = "resigned";
-          void jobLog(job, `nonce changed for ${results[i].address.slice(0, 8)}, re-signed`).catch(() => {});
+          void jobLogHot(`nonce changed for ${results[i].address.slice(0, 8)}, re-signed`).catch(() => {});
         }
       }
     } catch (e: any) {
@@ -398,10 +432,18 @@ export async function prepareAll(
     const v = timing.map((x) => x[k]).filter((x) => x >= 0);
     return v.length ? `${Math.min(...v)}–${Math.max(...v)}ms` : "-";
   };
-  await jobLog(
-    job,
-    `prepared ${prepared.length}/${req.wallets.length} txs (maxFee ${Number(fees.maxFeePerGas) / 1e9} gwei, worst-case total ${formatEther(total)} ${chain.nativeSymbol}) · timing after start: build ${ms("build")}, gas ${ms("gas")}, sign ${ms("sign")}, ready ${ms("ready")}, presigned ${timing.filter((x) => x.path === "presigned").length}, setup ${tStart - t0}ms, mode ${streaming ? "stream" : "batch"}`,
-  ).catch(() => {});
+  const off = (at: number) => (fireAt === undefined || at < 0 ? "?" : `${at - fireAt >= 0 ? "+" : ""}${at - fireAt}ms`);
+  const perWallet = timing
+    .map((x, i) => {
+      const addr = results[i].address.slice(0, 8);
+      return `${addr} first ${off(x.firstAttemptAt)} attempts ${x.attempts} build ${x.build}ms sign ${x.sign}ms ready ${x.ready < 0 ? "?" : `${x.ready}ms`}`;
+    })
+    .join(" | ");
+  deferredLogs.push(
+    `prepared ${prepared.length}/${req.wallets.length} txs (maxFee ${Number(fees.maxFeePerGas) / 1e9} gwei, worst-case total ${formatEther(total)} ${chain.nativeSymbol}) · build ${ms("build")}, gas ${ms("gas")}, sign ${ms("sign")}, ready ${ms("ready")}, presigned ${timing.filter((x) => x.path === "presigned").length}, setup ${tStart - t0}ms, mode ${streaming ? "stream" : "batch"} · ${perWallet}`,
+  );
+  log.info(`[job ${job.id.slice(0, 8)}] ${deferredLogs[deferredLogs.length - 1]}`);
+  if (deferredLogs.length) void appendJobLog(job.id, deferredLogs.join(" · ")).catch(() => {});
   if (streamErr) throw streamErr;
   return { prepared, results };
 }
@@ -422,12 +464,9 @@ export async function broadcastAndTrack(
       prepared.map(async (p) => {
         const r = results.find((x) => x.walletId === p.walletId)!;
         try {
-          // Budget row is best-effort and written in parallel with the send, so the DB round trip never delays it.
-          const spend = recordSpend(job.userId, chain, p.reserveWei, p.reserveRef).catch((e: any) => {
-            log.warn(`recordSpend ${p.reserveRef}`, String(e?.message ?? e).slice(0, 160));
-          });
+          const sentAt = Date.now();
           const b = await pool.broadcast(p.raw);
-          await spend;
+          r.broadcastMs = Date.now() - sentAt;
           r.txHash = b.hash;
           r.explorer = explorerTx(chain, b.hash);
           r.acceptedBy = b.accepted.length;
@@ -437,9 +476,12 @@ export async function broadcastAndTrack(
               b.errors.map((e) => e.error),
               chain.nativeSymbol,
             );
-            await settleSpend(p.reserveRef, 0n).catch(() => {});
             return;
           }
+          // Budget write stays off the send. The node has already accepted the tx.
+          await recordSpend(job.userId, chain, p.reserveWei, p.reserveRef).catch((e: any) => {
+            log.warn(`recordSpend ${p.reserveRef}`, String(e?.message ?? e).slice(0, 160));
+          });
           r.status = "broadcast";
         } catch (e: any) {
           if (r.txHash) {
@@ -455,6 +497,9 @@ export async function broadcastAndTrack(
     );
   } finally {
     await setResults(job, results);
+    const sent = results.filter((r) => r.broadcastMs !== undefined);
+    if (sent.length)
+      log.info(`[job ${job.id.slice(0, 8)}] broadcast ms ${sent.map((r) => `${r.address.slice(0, 8)} ${r.broadcastMs}ms`).join(", ")}`);
   }
   if (opts.track === false) return;
   await jobLog(job, `broadcast ${results.filter((r) => r.status === "broadcast").length} txs`);

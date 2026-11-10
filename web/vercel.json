@@ -5,7 +5,7 @@
   "buildCommand": "npm run build",
   "regions": ["sin1"],
   "functions": {
-    "app/api/jobs/run/route.ts": { "maxDuration": 300 },
+    "app/api/jobs/run/route.ts": { "maxDuration": 300, "regions": ["iad1"] },
     "app/api/cron/housekeeping/route.ts": { "maxDuration": 60 },
     "app/api/[...path]/route.ts": { "maxDuration": 60 }
   }

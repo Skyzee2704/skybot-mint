@@ -4,7 +4,7 @@ import { gasFromHint, nextRetryDelay, NOT_ACTIVE_RETRY_MS, waitUntil } from "../
 
 describe("mint timing helpers", () => {
   it("aligns a build retry to the start time", () => {
-    expect(nextRetryDelay(1000, 1100)).toBe(100);
+    expect(nextRetryDelay(1000, 1050)).toBe(50);
     expect(nextRetryDelay(1000, 5000)).toBe(NOT_ACTIVE_RETRY_MS);
     expect(nextRetryDelay(2000, 1000)).toBe(NOT_ACTIVE_RETRY_MS);
     expect(nextRetryDelay(1000, undefined)).toBe(NOT_ACTIVE_RETRY_MS);

@@ -8,6 +8,7 @@ describe("OpenSea mint API error mapping", () => {
   it("maps unfunded 422 to INSUFFICIENT_FUNDS, not an allowlist failure", () =>
     expect(osErrorCode(422, "Insufficient balance to mint")).toBe("INSUFFICIENT_FUNDS"));
   it("maps other 422 to NOT_ELIGIBLE", () => expect(osErrorCode(422, "the wallet is not on this stage's allowlist")).toBe("NOT_ELIGIBLE"));
+  it("maps 429 to RATE_LIMIT", () => expect(osErrorCode(429, "slow down")).toBe("RATE_LIMIT"));
   it("keeps other statuses", () => expect(osErrorCode(500)).toBe("HTTP_500"));
 });
 

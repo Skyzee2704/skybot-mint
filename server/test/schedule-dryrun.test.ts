@@ -5,7 +5,7 @@
 // the stage start plus the user's offset. A negative number is before T0.
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { BUILD_CONCURRENCY, GAS_ESTIMATE_BUDGET_MS, NOT_ACTIVE_RETRY_MS } from "../src/core/mint/executor.js";
+import { BUILD_CONCURRENCY, GAS_ESTIMATE_BUDGET_MS, NOT_ACTIVE_RETRY_MS, OPENSEA_LEAD_MS } from "../src/core/mint/executor.js";
 
 const schedulerSrc = readFileSync(new URL("../src/jobs/scheduler.ts", import.meta.url), "utf8");
 const envSrc = readFileSync(new URL("../src/config/env.ts", import.meta.url), "utf8");
@@ -60,10 +60,10 @@ export interface DryRun {
 /**
  * Mirror of runJob + prepareAll.
  * Resolve and fees start when the function wakes. Nonces and local signing start at T−PRESIGN_LEAD_MS
- * (or when resolve finishes, if that is later). opensea_api holds the real build until T0, retries 409
- * every NOT_ACTIVE_RETRY_MS, and caps a late gas estimate at GAS_ESTIMATE_BUDGET_MS.
+ * (or when resolve finishes, if that is later). opensea_api starts the mint API at T0−OPENSEA_LEAD_MS,
+ * retries 409 every NOT_ACTIVE_RETRY_MS, and caps a late gas estimate at GAS_ESTIMATE_BUDGET_MS.
  * direct_contract is the same local path, for a proof or signature already in hand.
- * Broadcast is gated on waitUntil(T0) then beginBroadcast.
+ * beginBroadcast runs before T0, so it is not on the post-T0 send path. Kalos builds locally and does not use this API loop.
  */
 const LOCAL = new Set<DryRun["strategy"]>(["seadrop_public", "generic", "direct_contract"]);
 
@@ -75,9 +75,8 @@ export function dryRun(strategy: DryRun["strategy"], p: DryPhases): DryRun {
 
   const readyAt: number[] = [];
   if (!LOCAL.has(strategy)) {
-    // The mint build is held until T0, or until resolve finishes if that is already after T0.
-    // A 409 costs one round trip plus NOT_ACTIVE_RETRY_MS.
-    let attempt = Math.max(0, setupDone);
+    // The mint build starts OPENSEA_LEAD_MS before T0. A 409 costs one round trip plus NOT_ACTIVE_RETRY_MS.
+    let attempt = Math.max(-OPENSEA_LEAD_MS, setupDone);
     for (;;) {
       if (attempt >= p.openseaOpensAt) break;
       attempt += p.openseaRtt + NOT_ACTIVE_RETRY_MS;
@@ -98,7 +97,7 @@ export function dryRun(strategy: DryRun["strategy"], p: DryPhases): DryRun {
   }
 
   const firstReady = Math.min(...readyAt);
-  const gateDone = Math.max(0, firstReady) + p.dbClaim;
+  const gateDone = Math.max(0, firstReady);
   const wallets: DryWallet[] = readyAt.map((ready) => {
     const sendStart = Math.max(ready, gateDone);
     return { ready, sendStart, mempool: sendStart + p.broadcastRtt };
@@ -134,22 +133,23 @@ describe("scheduled mint dry run", () => {
   it("locks the lead and retry constants the model mirrors", () => {
     expect(PRESIGN_LEAD_MS).toBe(5000);
     expect(JOB_LEAD_MS).toBe(60_000);
-    expect(NOT_ACTIVE_RETRY_MS).toBe(300);
+    expect(NOT_ACTIVE_RETRY_MS).toBe(75);
+    expect(OPENSEA_LEAD_MS).toBe(150);
     expect(GAS_ESTIMATE_BUDGET_MS).toBe(400);
     expect(BUILD_CONCURRENCY).toBe(8);
-    expect(schedulerSrc).toContain('req.strategy === "opensea_api" ? { buildNotBefore: fireAt }');
+    expect(schedulerSrc).toContain("buildNotBefore: fireAt - OPENSEA_LEAD_MS");
     expect(schedulerSrc).toContain("await waitUntil(fireAt");
     expect(schedulerSrc).toContain("beginBroadcast");
   });
 
-  it("SeaDrop public: sign before T0, first send at T0 plus the DB claim, never earlier", () => {
+  it("SeaDrop public: sign before T0, first send at T0, never earlier", () => {
     const r = dryRun("seadrop_public", base);
     // Signing starts at T−5000 (resolve already finished at wake). One wave is 1+40+300 ms.
     expect(r.prepStart).toBe(-5000);
     expect(r.wallets[0]!.ready).toBe(-5000 + 341);
     expect(r.wallets.every((w) => w.ready < 0)).toBe(true);
-    expect(r.firstSend).toBe(25);
-    expect(r.firstMempool).toBe(65);
+    expect(r.firstSend).toBe(0);
+    expect(r.firstMempool).toBe(40);
     expect(r.lastSend).toBe(r.firstSend);
     expect(r.firstSend).toBeGreaterThanOrEqual(0);
   });
@@ -167,7 +167,7 @@ describe("scheduled mint dry run", () => {
     const r = dryRun("seadrop_public", { ...base, setup: 4500, privySign: 800 });
     expect(r.prepStart).toBe(-5000);
     expect(r.wallets[0]!.ready).toBeLessThan(0);
-    expect(r.firstSend).toBe(25);
+    expect(r.firstSend).toBe(0);
   });
 
   it("a resolve that runs past the presign point can still push signing past T0", () => {
@@ -175,30 +175,31 @@ describe("scheduled mint dry run", () => {
     // Wake at T−60s, resolve ends at T−800ms, then 1+40+800 ms of signing.
     expect(r.prepStart).toBe(-800);
     expect(r.wallets[0]!.ready).toBe(41);
-    expect(r.firstSend).toBe(66);
+    expect(r.firstSend).toBe(41);
   });
 
   it("direct contract with the proof or signature already in hand matches SeaDrop public and beats the API", () => {
     const direct = dryRun("direct_contract", base);
     const api = dryRun("opensea_api", base);
-    expect(direct.firstMempool).toBe(65);
+    expect(direct.firstMempool).toBe(40);
     expect(direct.wallets.every((w) => w.ready < 0)).toBe(true);
-    expect(api.firstMempool).toBe(525);
+    expect(api.firstMempool).toBe(545);
     expect(api.wallets.every((w) => w.ready > 0)).toBe(true);
-    expect(api.firstMempool - direct.firstMempool).toBe(460);
+    expect(api.firstMempool - direct.firstMempool).toBe(505);
   });
 
-  it("OpenSea: nothing is signed before T0; 409 retries add 300ms after each round trip", () => {
+  it("OpenSea: the successful signature is after T0; 409 retries add 75ms after each round trip", () => {
     const open = dryRun("opensea_api", { ...base, wallets: 1 });
-    expect(open.wallets[0]!.ready).toBe(0 + 120 + Math.min(40, 400) + 300);
-    expect(open.firstSend).toBe(460 + 25);
-    expect(open.firstMempool).toBe(525);
+    // First try at T−150 returns before the stage opens, then the next try is after T0.
+    expect(open.wallets[0]!.ready).toBe(45 + 120 + Math.min(40, 400) + 300);
+    expect(open.firstSend).toBe(505);
+    expect(open.firstMempool).toBe(545);
     expect(open.firstSend).toBeGreaterThan(0);
 
-    // API still 409 at T0 (opens at +250). Attempt at 0 costs 120ms, then sleep 300, attempt at 420 succeeds.
+    // API still 409 at T0 (opens at +250). Attempts walk forward by RTT + 75ms.
     const late = dryRun("opensea_api", { ...base, wallets: 1, openseaOpensAt: 250 });
-    expect(late.wallets[0]!.ready).toBe(420 + 120 + 40 + 300);
-    expect(late.firstSend).toBe(880 + 25);
+    expect(late.wallets[0]!.ready).toBe(435 + 120 + 40 + 300);
+    expect(late.firstSend).toBe(895);
   });
 
   it("16 SeaDrop wallets: two waves, both still inside the presign window at these speeds", () => {
@@ -206,14 +207,14 @@ describe("scheduled mint dry run", () => {
     expect(r.wallets[0]!.ready).toBe(r.wallets[7]!.ready);
     expect(r.wallets[8]!.ready).toBe(r.wallets[0]!.ready + 341);
     expect(r.wallets[15]!.ready).toBeLessThan(0);
-    expect(r.firstSend).toBe(25);
-    expect(r.lastSend).toBe(25);
+    expect(r.firstSend).toBe(0);
+    expect(r.lastSend).toBe(0);
   });
 
   it("QStash on time absorbs a 2s cold start; a wake inside the last 5s does not", () => {
     const warm = dryRun("seadrop_public", { ...base, coldStart: 2000 });
     expect(warm.prepStart).toBe(-5000);
-    expect(warm.firstSend).toBe(25);
+    expect(warm.firstSend).toBe(0);
 
     // Delivered 58s late: function starts at T−2000, prep begins immediately, signing may miss T0.
     const lateWake = dryRun("seadrop_public", { ...base, qstashLate: 58_000, coldStart: 0, setup: 1500, privySign: 800 });

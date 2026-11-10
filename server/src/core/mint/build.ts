@@ -18,11 +18,13 @@ import { BuiltTx, MintRequest } from "./types.js";
 /** Map official mint-API errors. 422 is also returned for an unfunded minter, which says nothing about allowlist status. */
 export function osErrorCode(status: number, message = ""): string {
   if (status === 409) return "NOT_ACTIVE";
+  if (status === 429) return "RATE_LIMIT";
   if (status === 422) return /insufficient (balance|funds)/i.test(message) ? "INSUFFICIENT_FUNDS" : "NOT_ELIGIBLE";
   return `HTTP_${status}`;
 }
 export class MintBuildError extends Error {
   statusCode = 422;
+  retryAfterMs?: number;
   constructor(
     m: string,
     public code = "BUILD",
@@ -93,7 +95,9 @@ export async function buildMintTx(
       } catch (e: any) {
         if (e instanceof OpenSeaHttpError) {
           const code = osErrorCode(e.status, e.message);
-          throw new MintBuildError(`OpenSea: ${e.message || e.status}`, code);
+          const err = new MintBuildError(`OpenSea: ${e.message || e.status}`, code);
+          if (e.retryAfterMs) err.retryAfterMs = e.retryAfterMs;
+          throw err;
         }
         if (call.mintTimeoutMs && /abort|timeout/i.test(`${e?.name ?? ""} ${e?.message ?? e}`))
           throw new MintBuildError("OpenSea mint timed out", "RETRY");
