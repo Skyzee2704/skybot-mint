@@ -48,7 +48,6 @@ export default function WalletsPage() {
   const pageWallets = filteredWallets.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
   const removedList = list.removedWallets as any[];
   const [removal, setRemoval] = useState<{ w: any; chk: any | null; loading: boolean } | null>(null);
-  const [exportingId, setExportingId] = useState<string | null>(null);
   const load = list.reload;
   const [err, setErr] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
@@ -358,30 +357,24 @@ export default function WalletsPage() {
                   <button
                     className="ghost"
                     disabled={
-                      busy ||
-                      exportingId === w.id ||
-                      !authenticated ||
-                      !(privyWallets ?? []).some((x: any) => x.address?.toLowerCase() === w.address.toLowerCase())
+                      busy || !authenticated || !(privyWallets ?? []).some((x: any) => x.address?.toLowerCase() === w.address.toLowerCase())
                     }
                     title={
                       authenticated && (privyWallets ?? []).some((x: any) => x.address?.toLowerCase() === w.address.toLowerCase())
                         ? ""
                         : t("Connect with Privy in this browser to export")
                     }
-                    onClick={async () => {
+                    onClick={() => {
                       setErr(null);
-                      setExportingId(w.id);
-                      try {
-                        // Opens Privy's own export window; SkyBOT never sees the key.
-                        await exportWallet({ address: w.address });
-                      } catch (e: any) {
+                      // Fire-and-forget: Privy's export promise may never settle when the
+                      // user dismisses its popup, so no "Exporting…" state — the button
+                      // stays "Export" and can be tapped again. SkyBOT never sees the key.
+                      exportWallet({ address: w.address }).catch((e: any) => {
                         setErr(e?.message ?? t("Export failed"));
-                      } finally {
-                        setExportingId(null);
-                      }
+                      });
                     }}
                   >
-                    {exportingId === w.id ? t("Exporting…") : t("Export")}
+                    {t("Export")}
                   </button>
                   <button className="danger" disabled={busy} onClick={() => startRemoval(w)}>
                     {t("Remove")}

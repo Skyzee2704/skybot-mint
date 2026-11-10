@@ -120,7 +120,6 @@ const ID_STRINGS: Record<string, string> = {
     "Hubungkan dengan Privy di browser untuk mengekspor, atau gunakan home.privy.io.",
   "Export failed": "Ekspor gagal",
   Export: "Ekspor",
-  "Exporting…": "Mengekspor…",
   "New Main wallet": "Dompet utama baru",
   "I understand funds and NFTs left in this wallet will no longer be accessible from SkyBOT.":
     "Saya mengerti dana dan NFT yang tersisa di dompet ini tidak akan bisa lagi diakses dari SkyBOT.",
