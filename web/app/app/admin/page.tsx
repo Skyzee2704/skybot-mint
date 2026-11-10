@@ -7,7 +7,7 @@ import { formatDateTime } from "@/lib/time";
 
 export default function AdminPage() {
   const api = useApi();
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const [users, setUsers] = useState<any[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [keys, setKeys] = useState<any[] | null>(null);
@@ -71,7 +71,7 @@ export default function AdminPage() {
               <td>{u.walletCount}</td>
               <td>{u.jobCount}</td>
               <td>{u.telegramLinked ? `@${u.telegramUsername || t("linked")}` : "—"}</td>
-              <td className="muted">{u.lastSeenAt ? formatDateTime(u.lastSeenAt) : "—"}</td>
+              <td className="muted">{u.lastSeenAt ? formatDateTime(u.lastSeenAt, { locale: lang }) : "—"}</td>
               <td>
                 {u.role !== "admin" && (
                   <button

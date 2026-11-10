@@ -29,14 +29,14 @@ const ISO_RE = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z/g;
 
 export default function JobsPage() {
   const api = useApi();
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const [jobs, setJobs] = useState<any[]>([]);
   const [open, setOpen] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [tz, setTz] = useState<string | undefined>(undefined);
   useEffect(() => setTz(localTimeZone()), []);
   const now = useNow(1000);
-  const fmt = (w: string) => formatDateTime(w, { timeZone: tz, now });
+  const fmt = (w: string) => formatDateTime(w, { timeZone: tz, now, locale: lang });
   const load = () =>
     api("/api/jobs")
       .then((r) => setJobs(r.jobs))
@@ -170,7 +170,9 @@ export default function JobsPage() {
                       </tbody>
                     </table>
                     <pre className="mono muted" style={{ whiteSpace: "pre-wrap" }}>
-                      {(j.log || []).map((l: string) => l.replace(ISO_RE, (m) => formatShort(m, { timeZone: tz }))).join("\n")}
+                      {(j.log || [])
+                        .map((l: string) => l.replace(ISO_RE, (m) => formatShort(m, { timeZone: tz, locale: lang })))
+                        .join("\n")}
                     </pre>
                   </td>
                 </tr>

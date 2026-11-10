@@ -31,7 +31,7 @@ const STRAT = STRATEGY_LABELS as Record<Strategy, string>;
 export default function MintPage() {
   const api = useApi();
   // `tr` (not `t`): this page already uses `t` for the resolved drop.
-  const { t: tr } = useLang();
+  const { t: tr, lang } = useLang();
   const { userId, tgOnly, connectPrivy } = useShell();
   const { authenticated } = usePrivy();
   const { signMessage } = useSignMessage();
@@ -70,7 +70,7 @@ export default function MintPage() {
   const [tz, setTz] = useState<string | null>(null);
   useEffect(() => setTz(localTimeZone()), []);
   const fmt = (when: string | number | Date | null | undefined, relative = true) =>
-    when ? formatDateTime(when, { timeZone: tz ?? undefined, relative, now }) : "";
+    when ? formatDateTime(when, { timeZone: tz ?? undefined, relative, now, locale: lang }) : "";
 
   const doResolve = async (inp = input, ch = chain) => {
     if (!inp.trim()) return;
@@ -365,7 +365,7 @@ export default function MintPage() {
               <tbody>
                 {t.stages.map((s: any, i: number) => (
                   <tr key={i}>
-                    <td>{s.name}</td>
+                    <td>{tr(s.name)}</td>
                     <td className="hide-sm">{STAGE_TYPE[s.type] ? tr(STAGE_TYPE[s.type]) : s.type}</td>
                     <td>{priceLabel(s)}</td>
                     <td className="hide-sm">{s.maxPerWallet ?? "—"}</td>
@@ -398,7 +398,7 @@ export default function MintPage() {
           )}
           {t.warnings?.map((w: string) => (
             <div key={w} className="notice">
-              {w}
+              {tr(w)}
             </div>
           ))}
         </div>
@@ -517,7 +517,7 @@ export default function MintPage() {
           )}
           {elig.notes?.map((n: string) => (
             <div key={n} className="notice">
-              {n}
+              {tr(n)}
             </div>
           ))}
           {rows.some((r: any) => r.needsOpenSeaLogin) && tgOnly && !authenticated && (

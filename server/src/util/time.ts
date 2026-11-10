@@ -74,11 +74,17 @@ export function formatDuration(ms: number): string {
     .join(" ");
 }
 
-/** "in 23h 20m", "5m ago", "now" (within 30 s). */
-export function formatRelative(when: TimeInput, now: TimeInput = Date.now()): string {
+/** "in 23h 20m", "5m ago", "now" (within 30 s). Locale "id" gives "dalam 23j 20m", "5 mnt lalu", "sekarang". */
+export function formatRelative(when: TimeInput, now: TimeInput = Date.now(), locale: "en" | "id" = "en"): string {
   const diff = toDate(when).getTime() - toDate(now).getTime();
-  if (Math.abs(diff) < 30_000) return "now";
-  return diff > 0 ? `in ${formatDuration(diff)}` : `${formatDuration(diff)} ago`;
+  if (Math.abs(diff) < 30_000) return locale === "id" ? "sekarang" : "now";
+  return diff > 0
+    ? locale === "id"
+      ? `dalam ${formatDuration(diff)}`
+      : `in ${formatDuration(diff)}`
+    : locale === "id"
+      ? `${formatDuration(diff)} lalu`
+      : `${formatDuration(diff)} ago`;
 }
 
 export interface FormatOptions {
@@ -91,19 +97,22 @@ export interface FormatOptions {
   /** Show the offset label. Default true. */
   offset?: boolean;
   now?: TimeInput;
+  /** Weekday/month names + relative words. "id" uses id-ID ("Sel, 10 Nov 2026 · dalam 4 h"). Default "en". */
+  locale?: "en" | "id";
 }
 
 /** "Thu, 22 Oct 2026 · 21:00 (UTC+7) · in 23h 20m" */
 export function formatDateTime(when: TimeInput, opts: FormatOptions = {}): string {
   const d = toDate(when);
-  if (Number.isNaN(d.getTime())) return "unknown time";
+  if (Number.isNaN(d.getTime())) return opts.locale === "id" ? "waktu tidak diketahui" : "unknown time";
   const timeZone = isValidTimeZone(opts.timeZone ?? undefined)
     ? (opts.timeZone as string)
     : opts.timeZone === undefined
       ? localTimeZone()
       : "UTC";
+  const intlLocale = opts.locale === "id" ? "id-ID" : "en-GB";
   const parts = Object.fromEntries(
-    new Intl.DateTimeFormat("en-GB", {
+    new Intl.DateTimeFormat(intlLocale, {
       timeZone,
       weekday: "short",
       day: "numeric",
@@ -116,11 +125,11 @@ export function formatDateTime(when: TimeInput, opts: FormatOptions = {}): strin
       .formatToParts(d)
       .map((p) => [p.type, p.value]),
   ) as Record<string, string>;
-  const nowYear = new Intl.DateTimeFormat("en-GB", { timeZone, year: "numeric" }).format(toDate(opts.now ?? Date.now()));
+  const nowYear = new Intl.DateTimeFormat(intlLocale, { timeZone, year: "numeric" }).format(toDate(opts.now ?? Date.now()));
   const year = opts.compactYear && parts.year === nowYear ? "" : ` ${parts.year}`;
   let out = `${parts.weekday}, ${parts.day} ${parts.month}${year} · ${parts.hour}:${parts.minute}`;
   if (opts.offset !== false) out += ` (${offsetLabel(d, timeZone)})`;
-  if (opts.relative !== false) out += ` · ${formatRelative(d, opts.now)}`;
+  if (opts.relative !== false) out += ` · ${formatRelative(d, opts.now, opts.locale)}`;
   return out;
 }
 

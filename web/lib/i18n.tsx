@@ -158,6 +158,33 @@ const ID_STRINGS: Record<string, string> = {
   "balance unavailable": "saldo tidak tersedia",
 
   // Mint page
+  // Known server warnings/notes (resolve + eligibility): rendered through t(), so they translate.
+  "Sold out (remaining supply is 0).": "Habis terjual (sisa pasokan 0).",
+  "Sold out (or not enough supply left for this quantity).": "Habis terjual (atau sisa pasokan tidak cukup untuk jumlah ini).",
+  "Public stage has ended.": "Tahap publik sudah berakhir.",
+  "Mint price getter not found — enter the price manually; simulation will confirm.":
+    "Harga mint tidak ditemukan — masukkan harga secara manual; simulasi akan mengonfirmasi.",
+  "Drop restricts fee recipients and none are allowed — public mint cannot be built.":
+    "Drop membatasi penerima fee dan tidak ada yang diizinkan — mint publik tidak bisa dibuat.",
+  "ERC-1155 SeaDrop drops are not supported by OpenSea's mint API; only on-chain public stage can be attempted.":
+    "Drop ERC-1155 SeaDrop tidak didukung API mint OpenSea; hanya tahap publik on-chain yang bisa dicoba.",
+  "Kalos lists this drop, but the contract allows the OpenSea SeaDrop, so stages come from OpenSea.":
+    "Kalos mencatat drop ini, tapi kontrak mengizinkan OpenSea SeaDrop, jadi tahap diambil dari OpenSea.",
+  "The contract allows both SeaDrops. Using Kalos because the link is a Kalos drop.":
+    "Kontrak mengizinkan kedua SeaDrop. Memakai Kalos karena tautannya adalah drop Kalos.",
+  "The contract allows both SeaDrops. Using OpenSea because the link is not a Kalos drop.":
+    "Kontrak mengizinkan kedua SeaDrop. Memakai OpenSea karena tautannya bukan drop Kalos.",
+  "The contract's SeaDrop list does not include Kalos or OpenSea. Using the Kalos drop record.":
+    "Daftar SeaDrop kontrak tidak mencakup Kalos atau OpenSea. Memakai catatan drop Kalos.",
+  "Destination is a smart contract. Make sure it can receive native tokens (exchanges and multisigs may not).":
+    "Tujuan adalah smart contract. Pastikan bisa menerima token native (bursa dan multisig mungkin tidak bisa).",
+  "You have not sent NFTs to this address before. Double-check every character.":
+    "Anda belum pernah mengirim NFT ke alamat ini. Periksa lagi setiap karakternya.",
+  "You have not withdrawn to this address before. Double-check every character.":
+    "Anda belum pernah menarik ke alamat ini. Periksa lagi setiap karakternya.",
+  // Known stage names from the drop APIs (proper names stay as-is; only the description translates)
+  "GTD (Guaranteed)": "GTD (Terjamin)",
+  "FCFS (First Come, First Served)": "FCFS (Siapa Cepat, Dia Dapat)",
   "Resolving…": "Menyelesaikan…",
   "Checking wallets…": "Memeriksa dompet…",
   "Simulating…": "Mensimulasikan…",

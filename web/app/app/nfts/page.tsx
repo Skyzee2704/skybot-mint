@@ -60,7 +60,7 @@ function withSelector(text: string) {
 
 export default function NftsPage() {
   const api = useApi();
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const { tgOnly, connectPrivy } = useShell();
   const { authenticated } = usePrivy();
   const { signTransaction } = useSignTransaction();
@@ -353,7 +353,7 @@ export default function NftsPage() {
   const scanErrors = (view?.scans ?? []).filter((s) => s.error);
   const truncated = (view?.scans ?? []).filter((s) => s.truncated);
   const ready = quote?.items?.filter((i: any) => i.tx) ?? [];
-  const fmt = (w: string) => formatDateTime(w, { timeZone: tz, now });
+  const fmt = (w: string) => formatDateTime(w, { timeZone: tz, now, locale: lang });
 
   return (
     <>
