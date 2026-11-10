@@ -30,10 +30,23 @@ type HeldToken = {
   balance: string;
   source: string;
 };
+type HeldNft = {
+  chainId: number;
+  chainName: string;
+  contract: string;
+  tokenId: string;
+  standard: "erc721" | "erc1155";
+  balance: string | null;
+  collection: string | null;
+  name: string | null;
+  image: string | null;
+};
 type Lookup = {
   address: string;
   native: NativeRow[];
   tokens: HeldToken[];
+  nfts?: HeldNft[];
+  nftDiscovery?: { note: string; errors: string[]; truncated: boolean };
   zeroReads: { chainId: number; address: string; symbol: string | null; decimals: number | null }[];
   discovery: { provider: string | null; configured: boolean; note: string; errors: string[] };
 };
@@ -43,6 +56,9 @@ type Sent = {
   from?: string;
   to?: string;
   token?: string;
+  contract?: string;
+  tokenId?: string;
+  standard?: string;
   amount?: string;
   amountRaw?: string;
   symbol?: string | null;
@@ -70,12 +86,16 @@ async function postJson(url: string, token: string, body: unknown): Promise<{ ok
 export function TestSendForm({ wallets, chains }: { wallets: string[]; chains: TestSendChainOption[] }) {
   const [walletId, setWalletId] = useState(wallets[0] ?? "");
   const [chainId, setChainId] = useState(String(chains.find((c) => c.chainId === 1)?.chainId ?? chains[0]?.chainId ?? ""));
-  const [mode, setMode] = useState<"native" | "erc20">("native");
+  const [mode, setMode] = useState<"native" | "erc20" | "nft">("native");
   const [amount, setAmount] = useState("");
   const [destination, setDestination] = useState(DEFAULT_DESTINATION);
   const [token, setToken] = useState("");
   const [erc20Token, setErc20Token] = useState("");
   const [paste, setPaste] = useState("");
+  const [nftContract, setNftContract] = useState("");
+  const [nftTokenId, setNftTokenId] = useState("");
+  const [nftStandard, setNftStandard] = useState<"auto" | "erc721" | "erc1155">("auto");
+  const [nftAmount, setNftAmount] = useState("1");
   const [busy, setBusy] = useState(false);
   const [lookup, setLookup] = useState<Lookup | null>(null);
   const [sent, setSent] = useState<Sent | null>(null);
@@ -107,19 +127,34 @@ export function TestSendForm({ wallets, chains }: { wallets: string[]; chains: T
     setErc20Token(row.address);
   }
 
+  function selectNft(row: HeldNft) {
+    setMode("nft");
+    setChainId(String(row.chainId));
+    setNftContract(row.contract);
+    setNftTokenId(row.tokenId);
+    setNftStandard(row.standard);
+    if (row.balance) setNftAmount(row.balance);
+  }
+
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
     setSent(null);
     setErrorText(null);
     try {
-      const erc20 = mode === "erc20";
-      const res = await postJson(erc20 ? "/api/test/server-sign-native-send/erc20" : "/api/test/server-sign-native-send", token, {
+      const url =
+        mode === "erc20"
+          ? "/api/test/server-sign-native-send/erc20"
+          : mode === "nft"
+            ? "/api/test/server-sign-native-send/nft"
+            : "/api/test/server-sign-native-send";
+      const res = await postJson(url, token, {
         walletId,
         chainId: Number(chainId),
-        amount,
+        amount: mode === "nft" ? nftAmount : amount,
         destination,
-        ...(erc20 ? { token: erc20Token.trim() } : {}),
+        ...(mode === "erc20" ? { token: erc20Token.trim() } : {}),
+        ...(mode === "nft" ? { contract: nftContract.trim(), tokenId: nftTokenId.trim(), standard: nftStandard } : {}),
       });
       if (res.ok && res.json && typeof res.json.txHash === "string" && typeof res.json.explorer === "string") {
         setSent(res.json as Sent);
@@ -191,6 +226,9 @@ export function TestSendForm({ wallets, chains }: { wallets: string[]; chains: T
           <label>
             <input type="radio" name="mode" checked={mode === "erc20"} onChange={() => setMode("erc20")} /> ERC-20
           </label>
+          <label>
+            <input type="radio" name="mode" checked={mode === "nft"} onChange={() => setMode("nft")} /> NFT
+          </label>
         </div>
 
         {mode === "erc20" && (
@@ -238,19 +276,83 @@ export function TestSendForm({ wallets, chains }: { wallets: string[]; chains: T
           </>
         )}
 
-        <label htmlFor="test-send-amount" style={{ display: "block", marginTop: 14 }}>
-          <b>Amount{mode === "native" && chain ? ` (${chain.nativeSymbol})` : ""}</b>
-        </label>
-        <input
-          id="test-send-amount"
-          inputMode="decimal"
-          autoComplete="off"
-          spellCheck={false}
-          placeholder="0.0005"
-          value={amount}
-          onChange={(ev) => setAmount(ev.target.value)}
-          style={{ marginTop: 8 }}
-        />
+        {mode === "nft" && (
+          <>
+            <label htmlFor="test-send-nft" style={{ display: "block", marginTop: 14 }}>
+              <b>NFT contract</b>
+            </label>
+            <input
+              id="test-send-nft"
+              className="mono"
+              autoComplete="off"
+              spellCheck={false}
+              placeholder="0x… or pick a held NFT below"
+              value={nftContract}
+              onChange={(ev) => setNftContract(ev.target.value)}
+              style={{ marginTop: 8 }}
+            />
+            <label htmlFor="test-send-token-id" style={{ display: "block", marginTop: 14 }}>
+              <b>Token id</b>
+            </label>
+            <input
+              id="test-send-token-id"
+              className="mono"
+              autoComplete="off"
+              spellCheck={false}
+              value={nftTokenId}
+              onChange={(ev) => setNftTokenId(ev.target.value)}
+              style={{ marginTop: 8 }}
+            />
+            <label htmlFor="test-send-standard" style={{ display: "block", marginTop: 14 }}>
+              <b>Standard</b>
+            </label>
+            <select
+              id="test-send-standard"
+              value={nftStandard}
+              onChange={(ev) => setNftStandard(ev.target.value as typeof nftStandard)}
+              style={{ marginTop: 8 }}
+            >
+              <option value="auto">Auto (ERC-165)</option>
+              <option value="erc721">ERC-721</option>
+              <option value="erc1155">ERC-1155</option>
+            </select>
+            {(nftStandard === "erc1155" || nftStandard === "auto") && (
+              <>
+                <label htmlFor="test-send-nft-amount" style={{ display: "block", marginTop: 14 }}>
+                  <b>Amount (ERC-1155)</b>
+                </label>
+                <input
+                  id="test-send-nft-amount"
+                  inputMode="numeric"
+                  autoComplete="off"
+                  spellCheck={false}
+                  value={nftAmount}
+                  onChange={(ev) => setNftAmount(ev.target.value)}
+                  style={{ marginTop: 8 }}
+                />
+              </>
+            )}
+            <p className="muted">Chains without an Alchemy NFT slug, including Ink, need a contract and token id.</p>
+          </>
+        )}
+
+        {mode !== "nft" && (
+          <>
+            <label htmlFor="test-send-amount" style={{ display: "block", marginTop: 14 }}>
+              <b>Amount{mode === "native" && chain ? ` (${chain.nativeSymbol})` : ""}</b>
+            </label>
+            <input
+              id="test-send-amount"
+              inputMode="decimal"
+              autoComplete="off"
+              spellCheck={false}
+              placeholder="0.0005"
+              value={amount}
+              onChange={(ev) => setAmount(ev.target.value)}
+              style={{ marginTop: 8 }}
+            />
+          </>
+        )}
 
         <label htmlFor="test-send-dest" style={{ display: "block", marginTop: 14 }}>
           <b>Destination</b>
@@ -266,7 +368,7 @@ export function TestSendForm({ wallets, chains }: { wallets: string[]; chains: T
         />
         <div className="row" style={{ marginTop: 14 }}>
           <button className="btn" type="submit" disabled={busy || !wallets.length || !chains.length}>
-            {busy ? "Working…" : mode === "erc20" ? "Send ERC-20" : "Send native"}
+            {busy ? "Working…" : mode === "erc20" ? "Send ERC-20" : mode === "nft" ? "Send NFT" : "Send native"}
           </button>
         </div>
       </form>
@@ -340,6 +442,54 @@ export function TestSendForm({ wallets, chains }: { wallets: string[]; chains: T
               </table>
             </div>
           )}
+          <h2>NFTs held</h2>
+          {lookup.nftDiscovery?.note && <p className="muted">{lookup.nftDiscovery.note}</p>}
+          {lookup.nftDiscovery?.truncated && <p className="warn">The NFT list was truncated.</p>}
+          {(lookup.nftDiscovery?.errors ?? []).map((err) => (
+            <p key={err} className="warn">
+              {err}
+            </p>
+          ))}
+          {(lookup.nfts ?? []).length === 0 ? (
+            <p className="muted">No held NFTs were returned. Enter a contract and token id in the NFT section.</p>
+          ) : (
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                <thead>
+                  <tr>
+                    <th align="left" />
+                    <th align="left">Collection</th>
+                    <th align="left">Chain</th>
+                    <th align="left">Standard</th>
+                    <th align="left">Token id</th>
+                    <th align="left">Balance</th>
+                    <th align="left">Contract</th>
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {(lookup.nfts ?? []).map((row) => (
+                    <tr key={`${row.chainId}:${row.contract}:${row.tokenId}`}>
+                      <td>{row.image ? <img src={row.image} alt="" width={40} height={40} style={{ objectFit: "cover" }} /> : null}</td>
+                      <td>{row.collection ?? row.name ?? "—"}</td>
+                      <td>
+                        {row.chainName} · {row.chainId}
+                      </td>
+                      <td>{row.standard === "erc1155" ? "ERC-1155" : "ERC-721"}</td>
+                      <td className="mono">{row.tokenId}</td>
+                      <td>{row.balance ?? "1"}</td>
+                      <td className="mono">{row.contract}</td>
+                      <td>
+                        <button className="btn ghost" type="button" onClick={() => selectNft(row)}>
+                          Use
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
           {lookup.zeroReads.length > 0 && (
             <p className="muted">
               Pasted contracts with a zero balance: {lookup.zeroReads.map((z) => `${z.symbol ?? z.address} on ${z.chainId}`).join(", ")}
@@ -354,6 +504,12 @@ export function TestSendForm({ wallets, chains }: { wallets: string[]; chains: T
           {sent.from && (
             <p>
               From <span className="mono">{sent.from}</span>
+            </p>
+          )}
+          {sent.contract && (
+            <p>
+              NFT <span className="mono">{sent.contract}</span> #{sent.tokenId}
+              {sent.amount ? ` · amount ${sent.amount}` : ""} ({sent.standard})
             </p>
           )}
           {sent.token && (

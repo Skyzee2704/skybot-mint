@@ -7,7 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
-- **Draft test, do not merge.** `/test/server-sign-native-send` shows native balances and non-zero ERC-20s for an allowlisted wallet, and can send a native transfer or an ERC-20 `transfer` signed with `PRIVY_SIWE_AUTH_PRIVATE_KEY`. Token discovery uses the existing Alchemy key (`ALCHEMY_API_KEY`, or a key inside an Alchemy RPC URL); a pasted contract is read over RPC. There is no amount cap. Disabled unless `TEST_SEND_TOKEN` is set. The production selector denylist is unchanged.
+- **Draft test, do not merge.** `/test/server-sign-native-send` shows native balances, non-zero ERC-20s, and held NFTs for an allowlisted wallet, and can send a native transfer, an ERC-20 `transfer`, or an NFT `safeTransferFrom` signed with `PRIVY_SIWE_AUTH_PRIVATE_KEY`. NFT discovery uses Alchemy `getNFTsForOwner` on the chains the indexer already maps; other chains, including Ink, take a contract and token id. There is no amount cap. Disabled unless `TEST_SEND_TOKEN` is set. The production selector denylist is unchanged.
 
 - **$SKYBOT contract address** on the public landing page: the token contract, with a copy button and a link to its Volta.family token page. The copy button works in the browser and the Telegram Mini App.
 

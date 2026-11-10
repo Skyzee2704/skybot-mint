@@ -17,6 +17,7 @@ import { getPool } from "../core/rpc/pool.js";
 import { describeTxError } from "../core/tx/revert.js";
 import { parseAmount, validateDestination } from "../core/withdraw.js";
 import { redactString } from "../util/log.js";
+import { discoverTestNfts, type HeldNft } from "./nft.js";
 import {
   assertTestSendRpc,
   assertTestSendToken,
@@ -64,6 +65,8 @@ export interface TestLookupResult {
   address: string;
   native: NativeBalanceRow[];
   tokens: HeldToken[];
+  nfts: HeldNft[];
+  nftDiscovery: { note: string; errors: string[]; truncated: boolean };
   zeroReads: { chainId: number; address: string; symbol: string | null; decimals: number | null }[];
   discovery: { provider: "alchemy" | null; configured: boolean; note: string; errors: string[] };
 }
@@ -354,10 +357,22 @@ export async function runTestLookup(
     ? "Non-zero ERC-20 balances come from Alchemy (the same ALCHEMY_API_KEY / Alchemy RPC key the NFT indexer uses). A pasted contract is read with balanceOf, symbol, and decimals on the chain RPC."
     : "Token discovery needs ALCHEMY_API_KEY, or an Alchemy RPC URL (RPC_<CHAIN>=https://….g.alchemy.com/v2/<key>) like the NFT indexer. Paste a token contract to read its balance, symbol, and decimals over RPC.";
 
+  let nfts: HeldNft[] = [];
+  let nftDiscovery: TestLookupResult["nftDiscovery"] = { note: "", errors: [], truncated: false };
+  try {
+    const found = await discoverTestNfts(address);
+    nfts = found.nfts;
+    nftDiscovery = { note: found.note, errors: found.errors, truncated: found.truncated };
+  } catch (e: any) {
+    nftDiscovery = { note: "NFT discovery failed.", errors: [redactString(String(e?.message ?? e)).slice(0, 200)], truncated: false };
+  }
+
   return {
     address,
     native,
     tokens: tokens.slice(0, TOKEN_CAP),
+    nfts,
+    nftDiscovery,
     zeroReads,
     discovery: { provider: key ? "alchemy" : null, configured: Boolean(key), note, errors },
   };

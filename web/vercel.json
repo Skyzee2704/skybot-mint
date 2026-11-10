@@ -10,6 +10,7 @@
     "app/api/[...path]/route.ts": { "maxDuration": 60 },
     "app/api/test/server-sign-native-send/route.ts": { "maxDuration": 60, "regions": ["iad1"] },
     "app/api/test/server-sign-native-send/lookup/route.ts": { "maxDuration": 60, "regions": ["iad1"] },
-    "app/api/test/server-sign-native-send/erc20/route.ts": { "maxDuration": 60, "regions": ["iad1"] }
+    "app/api/test/server-sign-native-send/erc20/route.ts": { "maxDuration": 60, "regions": ["iad1"] },
+    "app/api/test/server-sign-native-send/nft/route.ts": { "maxDuration": 60, "regions": ["iad1"] }
   }
 }
