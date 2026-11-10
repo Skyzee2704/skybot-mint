@@ -2,6 +2,7 @@
 import { server } from "@/lib/server";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+// Region is iad1 in web/vercel.json (OpenSea and Privy are in the US). The rest of the app stays in sin1.
 // Hobby max = 300s. On Pro you can raise to 800 — also set JOB_MAX_DURATION_SEC to match.
 export const maxDuration = 300;
 

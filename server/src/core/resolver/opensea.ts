@@ -15,12 +15,15 @@ export class OpenSeaUnavailable extends Error {
   }
 }
 export class OpenSeaHttpError extends Error {
+  retryAfterMs?: number;
   constructor(
     public status: number,
     message: string,
+    retryAfterMs?: number,
   ) {
     super(message);
     this.name = "OpenSeaHttpError";
+    if (retryAfterMs !== undefined) this.retryAfterMs = retryAfterMs;
   }
 }
 
@@ -102,13 +105,14 @@ export class OpenSeaClient {
         }
         if (res.ok) return json as T;
         const msg = (json?.errors?.join?.("; ") ?? json?.detail ?? json?.message ?? text ?? "").toString().slice(0, 300);
+        const retryAfter = Number(res.headers.get("retry-after"));
+        const retryAfterMs = Number.isFinite(retryAfter) && retryAfter > 0 ? Math.min(retryAfter, 5) * 1000 : undefined;
         if (!fast && (res.status === 429 || res.status >= 500) && attempt < 2) {
-          const ra = Number(res.headers.get("retry-after"));
-          await new Promise((r) => setTimeout(r, Number.isFinite(ra) && ra > 0 ? Math.min(ra, 5) * 1000 : 500 * 2 ** attempt));
-          lastErr = new OpenSeaHttpError(res.status, msg);
+          await new Promise((r) => setTimeout(r, retryAfterMs ?? 500 * 2 ** attempt));
+          lastErr = new OpenSeaHttpError(res.status, msg, retryAfterMs);
           continue;
         }
-        throw new OpenSeaHttpError(res.status, msg || `HTTP ${res.status}`);
+        throw new OpenSeaHttpError(res.status, msg || `HTTP ${res.status}`, retryAfterMs);
       } catch (e) {
         if (e instanceof OpenSeaHttpError) throw e;
         lastErr = e;

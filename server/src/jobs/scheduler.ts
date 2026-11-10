@@ -34,11 +34,13 @@ import {
   trackReceipts,
   waitUntil,
   warmMint,
+  OPENSEA_LEAD_MS,
   type Prepared,
   type WalletResult,
 } from "../core/mint/executor.js";
+import { installKeepAlive, warmSockets, WARM_HOSTS } from "../util/keepalive.js";
 import { notifyJobDone } from "../bot/notify.js";
-import { getChain } from "../config/chains.js";
+import { getChain, rpcsForChain } from "../config/chains.js";
 import { log } from "../util/log.js";
 
 const PRESIGN_LEAD_MS = 5000;
@@ -176,6 +178,7 @@ export async function runJob(id: string, budgetMs = env.jobMaxDurationSec * 1000
 
   const job = await claimJob(id);
   if (!job) return { status: "skipped", reason: "already claimed" };
+  installKeepAlive();
   const req = job.request as MintRequest & { gasHints: Record<string, string> };
   try {
     // Cancelled between the claim and here: stop before any signing.
@@ -209,6 +212,15 @@ export async function runJob(id: string, budgetMs = env.jobMaxDurationSec * 1000
         await appendJobLog(id, `warm-up failed, will retry at presign: ${String(e?.message ?? e).slice(0, 160)}`).catch(() => {});
       }
     }
+    const socketWarmAt = fireAt - 8_000;
+    if (Date.now() < socketWarmAt) {
+      await waitUntil(socketWarmAt, async () => (await jobStatus(id)) === "cancelled");
+    }
+    {
+      const chain = getChain(req.chain);
+      const rpcs = chain ? rpcsForChain(chain).send : [];
+      await warmSockets([...WARM_HOSTS, ...rpcs]).catch(() => {});
+    }
     const presignAt = fireAt - PRESIGN_LEAD_MS;
     // Pre-sign wait: re-check for a cancel about once a second.
     let lastCheck = Date.now();
@@ -219,13 +231,33 @@ export async function runJob(id: string, budgetMs = env.jobMaxDurationSec * 1000
         if ((await jobStatus(id)) === "cancelled") throw new JobCancelledError();
       }
     }
-    // Broadcast gate (once per job): exact start, then atomically claim the right to broadcast. Lost → cancelled.
+    // Claim the broadcast a moment before T0 so the send itself does not wait on Neon.
+    // Mint Now (already at or past the start) claims inside the gate, after signing, so a cancel
+    // during signing still wins. A future stage claims in parallel with the last part of signing.
+    const claimAt = fireAt - Math.max(OPENSEA_LEAD_MS, 200);
+    const claimP =
+      Date.now() < claimAt
+        ? (async () => {
+            try {
+              await waitUntil(claimAt, async () => (await jobStatus(id)) === "cancelled");
+              if ((await jobStatus(id)) === "cancelled") return false;
+              return beginBroadcast(id);
+            } catch (e) {
+              if (e instanceof JobCancelledError) return false;
+              throw e;
+            }
+          })()
+        : null;
+    void claimP?.catch(() => {});
+    // Broadcast gate: wait for the start. The scheduled claim above is already done, so this wait
+    // is only the clock. Mint Now does its one claim here, after signing.
     let sentAt = 0;
     let gateP: Promise<void> | null = null;
     const gate = () =>
       (gateP ??= (async () => {
-        await waitUntil(fireAt, async () => (await jobStatus(id)) === "cancelled");
-        if (!(await beginBroadcast(id))) throw new JobCancelledError();
+        await waitUntil(fireAt);
+        const claimed = claimP ? await claimP : (await jobStatus(id)) === "cancelled" ? false : await beginBroadcast(id);
+        if (!claimed) throw new JobCancelledError();
         sentAt = Date.now();
       })());
     const sent = new Set<string>();
@@ -245,7 +277,7 @@ export async function runJob(id: string, budgetMs = env.jobMaxDurationSec * 1000
     const { prepared, results } = await prepareAll(job, req, req.gasHints ?? {}, buildDeadline, {
       fireAt,
       onSigned,
-      ...(req.strategy === "opensea_api" ? { buildNotBefore: fireAt } : {}),
+      ...(req.strategy === "opensea_api" ? { buildNotBefore: fireAt - OPENSEA_LEAD_MS } : {}),
     });
     await gate();
     await Promise.all(sends);

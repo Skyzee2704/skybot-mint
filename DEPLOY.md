@@ -51,7 +51,7 @@ git push -u origin main
 
 | Route                    | `maxDuration` | Why                                                                                                                                                       |
 | ------------------------ | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `/api/jobs/run`          | 300 s         | Pre-signs, waits until stage start, broadcasts, and tracks receipts                                                                                       |
+| `/api/jobs/run`          | 300 s         | Pre-signs, waits until stage start, broadcasts, and tracks receipts. This route runs in `iad1`; the rest of the app stays in `sin1`.                      |
 | `/api/cron/housekeeping` | 60 s          | Finishes receipts, expires stuck (15 min, Mint Now included) or missed (5 min) jobs, purges link codes, signer/NFT/Alchemy upkeep; ignores cancelled jobs |
 | `/api/webhooks/alchemy`  | 60 s          | Alchemy Address Activity webhooks (NFT holdings refresh; set in the route file)                                                                           |
 | `/api/*`                 | 60 s          | Regular API                                                                                                                                               |
