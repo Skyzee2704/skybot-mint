@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { generateKeyPairSync } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
 import { Wallet, formatEther, getAddress } from "ethers";
+import { normalizeAuthKey } from "../src/auth/authKey.js";
 import {
   TEST_SEND_DESTINATION,
   TEST_SEND_ETH_USD,
@@ -11,14 +13,22 @@ import {
   assertSourceWalletAddress,
   assertTestSendToken,
   runTestNativeSend,
+  siweTestAuthorizationContext,
   testSendFailure,
 } from "../src/testsend/nativeSend.js";
 
-const prevToken = process.env.TEST_SEND_TOKEN;
+const prevEnv = {
+  TEST_SEND_TOKEN: process.env.TEST_SEND_TOKEN,
+  PRIVY_SIWE_AUTH_PRIVATE_KEY: process.env.PRIVY_SIWE_AUTH_PRIVATE_KEY,
+  PRIVY_SIWE_KEY_QUORUM_ID: process.env.PRIVY_SIWE_KEY_QUORUM_ID,
+  PRIVY_AUTH_PRIVATE_KEY: process.env.PRIVY_AUTH_PRIVATE_KEY,
+};
 
 afterEach(() => {
-  if (prevToken === undefined) delete process.env.TEST_SEND_TOKEN;
-  else process.env.TEST_SEND_TOKEN = prevToken;
+  for (const [name, value] of Object.entries(prevEnv)) {
+    if (value === undefined) delete process.env[name];
+    else process.env[name] = value;
+  }
 });
 
 const matchingAddress = getAddress(`0xB22${"0".repeat(33)}4D2F`);
@@ -40,6 +50,32 @@ describe("test send gate", () => {
     delete process.env.TEST_SEND_TOKEN;
     await expect(runTestNativeSend("anything")).rejects.toMatchObject({ code: "TEST_SEND_DISABLED", statusCode: 503 });
     expect(() => assertTestSendToken("x")).toThrow(/TEST_SEND_TOKEN is not set/);
+  });
+
+  it("refuses to sign with the mint key when the SIWE key is missing", async () => {
+    process.env.TEST_SEND_TOKEN = "desk-token-value";
+    process.env.PRIVY_AUTH_PRIVATE_KEY = "mint-key-present";
+    delete process.env.PRIVY_SIWE_AUTH_PRIVATE_KEY;
+    delete process.env.PRIVY_SIWE_KEY_QUORUM_ID;
+    await expect(runTestNativeSend("desk-token-value")).rejects.toMatchObject({
+      code: "TEST_SEND_SIGNING_NOT_CONFIGURED",
+      statusCode: 503,
+    });
+  });
+
+  it("builds the authorization context from the SIWE key, not the mint key", () => {
+    const { privateKey } = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
+    const pem = privateKey.export({ type: "pkcs8", format: "pem" }).toString();
+    process.env.PRIVY_SIWE_AUTH_PRIVATE_KEY = `wallet-auth:${pem}`;
+    process.env.PRIVY_SIWE_KEY_QUORUM_ID = "siwe-quorum-id";
+    process.env.PRIVY_AUTH_PRIVATE_KEY = "mint-key-must-not-appear";
+    const ctx = siweTestAuthorizationContext();
+    expect(ctx.authorization_private_keys).toEqual([normalizeAuthKey(pem)]);
+    expect(JSON.stringify(ctx)).not.toContain("mint-key-must-not-appear");
+    expect(JSON.stringify(ctx)).not.toContain("siwe-quorum-id");
+    expect(ctx.authorization_private_keys[0]).not.toContain("BEGIN");
+    delete process.env.PRIVY_SIWE_KEY_QUORUM_ID;
+    expect(() => siweTestAuthorizationContext()).toThrow(/PRIVY_SIWE_KEY_QUORUM_ID/);
   });
 
   it("rejects a missing or wrong token without echoing it", () => {
@@ -127,5 +163,17 @@ describe("error scrubbing", () => {
     expect(f.message).not.toContain("super-secret-token");
     expect(f.message).not.toContain("wallet-auth:AAAA");
     expect(f.message).not.toContain("nope");
+  });
+
+  it("keeps a Privy policy denial verbatim", () => {
+    const denial = "Policy violation: eth_signTransaction is not allowed by policy pol_abc";
+    const f = testSendFailure({
+      status: 400,
+      message: `400 ${denial}`,
+      error: { code: "policy_violation", error: denial },
+    });
+    expect(f.status).toBe(400);
+    expect(f.message).toContain(denial);
+    expect(f.message).toContain("policy_violation");
   });
 });

@@ -55,8 +55,8 @@ export function TestSendForm() {
       <p className="pill accent">DO NOT MERGE</p>
       <h1 style={{ marginTop: 12 }}>Server-sign native send</h1>
       <p className="warn">
-        Draft test. One real Ethereum mainnet transfer, signed by the server Privy authorization key. Nothing here is read from the request
-        except the token header.
+        Draft test. One real Ethereum mainnet transfer, signed with PRIVY_SIWE_AUTH_PRIVATE_KEY. The mint signer is not used. Nothing here
+        is read from the request except the token header.
       </p>
       <div className="card">
         <div className="grid">

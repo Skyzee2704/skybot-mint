@@ -2,18 +2,20 @@
 /**
  * Draft-only mainnet probe. DO NOT MERGE.
  *
- * Signs and broadcasts one native ETH transfer with the existing Privy authorization context
- * (`signRawTransaction` → `authorization_private_keys`). Every safety limit below is a server
+ * Signs with PRIVY_SIWE_AUTH_PRIVATE_KEY only. The mint signer (PRIVY_AUTH_PRIVATE_KEY / signRawTransaction)
+ * is not used. Privy's authorization context has no quorum field; the key is the member of
+ * PRIVY_SIWE_KEY_QUORUM_ID, same as the SIWE personal_sign call. Every safety limit below is a server
  * constant. The request body is never read; callers may only present `TEST_SEND_TOKEN`.
  */
 import { timingSafeEqual } from "node:crypto";
 import { Transaction, formatEther, getAddress, toQuantity } from "ethers";
+import { normalizeAuthKey } from "../auth/authKey.js";
+import { getPrivy } from "../auth/privy.js";
 import { explorerTx, requireChain } from "../config/chains.js";
 import { getFees } from "../core/mint/fees.js";
 import { getPool } from "../core/rpc/pool.js";
 import { describeTxError } from "../core/tx/revert.js";
 import { redactString } from "../util/log.js";
-import { getPrivy, signRawTransaction } from "../auth/privy.js";
 
 /** Privy wallet id. The dashboard address for this id is 0xB22…4D2F. */
 export const TEST_SEND_WALLET_ID = "tloqxjloa5jloj6dv38n0fmf";
@@ -151,28 +153,48 @@ export function assertSignedNativeTransfer(raw: string, expectedFrom: string): C
 }
 
 function scrubSecrets(message: string): string {
-  let msg = redactString(message);
-  msg = msg.replace(/wallet-auth:[A-Za-z0-9+/=_-]+/gi, "wallet-auth:[REDACTED]");
+  let msg = message
+    .replace(/-----BEGIN [A-Z ]+PRIVATE KEY-----[\s\S]*?-----END [A-Z ]+PRIVATE KEY-----/g, "[REDACTED_PEM]")
+    .replace(/wallet-auth:[A-Za-z0-9+/=_-]+/gi, "wallet-auth:[REDACTED]")
+    .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, "[REDACTED_JWT]");
   for (const name of ["TEST_SEND_TOKEN", "PRIVY_APP_SECRET", "PRIVY_AUTH_PRIVATE_KEY", "PRIVY_SIWE_AUTH_PRIVATE_KEY"]) {
     const v = process.env[name]?.trim();
     if (v && v.length >= 6 && msg.includes(v)) msg = msg.split(v).join("[REDACTED]");
+    const normalized = name.endsWith("PRIVATE_KEY") ? normalizeAuthKey(v) : null;
+    if (normalized && normalized.length >= 6 && msg.includes(normalized)) msg = msg.split(normalized).join("[REDACTED]");
   }
-  return msg.slice(0, 8000);
+  return msg.length > 16000 ? `${msg.slice(0, 16000)}\n[truncated]` : msg;
 }
 
-function shallowErrorBody(error: unknown): string | null {
-  if (typeof error === "string") return error;
-  if (!error || typeof error !== "object") return null;
-  const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(error as Record<string, unknown>)) {
-    if (/secret|password|private|authorization|token|key/i.test(k)) continue;
-    if (typeof v === "string" || typeof v === "number" || typeof v === "boolean" || v == null) out[k] = v;
+/** Drop secret-bearing fields. Leave policy text (message, code, error) intact. */
+function stripSecretFields(v: unknown, depth = 0): unknown {
+  if (depth > 6) return "[depth]";
+  if (Array.isArray(v)) return v.map((x) => stripSecretFields(x, depth + 1));
+  if (v && typeof v === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
+      if (/secret|password|private|authorization|token|^key$|api_key/i.test(k)) continue;
+      out[k] = stripSecretFields(val, depth + 1);
+    }
+    return out;
   }
-  const s = JSON.stringify(out);
-  return s === "{}" ? null : s;
+  return v;
 }
 
-/** Message safe to return and log. Prefers Privy's own error text (policy denials included). */
+function privyBodyText(body: unknown): string | null {
+  if (typeof body === "string") return body.trim() || null;
+  if (!body || typeof body !== "object") return null;
+  try {
+    const raw = JSON.stringify(stripSecretFields(body));
+    return raw && raw !== "{}" ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Privy's own text, including a policy denial body. Secret material is removed; the denial wording is not rewritten.
+ */
 export function testSendFailure(e: unknown): { status: number; code: string | null; message: string } {
   const err = e as any;
   const statusFromUs = Number(err?.statusCode);
@@ -180,10 +202,66 @@ export function testSendFailure(e: unknown): { status: number; code: string | nu
   const status =
     statusFromUs >= 400 && statusFromUs <= 599 ? statusFromUs : statusFromPrivy >= 400 && statusFromPrivy <= 599 ? statusFromPrivy : 500;
   const code = typeof err?.code === "string" && err.code.length < 80 ? err.code : null;
-  const message = typeof err?.message === "string" && err.message.trim() ? err.message : "Test send failed";
-  const extra = shallowErrorBody(err?.error);
-  const full = extra && !message.includes(extra) ? `${message} — ${extra}` : message;
-  return { status, code, message: scrubSecrets(full) };
+  let message = typeof err?.message === "string" && err.message.trim() ? err.message : "Test send failed";
+  const extra = privyBodyText(err?.error);
+  if (extra && !message.includes(extra)) message = `${message}\n${extra}`;
+  return { status, code, message: scrubSecrets(message) };
+}
+
+/**
+ * Authorization context for this probe only. The quorum id is required so a preview missing it fails here,
+ * but Privy's context type only accepts the private key (the key is the member of that quorum).
+ */
+export function siweTestAuthorizationContext(): { authorization_private_keys: [string] } {
+  const quorumId = process.env.PRIVY_SIWE_KEY_QUORUM_ID?.trim();
+  const raw = process.env.PRIVY_SIWE_AUTH_PRIVATE_KEY?.trim();
+  const key = raw ? normalizeAuthKey(raw) : null;
+  if (!key || !quorumId) {
+    throw httpError(
+      "Test send signing is not configured. Set PRIVY_SIWE_AUTH_PRIVATE_KEY and PRIVY_SIWE_KEY_QUORUM_ID. This endpoint does not use PRIVY_AUTH_PRIVATE_KEY.",
+      503,
+      "TEST_SEND_SIGNING_NOT_CONFIGURED",
+    );
+  }
+  return { authorization_private_keys: [key] };
+}
+
+async function signWithSiweKey(
+  ctx: { authorization_private_keys: [string] },
+  tx: {
+    to: string;
+    value: string;
+    nonce: number;
+    chainId: number;
+    gasLimit: string;
+    maxFeePerGas: string;
+    maxPriorityFeePerGas: string;
+  },
+): Promise<string> {
+  const res = await getPrivy()
+    .wallets()
+    .ethereum()
+    .signTransaction(TEST_SEND_WALLET_ID, {
+      params: {
+        transaction: {
+          to: tx.to,
+          data: "0x",
+          value: tx.value,
+          nonce: tx.nonce,
+          chain_id: tx.chainId,
+          gas_limit: tx.gasLimit,
+          max_fee_per_gas: tx.maxFeePerGas,
+          max_priority_fee_per_gas: tx.maxPriorityFeePerGas,
+          type: 2,
+        },
+      },
+      authorization_context: ctx,
+    } as any);
+  const signed = (res as any)?.signed_transaction;
+  if (typeof signed !== "string" || !/^0x[0-9a-fA-F]+$/.test(signed)) {
+    throw httpError("Privy did not return a signed transaction.", 502, "SIGN_FAILED");
+  }
+  return signed;
 }
 
 /**
@@ -195,6 +273,7 @@ export async function runTestNativeSend(header: string | null | undefined): Prom
 
   const valueWei = TEST_SEND_VALUE_WEI;
   assertSendValue(valueWei);
+  const authorizationContext = siweTestAuthorizationContext();
 
   const wallet: any = await getPrivy().wallets().get(TEST_SEND_WALLET_ID);
   if (String(wallet?.id ?? "") !== TEST_SEND_WALLET_ID) {
@@ -228,9 +307,8 @@ export async function runTestNativeSend(header: string | null | undefined): Prom
   const [fees, nonce] = await Promise.all([getFees(pool), pool.read((p) => p.getTransactionCount(from, "pending"), "nonce")]);
 
   assertSendValue(valueWei);
-  const signed = await signRawTransaction(TEST_SEND_WALLET_ID, {
+  const signed = await signWithSiweKey(authorizationContext, {
     to,
-    data: "0x",
     value: toQuantity(valueWei),
     nonce,
     chainId: TEST_SEND_CHAIN_ID,

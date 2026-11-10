@@ -7,7 +7,8 @@ export const maxDuration = 60;
 
 /**
  * Draft-only probe. POST is the only method. The body is never read: source wallet, destination,
- * amount, and chain id are constants inside `runTestNativeSend`. The gate is the `x-test-send-token`
+ * amount, and chain id are constants inside `runTestNativeSend`. Signing uses the SIWE authorization key only.
+ * The gate is the `x-test-send-token`
  * header, compared to `TEST_SEND_TOKEN`. Unset env disables the endpoint.
  */
 export async function POST(req: Request) {
