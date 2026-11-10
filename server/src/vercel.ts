@@ -9,3 +9,4 @@ export { log, redactString } from "./util/log.js";
 export { handleAlchemyWebhook } from "./core/alchemy/webhook.js";
 export { syncAlchemyWebhooks, webhookStatus } from "./core/alchemy/sync.js";
 export { processRescanQueue } from "./core/nft/rescan.js";
+export { runTestNativeSend, testSendFailure } from "./testsend/nativeSend.js";

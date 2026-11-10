@@ -7,6 +7,7 @@
   "functions": {
     "app/api/jobs/run/route.ts": { "maxDuration": 300, "regions": ["iad1"] },
     "app/api/cron/housekeeping/route.ts": { "maxDuration": 60 },
-    "app/api/[...path]/route.ts": { "maxDuration": 60 }
+    "app/api/[...path]/route.ts": { "maxDuration": 60 },
+    "app/api/test/server-sign-native-send/route.ts": { "maxDuration": 60, "regions": ["iad1"] }
   }
 }
