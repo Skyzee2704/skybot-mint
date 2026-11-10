@@ -194,7 +194,7 @@ export function configStatus() {
   return {
     brand: "SkyBOT Mint",
     privy: { configured: privyConfigured(), appId: env.privyAppId ?? null, serverSigning: privyServerSigningReady() },
-    opensea: Boolean(env.openseaApiKey),
+    opensea: Boolean(str("OPENSEA_API_KEY") || str("OPENSEA_API_KEYS")),
     etherscan: Boolean(env.etherscanApiKey),
     telegram: Boolean(env.telegramBotToken),
     vaultAddress: env.vaultAddress ?? null,

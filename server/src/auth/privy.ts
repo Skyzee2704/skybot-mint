@@ -9,6 +9,7 @@
 import { PrivyClient } from "@privy-io/node";
 import { normalizeAuthKey } from "./authKey.js";
 import { env, privyConfigured, privyServerSigningReady, privySiweSignerReady } from "../config/env.js";
+import { installKeepAlive } from "../util/keepalive.js";
 import { log } from "../util/log.js";
 
 let client: PrivyClient | null = null;
@@ -20,7 +21,13 @@ export function getPrivy(): PrivyClient {
       code: "PRIVY_NOT_CONFIGURED",
     });
   if (!client) {
-    client = new PrivyClient({ appId: env.privyAppId!, appSecret: env.privyAppSecret! });
+    installKeepAlive();
+    client = new PrivyClient({
+      appId: env.privyAppId!,
+      appSecret: env.privyAppSecret!,
+      // Same global fetch the undici keep-alive dispatcher already serves.
+      fetch: ((url, init) => fetch(url, init)) as typeof fetch,
+    });
     log.info("Privy client initialized");
   }
   return client;

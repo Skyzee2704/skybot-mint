@@ -8,6 +8,8 @@ export default function AdminPage() {
   const api = useApi();
   const [users, setUsers] = useState<any[]>([]);
   const [err, setErr] = useState<string | null>(null);
+  const [keys, setKeys] = useState<any[] | null>(null);
+  const [keyErr, setKeyErr] = useState<string | null>(null);
   const load = () =>
     api("/api/admin/users")
       .then((r) => setUsers(r.users))
@@ -18,6 +20,29 @@ export default function AdminPage() {
   return (
     <div className="card">
       <h2>Admin · Users</h2>
+      <p>
+        <button
+          className="ghost"
+          onClick={() => {
+            setKeyErr(null);
+            api("/api/admin/opensea-keys/test", { method: "POST" })
+              .then((r) => setKeys(r.keys))
+              .catch((e) => setKeyErr(e.message));
+          }}
+        >
+          Test OpenSea keys
+        </button>
+      </p>
+      {keyErr && <div className="err">{keyErr}</div>}
+      {keys && (
+        <p className="muted">
+          {keys.length
+            ? keys
+                .map((k) => `key ${k.index}: ${k.ok ? `${k.latencyMs}ms` : k.error} remaining ${k.remaining ?? "?"}/${k.limit ?? "?"}`)
+                .join(" · ")
+            : "No OpenSea API keys configured."}
+        </p>
+      )}
       {err && <div className="err">{err}</div>}
       <table>
         <thead>

@@ -218,6 +218,8 @@ export async function probeAndRelease<T>(opts: {
   tick?: () => Promise<void>;
   /** Added to T0 for the first parallel wave. Defaults to FIRST_WAVE_OFFSET_MS (0). */
   waveOffsetMs?: number;
+  /** When set, a 429 does not pause every wallet. The OpenSea key pool cools down that key only. */
+  isolateRateLimits?: boolean;
   maxConcurrency?: number;
   call: (index: number) => Promise<ProbeCall<T>>;
   onOk?: (index: number, value: T) => Promise<void>;
@@ -324,7 +326,7 @@ export async function probeAndRelease<T>(opts: {
     }
     if (res.kind === "rate") {
       strikes = 0;
-      applyRate(res);
+      if (!opts.isolateRateLimits) applyRate(res);
       return "rate";
     }
     if (res.kind === "promote") {
@@ -389,7 +391,7 @@ export async function probeAndRelease<T>(opts: {
                   now() >= opts.deadline ? { kind: "fail", error: new Error("build deadline") } : await opts.call(i);
                 noteSample(res);
                 if (res.kind === "rate") {
-                  applyRate(res);
+                  if (!opts.isolateRateLimits) applyRate(res);
                   queue.push(i);
                   return;
                 }

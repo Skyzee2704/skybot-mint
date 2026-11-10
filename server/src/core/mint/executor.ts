@@ -11,7 +11,9 @@ import { appendJobLog, jobStatus, JobCancelledError, patchJob, recordMinted, typ
 import { buildMintTx, MintBuildError } from "./build.js";
 import { stagePriceWei } from "./stage.js";
 import type { BuiltTx } from "./types.js";
-import { getFees, jobFeesIfFresh, rememberJobFees } from "./fees.js";
+import { getFees, feesMoved, jobFeesIfFresh, rememberJobFees, type Fees } from "./fees.js";
+import { sendWhenLive, startStageProbe, SIM_LEAD_MS, type StageProbe } from "./readiness.js";
+import { openseaKeyLog } from "../resolver/openseaKeys.js";
 import { parseMintedTokenIds, waitForReceipt } from "./receipts.js";
 import { fallbackGas } from "./simulate.js";
 import { broadcastRejectedMessage, buildFailureMessage, revertedOnChainMessage, signFailureMessage } from "./jobErrors.js";
@@ -46,6 +48,8 @@ export interface Prepared {
   hash: string;
   reserveRef: string;
   reserveWei: bigint;
+  /** eth_call loop for a tx we built ourselves. The T0 send does not wait on it. */
+  readiness?: StageProbe;
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -60,7 +64,8 @@ export function gasFromHint(hint: bigint): bigint {
 
 /** After T0 the OpenSea mint call must not sit on a 10s timeout. */
 export const MINT_API_TIMEOUT_MS = 1_500;
-/** How long before the start we re-read nonces for an already signed local transaction. */
+/** How long a fresh fee read may delay a signature. The T-60s quote is used if this expires. */
+const FEE_REFRESH_BUDGET_MS = 150;
 const NONCE_REFRESH_LEAD_MS = 1_200;
 const maxBig = (a: bigint, b: bigint) => (a > b ? a : b);
 
@@ -142,6 +147,18 @@ export async function prepareAll(
   ]);
   // Fees were read at wake when the job was scheduled ahead. A mint-now job, or a missed warm-up, reads them here.
   const fees = jobFeesIfFresh(chain.key, mode) ?? (await getFees(pool, mode));
+  // OpenSea signs after the build that starts at T−150ms. The fresh quote is started then
+  // (see below) and may not hold the signature for more than FEE_REFRESH_BUDGET_MS.
+  let freshFees: Fees | null = null;
+  let feeWatchStarted = 0;
+  let feeWatch: Promise<Fees | null> | null = null;
+  const feesForSign = async (): Promise<Fees> => {
+    if (!feeWatch) return fees;
+    if (freshFees) return freshFees;
+    const budget = Math.max(0, FEE_REFRESH_BUDGET_MS - (Date.now() - feeWatchStarted));
+    if (budget > 0) await Promise.race([feeWatch, sleep(budget)]);
+    return freshFees ?? fees;
+  };
   // Nonces don't depend on the build: fetch now (in parallel) so signing doesn't wait on another RPC round trip.
   const nonces = walletRows.map((w) => pool.read((p) => p.getTransactionCount(w.address, "pending"), "nonce"));
   nonces.forEach((n) => n.catch(() => {}));
@@ -236,9 +253,10 @@ export async function prepareAll(
     return Promise.race([estimateGas(tx, i), sleep(GAS_ESTIMATE_BUDGET_MS).then(() => fb)]);
   };
 
-  const sign = async (i: number, tx: BuiltTx, gasLimit: bigint, nonce: number) => {
+  const sign = async (i: number, tx: BuiltTx, gasLimit: bigint, nonce: number, quote?: Fees) => {
     const w = walletRows[i];
     if (!w.privyWalletId) throw new Error("Wallet has no Privy id — re-sync from Settings/Wallets");
+    const use = quote ?? (await feesForSign());
     return signRawTransaction(w.privyWalletId, {
       to: tx.to,
       data: tx.data,
@@ -246,8 +264,8 @@ export async function prepareAll(
       nonce,
       chainId: chain.chainId,
       gasLimit: toQuantity(gasLimit),
-      maxFeePerGas: toQuantity(fees.maxFeePerGas),
-      maxPriorityFeePerGas: toQuantity(fees.maxPriorityFeePerGas),
+      maxFeePerGas: toQuantity(use.maxFeePerGas),
+      maxPriorityFeePerGas: toQuantity(use.maxPriorityFeePerGas),
     });
   };
 
@@ -266,6 +284,15 @@ export async function prepareAll(
   if (streaming) await assertDailyBudget(job.userId, chain, upfrontTotal);
 
   if (opts.buildNotBefore !== undefined) await waitUntil(opts.buildNotBefore, cancelled);
+  if (req.strategy === "opensea_api") {
+    feeWatchStarted = Date.now();
+    feeWatch = getFees(pool, mode)
+      .then((f) => {
+        freshFees = f;
+        return f;
+      })
+      .catch(() => null);
+  }
   const tStart = Date.now();
   // Nonce refresh: re-read pending nonces in parallel with the build (cheap; catches a tx sent since pre-fetch).
   const freshNonces = walletRows.map((w, i) =>
@@ -277,6 +304,7 @@ export async function prepareAll(
   const built: (BuiltTx | null)[] = req.wallets.map(() => null);
   const gasLimits: bigint[] = req.wallets.map(() => 0n);
   const raws: (string | null)[] = req.wallets.map(() => null);
+  const stageProbe: (StageProbe | undefined)[] = req.wallets.map(() => undefined);
   const prepared: Prepared[] = [];
   let streamErr: unknown = null;
 
@@ -290,6 +318,7 @@ export async function prepareAll(
       hash: "",
       reserveRef: `${job.id}:${wq.walletId}`,
       reserveWei: built[i]!.value + gasLimits[i] * fees.maxFeePerGas,
+      readiness: stageProbe[i],
     };
     prepared.push(p);
     results[i].status = "signed";
@@ -334,6 +363,7 @@ export async function prepareAll(
     try {
       if (await cancelled()) throw new JobCancelledError();
       const nonce = await freshNonces[i];
+      let usedNonce = nonce;
       const pr = pre[i];
       if (pr && sameTx(pr.tx, tx) && pr.nonce === nonce) {
         gasLimits[i] = pr.gas;
@@ -356,8 +386,30 @@ export async function prepareAll(
         const nowNonce = await pool.read((p) => p.getTransactionCount(results[i].address, "pending"), "nonce").catch(() => nonce);
         if (nowNonce !== nonce) {
           raws[i] = await sign(i, tx, gasLimits[i], nowNonce);
+          usedNonce = nowNonce;
           timing[i].path = "resigned";
           void jobLogHot(`nonce changed for ${results[i].address.slice(0, 8)}, re-signed`).catch(() => {});
+        }
+      }
+      // Pre-signed paths: at about T−1s, re-quote fees and re-sign the same nonce if they moved more than 10%.
+      // The broadcast gate is still T0, so an on-time send is not held for this.
+      if (req.strategy !== "opensea_api" && fireAt && raws[i]) {
+        stageProbe[i] = startStageProbe({
+          fireAt,
+          deadline: buildDeadline,
+          call: async () => {
+            await pool.read((p) => p.call({ to: tx.to, data: tx.data, value: tx.value, from: results[i].address }), "simMint");
+          },
+        });
+        const refreshAt = fireAt - SIM_LEAD_MS;
+        if (Date.now() < refreshAt) await waitUntil(refreshAt, cancelled);
+        if (Date.now() < fireAt) {
+          const budget = Math.min(FEE_REFRESH_BUDGET_MS, Math.max(0, fireAt - Date.now()));
+          const next = await Promise.race([getFees(pool, mode).catch(() => null), sleep(budget).then(() => null)]);
+          if (next && feesMoved(fees.maxFeePerGas, next.maxFeePerGas)) {
+            raws[i] = await sign(i, tx, gasLimits[i], usedNonce, next);
+            timing[i].path = "resigned";
+          }
         }
       }
     } catch (e: any) {
@@ -378,6 +430,7 @@ export async function prepareAll(
       count: req.wallets.length,
       fireAt,
       deadline: buildDeadline,
+      isolateRateLimits: true,
       maxConcurrency: BUILD_CONCURRENCY,
       tick: async () => {
         if (await cancelled()) throw new JobCancelledError();
@@ -390,6 +443,7 @@ export async function prepareAll(
           const tx = await buildMintTx(t, req, results[i].address, req.wallets[i].quantity, undefined, job.userId, {
             mintTimeoutMs: MINT_API_TIMEOUT_MS,
             mintJobId: job.id,
+            walletIndex: i,
             onMintSample: (sample) => rateLog.note(sample),
           });
           timing[i].build = Date.now() - s;
@@ -444,7 +498,7 @@ export async function prepareAll(
     })
     .join(" | ");
   deferredLogs.push(
-    `prepared ${prepared.length}/${req.wallets.length} txs (maxFee ${Number(fees.maxFeePerGas) / 1e9} gwei, worst-case total ${formatEther(total)} ${chain.nativeSymbol}) · build ${ms("build")}, gas ${ms("gas")}, sign ${ms("sign")}, ready ${ms("ready")}, presigned ${timing.filter((x) => x.path === "presigned").length}, setup ${tStart - t0}ms, mode ${streaming ? "stream" : "batch"} · probe ${probeAttempts} release ${off(releaseAt ?? -1)} waited ${waited}${rateLog.seen ? ` · ${rateLog.format()}` : ""} · ${perWallet}`,
+    `prepared ${prepared.length}/${req.wallets.length} txs (maxFee ${Number(fees.maxFeePerGas) / 1e9} gwei, worst-case total ${formatEther(total)} ${chain.nativeSymbol}) · build ${ms("build")}, gas ${ms("gas")}, sign ${ms("sign")}, ready ${ms("ready")}, presigned ${timing.filter((x) => x.path === "presigned").length}, setup ${tStart - t0}ms, mode ${streaming ? "stream" : "batch"} · probe ${probeAttempts} release ${off(releaseAt ?? -1)} waited ${waited}${rateLog.seen ? ` · ${rateLog.format()}` : ""}${req.strategy === "opensea_api" && openseaKeyLog() ? ` · ${openseaKeyLog()}` : ""} · ${perWallet}`,
   );
   log.info(`[job ${job.id.slice(0, 8)}] ${deferredLogs[deferredLogs.length - 1]}`);
   if (deferredLogs.length) void appendJobLog(job.id, deferredLogs.join(" · ")).catch(() => {});
@@ -469,7 +523,11 @@ export async function broadcastAndTrack(
         const r = results.find((x) => x.walletId === p.walletId)!;
         try {
           const sentAt = Date.now();
-          const b = await pool.broadcast(p.raw);
+          const sent = await sendWhenLive(async () => {
+            const attempt = await pool.broadcast(p.raw);
+            return { ok: attempt.accepted.length > 0, errors: attempt.errors.map((e) => e.error), attempt };
+          }, p.readiness);
+          const b = sent.attempt;
           r.broadcastMs = Date.now() - sentAt;
           r.txHash = b.hash;
           r.explorer = explorerTx(chain, b.hash);

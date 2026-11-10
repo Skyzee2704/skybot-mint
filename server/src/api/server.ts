@@ -622,6 +622,10 @@ export async function buildServer(): Promise<FastifyInstance> {
     a.register(async (ad) => {
       ad.addHook("onRequest", adminGate);
       ad.get("/api/admin/users", async () => ({ users: await listUsersAdmin() }));
+      ad.post("/api/admin/opensea-keys/test", async () => {
+        const { testOpenseaKeys } = await import("../core/resolver/openseaKeys.js");
+        return { keys: await testOpenseaKeys() };
+      });
       /** Post-deploy: setWebhook + commands + Mini App menu button. Admin only. */
       ad.post("/api/admin/telegram/setup", async () => {
         const { ensureHousekeepingSchedule } = await import("../jobs/scheduler.js");

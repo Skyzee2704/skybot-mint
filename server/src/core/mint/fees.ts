@@ -33,6 +33,14 @@ export function computeFees(baseFee: bigint, suggestedTip: bigint, mode: GasMode
   return { maxFeePerGas: maxFee, maxPriorityFeePerGas: tip, baseFee, capped };
 }
 
+/** True when the fee moved by more than `percent` (default 10). */
+export function feesMoved(before: bigint, after: bigint, percent = 10): boolean {
+  if (before === after) return false;
+  if (before <= 0n) return after !== before;
+  const delta = before > after ? before - after : after - before;
+  return delta * 100n > before * BigInt(percent);
+}
+
 /** Fees read when a scheduled job wakes, reused through the presign window (the 12s quote cache is too short). */
 const JOB_FEE_TTL_MS = 90_000;
 const jobFees = new Map<string, { at: number; fees: Fees }>();
