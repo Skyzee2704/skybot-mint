@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { env } from "../../config/env.js";
 import { honoredRetryMs, readOpenSeaMintHeaders, type OpenSeaMintSample } from "../mint/openseaLimit.js";
+import { listOpenseaApiKeys, openseaFetch } from "./openseaKeys.js";
 
 /**
  * Client for OpenSea's OFFICIAL REST API (api.opensea.io/api/v2) only.
@@ -79,7 +80,7 @@ export class OpenSeaClient {
     private fetchImpl: FetchFn = fetch,
   ) {}
   get available() {
-    return Boolean(this.apiKey);
+    return Boolean(this.apiKey) || listOpenseaApiKeys().length > 0;
   }
 
   private async req<T>(
@@ -88,13 +89,10 @@ export class OpenSeaClient {
     body?: unknown,
     allowNoKey = false,
     timeoutMs = 10_000,
-    hook?: { jobId?: string; onSample?: (sample: OpenSeaMintSample) => void },
+    hook?: { jobId?: string; walletIndex?: number; onSample?: (sample: OpenSeaMintSample) => void },
   ): Promise<T> {
-    if (!this.apiKey && !allowNoKey) throw new OpenSeaUnavailable("OPENSEA_API_KEY not set — OpenSea features disabled");
-    const headers: Record<string, string> = { accept: "application/json", "user-agent": "nft-mint-bot/0.1" };
-    if (this.apiKey) headers["x-api-key"] = this.apiKey;
-    if (body) headers["content-type"] = "application/json";
-    // A short timeout is one attempt: the caller retries. The default keeps the longer interactive lookup.
+    if (!this.apiKey && !listOpenseaApiKeys().length && !allowNoKey)
+      throw new OpenSeaUnavailable("OPENSEA_API_KEY not set — OpenSea features disabled");
     const fast = timeoutMs < 10_000;
     const mintPost = method === "POST" && path.endsWith("/mint");
     let lastErr: unknown;
@@ -102,11 +100,17 @@ export class OpenSeaClient {
       const ctrl = new AbortController();
       const t = setTimeout(() => ctrl.abort(), timeoutMs);
       try {
-        const res = await this.fetchImpl(BASE + path, {
+        const res = await openseaFetch({
+          priority: mintPost ? "mint" : "background",
+          url: BASE + path,
           method,
-          headers,
+          headers: body ? { "content-type": "application/json" } : undefined,
           body: body ? JSON.stringify(body) : undefined,
           signal: ctrl.signal,
+          fetchImpl: this.fetchImpl,
+          fallbackKey: this.apiKey,
+          allowNoKey,
+          onSample: hook?.onSample,
         });
         const text = await res.text();
         let json: any = undefined;
@@ -116,12 +120,11 @@ export class OpenSeaClient {
           /* non-json */
         }
         const sample = mintPost ? readOpenSeaMintHeaders(res.headers, res.status) : undefined;
-        if (sample) hook?.onSample?.(sample);
         if (res.ok) return json as T;
         const msg = (json?.errors?.join?.("; ") ?? json?.detail ?? json?.message ?? text ?? "").toString().slice(0, 300);
         const retryAfterMs = sample?.retryAfterMs;
         const honored = sample ? honoredRetryMs(sample, Date.now()) : undefined;
-        if (!fast && (res.status === 429 || res.status >= 500) && attempt < 2) {
+        if (!fast && res.status >= 500 && attempt < 2) {
           await new Promise((r) => setTimeout(r, honored ?? 500 * 2 ** attempt));
           lastErr = new OpenSeaHttpError(res.status, msg, retryAfterMs, sample);
           continue;
@@ -159,7 +162,7 @@ export class OpenSeaClient {
     minter: string,
     quantity: number,
     timeoutMs?: number,
-    hook?: { jobId?: string; onSample?: (sample: OpenSeaMintSample) => void },
+    hook?: { jobId?: string; walletIndex?: number; onSample?: (sample: OpenSeaMintSample) => void },
   ) {
     return this.req<OsMintTx>(
       "POST",

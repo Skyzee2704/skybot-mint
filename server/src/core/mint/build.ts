@@ -52,7 +52,7 @@ export async function buildMintTx(
   quantity: number,
   os = new OpenSeaClient(),
   userId = "system",
-  call: { mintTimeoutMs?: number; mintJobId?: string; onMintSample?: (sample: OpenSeaMintSample) => void } = {},
+  call: { mintTimeoutMs?: number; mintJobId?: string; walletIndex?: number; onMintSample?: (sample: OpenSeaMintSample) => void } = {},
 ): Promise<BuiltTx> {
   const chain = requireChain(t.chain.key);
   const chosen = req.stage ? (t.stages.find((s) => s.name === req.stage) ?? null) : null;
@@ -91,6 +91,7 @@ export async function buildMintTx(
       try {
         const r = await os.buildMint(slug, wallet, quantity, call.mintTimeoutMs, {
           jobId: call.mintJobId,
+          walletIndex: call.walletIndex,
           onSample: call.onMintSample,
         });
         const value = BigInt(r.value || "0x0");

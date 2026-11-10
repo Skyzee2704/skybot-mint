@@ -41,6 +41,7 @@ import {
 import { installKeepAlive, warmSockets, WARM_HOSTS } from "../util/keepalive.js";
 import { notifyJobDone } from "../bot/notify.js";
 import { getChain, rpcsForChain } from "../config/chains.js";
+import { getPool } from "../core/rpc/pool.js";
 import { log } from "../util/log.js";
 
 const PRESIGN_LEAD_MS = 5000;
@@ -180,6 +181,11 @@ export async function runJob(id: string, budgetMs = env.jobMaxDurationSec * 1000
   if (!job) return { status: "skipped", reason: "already claimed" };
   installKeepAlive();
   const req = job.request as MintRequest & { gasHints: Record<string, string> };
+  const chainForRank = getChain(req.chain);
+  if (chainForRank)
+    await getPool(chainForRank)
+      .rankLatency()
+      .catch(() => {});
   try {
     // Cancelled between the claim and here: stop before any signing.
     if ((await jobStatus(id)) === "cancelled") throw new JobCancelledError();

@@ -12,6 +12,7 @@ import { CHAINS, type ChainConfig } from "../../config/chains.js";
 import { env } from "../../config/env.js";
 import type { MetaState } from "./metadata.js";
 import { canonUri } from "./uri.js";
+import { openseaFetch, openseaKeyCount } from "../resolver/openseaKeys.js";
 
 export type NftStandard = "erc721" | "erc1155";
 export interface NftItem {
@@ -183,20 +184,42 @@ export async function scanAlchemy(chain: ChainConfig, owner: string, f: Fetch, k
   return { items, source: "alchemy", truncated: true };
 }
 
+async function adaptFetch(f: Fetch, input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const headers: Record<string, string> = {};
+  new Headers(init?.headers).forEach((value, name) => {
+    headers[name] = value;
+  });
+  const res = await f(String(input), { headers, signal: init?.signal ?? undefined });
+  const body = await res.json().catch(() => null);
+  return new Response(body == null ? "" : JSON.stringify(body), {
+    status: res.status,
+    headers: { "content-type": "application/json" },
+  });
+}
+
 export async function scanOpenSea(chain: ChainConfig, owner: string, f: Fetch, key = env.openseaApiKey): Promise<ScanResult> {
   if (!chain.openseaChain) throw new Error(`OpenSea does not index ${chain.name}`);
-  if (!key) throw new Error("OPENSEA_API_KEY is not set");
+  const pooled = openseaKeyCount(key) > 0 && (!key || key === env.openseaApiKey);
+  if (!pooled && !key) throw new Error("OPENSEA_API_KEY is not set");
   const items: NftItem[] = [];
   let next: string | null = null;
   for (let page = 0; page < OPENSEA_MAX_PAGES; page++) {
     const q = new URLSearchParams({ limit: String(OPENSEA_PAGE_SIZE) });
     if (next) q.set("next", next);
-    const j = await getJson(
-      f,
-      `https://api.opensea.io/api/v2/chain/${encodeURIComponent(chain.openseaChain)}/account/${owner}/nfts?${q}`,
-      { accept: "application/json", "x-api-key": key },
-      "OpenSea",
-    );
+    const url = `https://api.opensea.io/api/v2/chain/${encodeURIComponent(chain.openseaChain)}/account/${owner}/nfts?${q}`;
+    const j = pooled
+      ? await openseaFetch({
+          priority: "background",
+          url,
+          headers: { accept: "application/json" },
+          fallbackKey: key,
+          fetchImpl: (input, init) => adaptFetch(f, input, init),
+        }).then(async (r) => {
+          const body = await r.json().catch(() => null);
+          if (!r.ok) throw new Error(`OpenSea HTTP ${r.status}: ${String(body?.error?.message ?? body?.message ?? "").slice(0, 140)}`);
+          return body;
+        })
+      : await getJson(f, url, { accept: "application/json", "x-api-key": key! }, "OpenSea");
     for (const n of j?.nfts ?? []) {
       const it = fromOpenSea(n);
       if (it) items.push(it);

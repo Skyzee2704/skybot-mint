@@ -19,6 +19,8 @@ export interface Endpoint {
   cooldownUntil: number;
   verified: boolean;
   disabled: boolean;
+  /** eth_chainId round trip, set by rankLatency. Lower is preferred for reads. */
+  latencyMs?: number;
   lastError?: string;
   sendOnly: boolean;
 }
@@ -98,12 +100,39 @@ export class RpcPool {
     return this.opts.timeoutMs ?? env.rpcTimeoutMs;
   }
 
-  /** Order: not disabled, not cooling down, fewest failures, original priority. */
+  /** Order: not disabled, not cooling down, lowest measured latency, fewest failures, original priority. */
   ordered(now = Date.now()): Endpoint[] {
     const ok = this.endpoints.filter((e) => !e.disabled && !e.sendOnly);
-    const ready = ok.filter((e) => e.cooldownUntil <= now).sort((a, b) => a.failures - b.failures);
-    const cooling = ok.filter((e) => e.cooldownUntil > now).sort((a, b) => a.cooldownUntil - b.cooldownUntil);
+    const latency = (e: Endpoint) => e.latencyMs ?? Number.POSITIVE_INFINITY;
+    const bySpeed = (a: Endpoint, b: Endpoint) => latency(a) - latency(b) || a.failures - b.failures;
+    const ready = ok.filter((e) => e.cooldownUntil <= now).sort(bySpeed);
+    const cooling = ok.filter((e) => e.cooldownUntil > now).sort((a, b) => a.cooldownUntil - b.cooldownUntil || bySpeed(a, b));
     return [...ready, ...cooling];
+  }
+
+  /**
+   * Time eth_chainId on every read endpoint and remember it. Broadcast still fans out to all
+   * endpoints; only the read order changes. Failures sort last.
+   */
+  async rankLatency(timeoutMs = 1_500): Promise<void> {
+    await Promise.all(
+      this.endpoints
+        .filter((e) => !e.sendOnly && !e.disabled)
+        .map(async (e) => {
+          const started = Date.now();
+          try {
+            await withTimeout(e.provider.send("eth_chainId", []), timeoutMs, "rank");
+            e.latencyMs = Date.now() - started;
+          } catch {
+            e.latencyMs = Number.POSITIVE_INFINITY;
+          }
+        }),
+    );
+    const ranked = this.endpoints
+      .filter((e) => !e.sendOnly && e.latencyMs !== undefined && e.latencyMs < Number.POSITIVE_INFINITY)
+      .map((e) => `${shortUrl(e.url)} ${e.latencyMs}ms`)
+      .join(", ");
+    if (ranked) log.info(`rpc rank ${this.chain.key}: ${ranked}`);
   }
 
   markFailure(e: Endpoint, err: unknown) {
