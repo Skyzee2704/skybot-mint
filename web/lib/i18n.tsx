@@ -435,6 +435,7 @@ const ID_STRINGS: Record<string, string> = {
   "Back to SkyBOT Mint": "Kembali ke SkyBOT Mint",
 
   // Compact wallet list (search + pagination)
+  "Scroll down for more": "Gulir ke bawah untuk melihat lebih banyak",
   "Search wallets…": "Cari dompet…",
   "Search wallets to fund…": "Cari dompet untuk diisi…",
   Previous: "Sebelumnya",

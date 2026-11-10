@@ -15,6 +15,7 @@ import { balancesAsOf, balancesFetcher, balancesKey, revalidate } from "@/lib/sw
 import type { useApi } from "@/components/AppShell";
 import { usePersistedChain } from "@/lib/chainPref";
 import { useLang } from "@/lib/i18n";
+import { ScrollArea } from "@/components/ScrollArea";
 
 type W = { id: string; label: string; address: string; isMain: boolean };
 type Status = "queued" | "signing" | "sent" | "confirmed" | "failed" | "skipped";
@@ -245,7 +246,7 @@ export function FundWallets({ api, wallets, onDone }: { api: ReturnType<typeof u
               aria-label={t("Search wallets to fund…")}
             />
           </div>
-          <div className="wallet-pick">
+          <ScrollArea className="wallet-pick">
             {visibleOthers.map((w) => (
               <label key={w.id} className={picked[w.id] ? "on" : ""}>
                 <input
@@ -265,7 +266,7 @@ export function FundWallets({ api, wallets, onDone }: { api: ReturnType<typeof u
               </label>
             ))}
             {!visibleOthers.length && <span className="muted small">{t("No wallets match this search.")}</span>}
-          </div>
+          </ScrollArea>
           <div className="row" style={{ marginTop: 12 }}>
             <input
               inputMode="decimal"

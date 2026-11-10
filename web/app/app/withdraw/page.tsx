@@ -7,6 +7,7 @@ import { assertSignableChain, withSignTimeout } from "@/lib/signing";
 import { usePrivy, useSignTransaction } from "@privy-io/react-auth";
 import { fmtEth, fmtNative, short } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
+import { ScrollArea } from "@/components/ScrollArea";
 import { useApi, useShell } from "@/components/AppShell";
 import { ChainSelect } from "@/components/ChainSelect";
 import { useWalletList } from "@/lib/wallets";
@@ -191,7 +192,7 @@ export default function WithdrawPage() {
           </button>
           <span className="muted">{t("{selected} of {total} selected", { selected: ids.length, total: list.wallets.length })}</span>
         </div>
-        <div className="scroll-table">
+        <ScrollArea className="scroll-table">
           <table>
             <thead>
               <tr>
@@ -260,7 +261,7 @@ export default function WithdrawPage() {
               )}
             </tbody>
           </table>
-        </div>
+        </ScrollArea>
         <div className="row" style={{ marginTop: 12 }}>
           <input
             className="mono"

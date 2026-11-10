@@ -582,6 +582,42 @@ html.tg-mini-app body {
   background: var(--panel);
   z-index: 1;
 }
+
+/* "More below" hint: phones hide the native scrollbar until you scroll, so the
+   scrollable lists get a visible fade + pill at the bottom edge instead. */
+.scroll-area-wrap {
+  position: relative;
+}
+.scroll-hint {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 20px 8px 8px;
+  background: linear-gradient(to bottom, transparent, var(--panel) 65%);
+  color: var(--orange);
+  font-size: 12px;
+  font-weight: 600;
+  pointer-events: none;
+  z-index: 2;
+}
+.scroll-hint-arrow {
+  display: inline-block;
+  animation: scroll-hint-bob 1.4s ease-in-out infinite;
+}
+@keyframes scroll-hint-bob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(3px);
+  }
+}
 .wallet-pick label {
   display: flex;
   align-items: center;

@@ -6,6 +6,7 @@ import { STRATEGY_LABELS } from "@/lib/labels";
 import Link from "next/link";
 import { fmtEth, short } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
+import { ScrollArea } from "@/components/ScrollArea";
 import { useApi, useShell } from "@/components/AppShell";
 import { usePrivy, useSignMessage, useWallets } from "@privy-io/react-auth";
 import { assertOpenSeaSiwe } from "@nft-mint-bot/server/siwe";
@@ -478,7 +479,7 @@ export default function MintPage() {
                   {tr("Clear")}
                 </button>
               </div>
-              <div className="wallet-pick">
+              <ScrollArea className="wallet-pick">
                 {walletList.loading &&
                   [0, 1, 2].map((i) => (
                     <label key={i}>
@@ -502,7 +503,7 @@ export default function MintPage() {
                     {tr("No wallets yet. Add some on")} <Link href="/app/wallets">{tr("Wallets")}</Link>.
                   </span>
                 )}
-              </div>
+              </ScrollArea>
             </>
           )}
         </div>
