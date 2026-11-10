@@ -199,7 +199,7 @@ const ID_STRINGS: Record<string, string> = {
   "is no longer available": "tidak lagi tersedia",
   "so timing switched to {name}.": "jadi waktu beralih ke {name}.",
   Mint: "Mint",
-  "Paste an OpenSea link, collection slug, or contract address.": "Tempel tautan OpenSea, slug koleksi, atau alamat kontrak.",
+  "Paste an OpenSea link, collection name, or contract address.": "Tempel tautan OpenSea, nama koleksi, atau alamat kontrak.",
   Resolve: "Cari",
   Contract: "Kontrak",
   Chain: "Chain",

@@ -52,6 +52,9 @@ export function kalosResolved(opts: {
   standard: ResolvedTarget["standard"];
   warning?: string;
   nowSec?: number;
+  /** On-chain ERC-721 name/symbol: the collection display name when the drop carries none. */
+  onChainName?: string | null;
+  onChainSymbol?: string | null;
 }): ResolvedTarget {
   const chain = requireChain("elysium");
   const drop = opts.drop;
@@ -70,8 +73,10 @@ export function kalosResolved(opts: {
     chain: { key: chain.key, chainId: chain.chainId, name: chain.name, nativeSymbol: chain.nativeSymbol, explorer: chain.explorer },
     contract: getAddress(drop.address),
     kind: "seadrop",
-    name: drop.page?.displayName || drop.name || drop.slug,
-    symbol: drop.symbol ?? null,
+    // Display name, never the slug: a drop without a display name falls back to the
+    // on-chain contract name (usually the collection name) before the slug.
+    name: drop.page?.displayName || drop.name || opts.onChainName || drop.slug,
+    symbol: drop.symbol ?? opts.onChainSymbol ?? null,
     standard: opts.standard,
     slug: drop.slug,
     opensea: { apiKey: false, drop: null, error: null, url: null },

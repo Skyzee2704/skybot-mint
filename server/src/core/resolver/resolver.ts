@@ -230,7 +230,7 @@ export async function resolveTarget(opts: ResolveOptions): Promise<ResolvedTarge
     }
     const choice = chooseSeaDrop(allowed, parsed.source === "kalos" || Boolean(slug && kalosHit.slug === slug));
     if (choice.use === "kalos") {
-      const standard = await detectStandard(pool, contract!);
+      const [standard, ns] = await Promise.all([detectStandard(pool, contract!), readNameSymbol(pool, contract!)]);
       return kalosResolved({
         drop: kalosHit,
         input: opts.input,
@@ -238,6 +238,8 @@ export async function resolveTarget(opts: ResolveOptions): Promise<ResolvedTarge
         code,
         standard,
         warning: [choice.warning, ...warnings].filter(Boolean).join(" ") || undefined,
+        onChainName: ns.name,
+        onChainSymbol: ns.symbol,
       });
     }
     if (choice.warning) warnings.push(choice.warning);

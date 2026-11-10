@@ -351,11 +351,11 @@ export default function MintPage() {
     <>
       <div className="card">
         <h2>{tr("Mint")}</h2>
-        <p className="muted">{tr("Paste an OpenSea link, collection slug, or contract address.")}</p>
+        <p className="muted">{tr("Paste an OpenSea link, collection name, or contract address.")}</p>
         <div className="row">
           <input
             style={{ flex: 1, minWidth: 260 }}
-            placeholder="https://opensea.io/collection/… · kalos.fun/drops/… · 0x… · slug"
+            placeholder="https://opensea.io/collection/… · 0x… · collection name"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && doResolve()}
@@ -373,7 +373,7 @@ export default function MintPage() {
         <div className="card">
           <h2>
             {t.name ?? tr("Contract")} {t.symbol && <span className="muted">({t.symbol})</span>}{" "}
-            <span className="pill">{t.dropSource === "kalos" ? "Kalos" : t.kind}</span> <span className="pill">{t.standard}</span>
+            {t.dropSource !== "kalos" && <span className="pill">{t.kind}</span>} <span className="pill">{t.standard}</span>
           </h2>
           <div className="grid">
             <div className="kv">

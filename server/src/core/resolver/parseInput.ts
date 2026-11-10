@@ -26,7 +26,7 @@ function chainKey(seg?: string): string | undefined {
 /** Accepts: OpenSea collection/drop/item URLs, bare slug, 0x address, explorer URLs, any URL containing an address. */
 export function parseInput(raw: string): ParsedInput {
   const input = (raw ?? "").trim().replace(/\/+$/, "");
-  if (!input) throw new Error("Empty input — paste an OpenSea link, collection slug or contract address");
+  if (!input) throw new Error("Empty input — paste an OpenSea link, collection name or contract address");
   if (ADDR.test(input)) return { kind: "address", value: input, source: "raw" };
 
   const looksUrl = /^https?:\/\//i.test(input) || /^[\w.-]+\.[a-z]{2,}\//i.test(input);
@@ -74,7 +74,7 @@ export function parseInput(raw: string): ParsedInput {
       }
       const addr = segs.find((s) => ADDR.test(s));
       if (addr) return { kind: "address", value: addr, source: "opensea" };
-      throw new Error("OpenSea URL has no collection slug or contract address — paste the collection or item link");
+      throw new Error("OpenSea URL has no collection name or contract address — paste the collection or item link");
     }
 
     const explorerChain = Object.entries(EXPLORERS).find(([h]) => host === h || host.endsWith("." + h))?.[1];
@@ -85,6 +85,8 @@ export function parseInput(raw: string): ParsedInput {
 
   const embedded = input.match(/0x[0-9a-fA-F]{40}/)?.[0];
   if (embedded) return { kind: "address", value: embedded, source: "raw" };
-  if (/^[a-z0-9][a-z0-9._-]{0,199}$/i.test(input)) return { kind: "slug", value: input.toLowerCase(), source: "raw" };
-  throw new Error(`Could not read "${input}" as an OpenSea link, slug, or contract address`);
+  // A collection display name ("Elysium Punks") resolves as its slug ("elysium-punks").
+  const slugCandidate = input.replace(/\s+/g, "-");
+  if (/^[a-z0-9][a-z0-9._-]{0,199}$/i.test(slugCandidate)) return { kind: "slug", value: slugCandidate.toLowerCase(), source: "raw" };
+  throw new Error(`Could not read "${input}" as an OpenSea link, collection name, slug, or contract address`);
 }
