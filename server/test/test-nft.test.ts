@@ -2,13 +2,16 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { Interface, Wallet, getAddress } from "ethers";
 import {
+  ERC1155_BATCH_SELECTOR,
   ERC1155_SAFE_SELECTOR,
   ERC721_SAFE_SELECTOR,
   assertSignedNftTransfer,
+  encodeErc1155Batch,
   encodeNftTransfer,
   parseUint,
   runTestNftSend,
 } from "../src/testsend/nft.js";
+import { parseOptionalNonce } from "../src/testsend/nativeSend.js";
 
 const FROM = getAddress("0xb22b000000000000000000000000000000004d2f");
 const TO = getAddress("0xdd911fa75e72b3c11e75dcabfae9f60d65903877");
@@ -40,6 +43,11 @@ describe("nft calldata", () => {
     expect(decoded1155[4]).toBe("0x");
     expect(() => parseUint("0", "Amount", { positive: true })).toThrow(/greater than 0/);
     expect(() => encodeNftTransfer("erc1155", FROM, TO, id)).toThrow(/greater than 0/);
+    const batch = encodeErc1155Batch(FROM, TO, [1n, 2n], [1n, 4n]);
+    expect(batch.toLowerCase().startsWith(ERC1155_BATCH_SELECTOR)).toBe(true);
+    expect(parseOptionalNonce(undefined)).toBeNull();
+    expect(parseOptionalNonce("7")).toBe(7);
+    expect(() => parseOptionalNonce("-1")).toThrow(/Nonce/);
   });
 
   it("accepts a value-0 signed transfer and rejects native value", async () => {

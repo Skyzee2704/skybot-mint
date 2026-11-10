@@ -16,12 +16,19 @@ import { getPool } from "../core/rpc/pool.js";
 import { describeTxError } from "../core/tx/revert.js";
 import { validateDestination } from "../core/withdraw.js";
 import { redactString } from "../util/log.js";
-import { assertTestSendToken, fetchAllowlistedAddress, resolveTestSendChain, siweTestAuthorizationContext } from "./nativeSend.js";
+import {
+  assertTestSendToken,
+  fetchAllowlistedAddress,
+  parseOptionalNonce,
+  resolveTestSendChain,
+  siweTestAuthorizationContext,
+} from "./nativeSend.js";
 
 export const ERC721_INTERFACE = "0x80ac58cd";
 export const ERC1155_INTERFACE = "0xd9b67a26";
 export const ERC721_SAFE_SELECTOR = "0x42842e0e";
 export const ERC1155_SAFE_SELECTOR = "0xf242432a";
+export const ERC1155_BATCH_SELECTOR = "0x2eb2c2d6";
 const NFT_GAS_SANITY_CAP = 500_000n;
 
 const ERC165 = new Interface(["function supportsInterface(bytes4 interfaceId) view returns (bool)"]);
@@ -31,6 +38,7 @@ const ERC721 = new Interface([
 ]);
 const ERC1155 = new Interface([
   "function safeTransferFrom(address from, address to, uint256 id, uint256 amount, bytes data)",
+  "function safeBatchTransferFrom(address from, address to, uint256[] ids, uint256[] amounts, bytes data)",
   "function balanceOf(address account, uint256 id) view returns (uint256)",
 ]);
 
@@ -72,6 +80,18 @@ export function encodeNftTransfer(standard: NftStandard, from: string, to: strin
   const data = ERC1155.encodeFunctionData("safeTransferFrom", [getAddress(from), getAddress(to), tokenId, amount, "0x"]);
   if (!data.toLowerCase().startsWith(ERC1155_SAFE_SELECTOR)) {
     throw httpError("ERC-1155 encoder did not produce selector 0xf242432a.", 500, "ENCODER");
+  }
+  return data;
+}
+
+/** One ERC-1155 safeBatchTransferFrom for several ids of the same contract. Value stays 0. */
+export function encodeErc1155Batch(from: string, to: string, ids: bigint[], amounts: bigint[]): string {
+  if (!ids.length || ids.length !== amounts.length)
+    throw httpError("Batch token ids and amounts must be the same length.", 400, "BAD_AMOUNT");
+  if (amounts.some((a) => a <= 0n)) throw httpError("ERC-1155 amount must be greater than 0.", 400, "BAD_AMOUNT");
+  const data = ERC1155.encodeFunctionData("safeBatchTransferFrom", [getAddress(from), getAddress(to), ids, amounts, "0x"]);
+  if (!data.toLowerCase().startsWith(ERC1155_BATCH_SELECTOR)) {
+    throw httpError("ERC-1155 batch encoder did not produce selector 0x2eb2c2d6.", 500, "ENCODER");
   }
   return data;
 }
@@ -212,11 +232,119 @@ function stampFrom(e: unknown, from: string): never {
   throw e;
 }
 
+/** Several ERC-1155 ids of one contract, one safeBatchTransferFrom, value 0. */
+async function runTestNftBatch(header: string | null | undefined, body: unknown) {
+  assertTestSendToken(header);
+  const ctx = siweTestAuthorizationContext();
+  const b = body as Record<string, unknown>;
+  const walletId = typeof b.walletId === "string" ? b.walletId.trim() : "";
+  const contractRaw = typeof b.contract === "string" ? b.contract.trim() : "";
+  const destination = typeof b.destination === "string" ? b.destination.trim() : "";
+  const chainRaw = b.chainId;
+  const chainId = typeof chainRaw === "number" ? chainRaw : typeof chainRaw === "string" && /^\d+$/.test(chainRaw) ? Number(chainRaw) : NaN;
+  const idRaw = b.tokenIds as unknown[];
+  const amtRaw = Array.isArray(b.amounts) ? (b.amounts as unknown[]) : [];
+  if (!walletId) throw httpError("Wallet is required.", 400, "BAD_WALLET");
+  if (!Number.isInteger(chainId)) throw httpError("Chain is required.", 400, "BAD_CHAIN");
+  if (!contractRaw) throw httpError("NFT contract is required.", 400, "BAD_TOKEN");
+  if (!destination) throw httpError("Destination is required.", 400, "BAD_ADDRESS");
+  if (!idRaw.length || idRaw.length !== amtRaw.length)
+    throw httpError("Batch token ids and amounts must be the same length.", 400, "BAD_AMOUNT");
+  const ids = idRaw.map((v) => parseUint(String(v), "Token id"));
+  const amounts = amtRaw.map((v) => parseUint(String(v), "Amount", { positive: true }));
+  const chain = resolveTestSendChain(chainId);
+  const contract = validateDestination(contractRaw);
+  const to = validateDestination(destination);
+  const from = await fetchAllowlistedAddress(walletId);
+  const pool = getPool(chain);
+  for (let i = 0; i < ids.length; i++) {
+    let bal: bigint;
+    try {
+      bal = (await pool.read((p) => new Contract(contract, ERC1155, p).balanceOf(from, ids[i]) as Promise<bigint>, "balanceOf")) as bigint;
+    } catch (e: any) {
+      throw httpError(`balanceOf failed: ${redactString(String(e?.shortMessage ?? e?.message ?? e)).slice(0, 300)}`, 400, "BALANCE_CHECK");
+    }
+    if (bal < amounts[i])
+      throw httpError(
+        `ERC-1155 balance ${bal.toString()} is below amount ${amounts[i].toString()} for id ${ids[i].toString()}.`,
+        400,
+        "INSUFFICIENT_BALANCE",
+      );
+  }
+  const data = encodeErc1155Batch(from, to, ids, amounts);
+  let gasLimit: bigint;
+  try {
+    gasLimit = await pool.read((p) => p.estimateGas({ from, to: contract, value: 0n, data }), "estimateGas");
+  } catch (e) {
+    const why = await describeTxError(e, { chain, contracts: [contract] });
+    throw httpError(`Gas estimate failed: ${why.message}`, 400, "ESTIMATE_FAILED");
+  }
+  if (gasLimit < 21_000n) gasLimit = 21_000n;
+  if (gasLimit > NFT_GAS_SANITY_CAP) {
+    throw httpError(
+      `Gas estimate ${gasLimit.toString()} exceeds the NFT transfer sanity cap of ${NFT_GAS_SANITY_CAP.toString()}.`,
+      400,
+      "GAS_CAP",
+    );
+  }
+  const fees = await getFees(pool);
+  const nonce = parseOptionalNonce(b.nonce) ?? (await pool.read((p) => p.getTransactionCount(from, "pending"), "nonce"));
+  const res = await getPrivy()
+    .wallets()
+    .ethereum()
+    .signTransaction(walletId, {
+      params: {
+        transaction: {
+          to: contract,
+          data,
+          value: "0x0",
+          nonce,
+          chain_id: chain.chainId,
+          gas_limit: toQuantity(gasLimit),
+          max_fee_per_gas: toQuantity(fees.maxFeePerGas),
+          max_priority_fee_per_gas: toQuantity(fees.maxPriorityFeePerGas),
+          type: 2,
+        },
+      },
+      authorization_context: ctx,
+    } as any);
+  const signed = (res as any)?.signed_transaction as string;
+  if (typeof signed !== "string" || !/^0x[0-9a-fA-F]+$/.test(signed)) {
+    throw httpError("Privy did not return a signed transaction.", 502, "SIGN_FAILED");
+  }
+  const parsed = Transaction.from(signed);
+  if (parsed.value !== 0n || !parsed.to || getAddress(parsed.to) !== contract || (parsed.data ?? "").toLowerCase() !== data.toLowerCase()) {
+    throw httpError("Refusing to broadcast calldata that is not the requested safeBatchTransferFrom.", 400, "TX_SHAPE");
+  }
+  if (!parsed.from || getAddress(parsed.from) !== from)
+    throw httpError("Signed sender does not match the fetched wallet.", 400, "TX_SHAPE");
+  const sent = await pool.broadcast(signed);
+  if (!sent.accepted.length) {
+    const msg = sent.errors.map((e) => redactString(e.error)).join("; ") || "no RPC accepted the transaction";
+    throw httpError(`Broadcast failed (hash ${sent.hash}): ${msg}`, 502, "BROADCAST_FAILED");
+  }
+  return {
+    txHash: sent.hash,
+    explorer: explorerTx(chain, sent.hash),
+    from,
+    to,
+    contract,
+    tokenId: ids.map((id) => id.toString()).join(","),
+    amount: amounts.map((a) => a.toString()).join(","),
+    standard: "erc1155" as const,
+    chainId: chain.chainId,
+    nonce,
+  };
+}
+
 /**
  * ERC-721 or ERC-1155 safeTransferFrom. Value is 0. Standard "auto" uses ERC-165.
  */
 export async function runTestNftSend(header: string | null | undefined, body: unknown) {
   assertTestSendToken(header);
+  if (body && typeof body === "object" && Array.isArray((body as { tokenIds?: unknown }).tokenIds)) {
+    return runTestNftBatch(header, body);
+  }
   const ctx = siweTestAuthorizationContext();
   if (!body || typeof body !== "object" || Array.isArray(body)) throw httpError("JSON body required.", 400, "BAD_BODY");
   const b = body as Record<string, unknown>;
@@ -303,7 +431,8 @@ export async function runTestNftSend(header: string | null | undefined, body: un
       from,
     );
   }
-  const [fees, nonce] = await Promise.all([getFees(pool), pool.read((p) => p.getTransactionCount(from, "pending"), "nonce")]);
+  const fees = await getFees(pool);
+  const nonce = parseOptionalNonce(b.nonce) ?? (await pool.read((p) => p.getTransactionCount(from, "pending"), "nonce"));
 
   let signed: string;
   try {
@@ -350,5 +479,6 @@ export async function runTestNftSend(header: string | null | undefined, body: un
     amount: checked.amount?.toString() ?? null,
     standard: checked.standard,
     chainId: chain.chainId,
+    nonce,
   };
 }

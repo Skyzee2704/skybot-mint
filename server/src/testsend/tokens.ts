@@ -22,6 +22,7 @@ import {
   assertTestSendRpc,
   assertTestSendToken,
   fetchAllowlistedAddress,
+  parseOptionalNonce,
   resolveTestSendChain,
   siweTestAuthorizationContext,
   testSendChainOptions,
@@ -438,6 +439,7 @@ export async function runTestErc20Send(
   symbol: string | null;
   decimals: number;
   chainId: number;
+  nonce: number;
 }> {
   assertTestSendToken(header);
   const ctx = siweTestAuthorizationContext();
@@ -480,7 +482,8 @@ export async function runTestErc20Send(
       from,
     );
   }
-  const [fees, nonce] = await Promise.all([getFees(pool), pool.read((p) => p.getTransactionCount(from, "pending"), "nonce")]);
+  const fees = await getFees(pool);
+  const nonce = parseOptionalNonce(b.nonce) ?? (await pool.read((p) => p.getTransactionCount(from, "pending"), "nonce"));
 
   let signed: string;
   try {
@@ -528,5 +531,6 @@ export async function runTestErc20Send(
     symbol: meta.symbol,
     decimals: meta.decimals,
     chainId: chain.chainId,
+    nonce,
   };
 }

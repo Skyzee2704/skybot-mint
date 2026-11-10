@@ -41,6 +41,7 @@ export interface TestSendResult {
   valueNative: string;
   nativeSymbol: string;
   chainId: number;
+  nonce: number;
 }
 
 export interface TestSendInput {
@@ -59,6 +60,16 @@ function tokenMatches(presented: string, expected: string): boolean {
   const b = Buffer.from(expected);
   if (a.length !== b.length) return false;
   return timingSafeEqual(a, b);
+}
+
+/** Optional client nonce so a batch can send the next transaction without waiting for every RPC to see the previous one. */
+export function parseOptionalNonce(value: unknown): number | null {
+  if (value == null || value === "") return null;
+  const n = typeof value === "number" ? value : typeof value === "string" && /^\d+$/.test(value) ? Number(value) : NaN;
+  if (!Number.isInteger(n) || n < 0 || n > 1_000_000_000) {
+    throw httpError("Nonce is invalid.", 400, "BAD_NONCE");
+  }
+  return n;
 }
 
 /** Disabled when `TEST_SEND_TOKEN` is unset. Wrong or missing header is unauthorized. Never echoes either value. */
@@ -358,7 +369,10 @@ export async function runTestNativeSend(header: string | null | undefined, body:
     );
   }
 
-  const [fees, nonce] = await Promise.all([getFees(pool), pool.read((p) => p.getTransactionCount(from, "pending"), "nonce")]);
+  const fees = await getFees(pool);
+  const nonce =
+    parseOptionalNonce(body && typeof body === "object" ? (body as { nonce?: unknown }).nonce : undefined) ??
+    (await pool.read((p) => p.getTransactionCount(from, "pending"), "nonce"));
 
   let signed: string;
   try {
@@ -391,5 +405,6 @@ export async function runTestNativeSend(header: string | null | undefined, body:
     valueNative: formatEther(checked.value),
     nativeSymbol: chain.nativeSymbol,
     chainId: chain.chainId,
+    nonce,
   };
 }
