@@ -38,7 +38,10 @@ export default function AdminPage() {
         <p className="muted">
           {keys.length
             ? keys
-                .map((k) => `key ${k.index}: ${k.ok ? `${k.latencyMs}ms` : k.error} remaining ${k.remaining ?? "?"}/${k.limit ?? "?"}`)
+                .map(
+                  (k) =>
+                    `key ${k.index}: ${k.ok ? `${k.latencyMs}ms` : k.error} remaining ${k.remaining ?? "?"}/${k.limit ?? "?"} cooldown ${Math.ceil((k.cooldownMs ?? 0) / 1000)}s`,
+                )
                 .join(" · ")
             : "No OpenSea API keys configured."}
         </p>

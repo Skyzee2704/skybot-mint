@@ -6,7 +6,7 @@
  * the short-lived JWT is held in memory only. Nothing is logged.
  */
 import { getAddress, type Wallet } from "ethers";
-import { env } from "../../config/env.js";
+import { openseaFetch } from "./openseaKeys.js";
 import { OPENSEA_SIWE_STATEMENT } from "./siweGuard.js";
 
 const API = "https://api.opensea.io";
@@ -232,14 +232,14 @@ export async function dropEligibility(signer: Wallet, slug: string, fetchImpl: t
   return eligibilityWithJwt(await walletJwt(signer, fetchImpl), slug, fetchImpl);
 }
 
-/** GET /api/v2/drops/{slug}/eligibility — per-stage verdict incl. upcoming stages. No balance needed. */
+/** GET /api/v2/drops/{slug}/eligibility — per-stage verdict incl. upcoming stages. Uses the shared key pool. */
 export async function eligibilityWithJwt(jwt: string, slug: string, fetchImpl: typeof fetch = fetch): Promise<StageEligibility[]> {
-  if (!env.openseaApiKey) throw new Error("OPENSEA_API_KEY not set");
-  const r = await osFetch(
-    `${API}/api/v2/drops/${encodeURIComponent(slug)}/eligibility`,
-    { headers: { "x-api-key": env.openseaApiKey, authorization: `Bearer ${jwt}`, accept: "application/json" } },
+  const r = await openseaFetch({
+    priority: "background",
+    url: `${API}/api/v2/drops/${encodeURIComponent(slug)}/eligibility`,
+    headers: { authorization: `Bearer ${jwt}`, accept: "application/json" },
     fetchImpl,
-  );
+  });
   await ok(r, "eligibility");
   return ((await r.json()) as any).stages ?? [];
 }

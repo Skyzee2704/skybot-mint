@@ -17,6 +17,7 @@
 import { Interface } from "ethers";
 import type { ChainConfig } from "../../config/chains.js";
 import { env } from "../../config/env.js";
+import { openseaFetch, openseaKeyCount } from "../resolver/openseaKeys.js";
 import { getPool } from "../rpc/pool.js";
 import { aggregate, type McResult } from "../rpc/multicall.js";
 import { ALCHEMY_NFT_NETWORK, alchemyKey, type Fetch, type NftItem } from "./indexer.js";
@@ -149,12 +150,30 @@ export async function metadataFromOpenSea(
   f: Fetch,
   key = env.openseaApiKey,
 ): Promise<{ name: string | null; image: string | null } | null> {
-  if (!key || !chain.openseaChain) return null;
-  const j = await getJson(
-    f,
-    `https://api.opensea.io/api/v2/chain/${encodeURIComponent(chain.openseaChain)}/contract/${item.contract}/nfts/${item.tokenId}`,
-    { "x-api-key": key },
-  );
+  if (!chain.openseaChain || (!key && openseaKeyCount() === 0)) return null;
+  const url = `https://api.opensea.io/api/v2/chain/${encodeURIComponent(chain.openseaChain)}/contract/${item.contract}/nfts/${item.tokenId}`;
+  const pooled = !key || key === env.openseaApiKey;
+  const j = pooled
+    ? await openseaFetch({
+        priority: "background",
+        url,
+        fallbackKey: key ?? undefined,
+        fetchImpl: async (input, init) => {
+          const headers: Record<string, string> = {};
+          new Headers(init?.headers).forEach((value, name) => {
+            headers[name] = value;
+          });
+          const res = await f(String(input), { headers, signal: init?.signal ?? undefined });
+          const body = await res.json().catch(() => null);
+          return new Response(body == null ? "" : JSON.stringify(body), {
+            status: res.status,
+            headers: { "content-type": "application/json" },
+          });
+        },
+      })
+        .then(async (r) => (r.ok ? r.json().catch(() => null) : null))
+        .catch(() => null)
+    : await getJson(f, url, { "x-api-key": key! });
   const n = j?.nft;
   if (!n) return null;
   if (!sameUri(canonUri(n.metadata_url), onchainRaw, item.tokenId)) return null;

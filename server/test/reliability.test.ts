@@ -34,24 +34,43 @@ describe("OpenSea key pool", () => {
     expect(keyIndexForWallet(2, 2)).toBe(0);
   });
 
-  it("cools down one key without delaying the other, and logs indexes only", async () => {
+  it("skips a cooling key and uses the next one immediately", async () => {
     process.env.OPENSEA_API_KEYS = `${SECRET_A},${SECRET_B}`;
     resetOpenseaKeyPool();
-    penalizeOpenseaKey(0, Date.now() + 250);
-    const other = Date.now();
-    const held = await acquireOpenseaKey(1);
-    expect(Date.now() - other).toBeLessThan(80);
+    penalizeOpenseaKey(0, Date.now() + 5_000);
+    const started = Date.now();
+    const held = await acquireOpenseaKey(0);
     expect(held?.index).toBe(1);
+    expect(Date.now() - started).toBeLessThan(80);
     held?.release();
-    const slowed = Date.now();
-    const cooled = await acquireOpenseaKey(0);
-    expect(Date.now() - slowed).toBeGreaterThanOrEqual(200);
-    cooled?.release();
     const line = openseaKeyLog();
     expect(line).toContain("key0");
     expect(line).toContain("key1");
     expect(line).not.toContain(SECRET_A);
     expect(line).not.toContain(SECRET_B);
+  });
+
+  it("rotates to the next key on 429 without waiting for Retry-After", async () => {
+    process.env.OPENSEA_API_KEYS = `${SECRET_A},${SECRET_B}`;
+    resetOpenseaKeyPool();
+    const seen: string[] = [];
+    const started = Date.now();
+    const { openseaFetch } = await import("../src/core/resolver/openseaKeys.js");
+    const res = await openseaFetch({
+      priority: "mint",
+      url: "https://api.opensea.io/api/v2/drops/demo/mint",
+      method: "POST",
+      fetchImpl: async (_url, init) => {
+        const key = new Headers(init?.headers).get("x-api-key") ?? "";
+        seen.push(key);
+        if (key === SECRET_A) return new Response("no", { status: 429, headers: { "retry-after": "30" } });
+        return new Response("{}", { status: 200, headers: { "x-ratelimit-limit": "50", "x-ratelimit-remaining": "40" } });
+      },
+    });
+    expect(res.status).toBe(200);
+    expect(seen).toEqual([SECRET_A, SECRET_B]);
+    expect(Date.now() - started).toBeLessThan(150);
+    expect(openseaKeyLog()).not.toContain(SECRET_A);
   });
 
   it("reports latency and remaining per index and never the key", async () => {
