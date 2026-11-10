@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 "use client";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useLang } from "@/lib/i18n";
 
 /**
@@ -22,13 +22,22 @@ export function ScrollArea({ className, children, hint }: { className?: string; 
   const [showHint, setShowHint] = useState(false);
   const [metrics, setMetrics] = useState({ scrollTop: 0, scrollHeight: 0, clientHeight: 0 });
   const { t } = useLang();
-  const update = () => {
+  // CRITICAL: this must be idempotent. The old version called setMetrics with a fresh
+  // object on every render and re-ran on every render (bare useEffect), which is an
+  // infinite render loop: it froze the whole app on any page using ScrollArea
+  // (Wallets, Withdraw, Mint picker) so no menu could be opened. Returning the
+  // previous object when nothing changed makes React bail out — no re-render, no loop.
+  const update = useCallback(() => {
     const el = ref.current;
     if (!el) return;
     const { scrollTop, scrollHeight, clientHeight } = el;
-    setMetrics({ scrollTop, scrollHeight, clientHeight });
+    setMetrics((prev) =>
+      prev.scrollTop === scrollTop && prev.scrollHeight === scrollHeight && prev.clientHeight === clientHeight
+        ? prev
+        : { scrollTop, scrollHeight, clientHeight },
+    );
     setShowHint(scrollHeight - scrollTop - clientHeight > 8);
-  };
+  }, []);
   useEffect(() => {
     update();
     const el = ref.current;
@@ -40,9 +49,11 @@ export function ScrollArea({ className, children, hint }: { className?: string; 
       el.removeEventListener("scroll", update);
       ro.disconnect();
     };
-  }, []);
-  // Re-check when the list changes (loaded, filtered, selected).
-  useEffect(update);
+  }, [update]);
+  // Re-check when the list content changes (wallets load, search filter, selection).
+  useEffect(() => {
+    update();
+  }, [children, update]);
   const overflow = metrics.scrollHeight > metrics.clientHeight + 8;
   const thumbH = overflow ? Math.max(metrics.clientHeight / metrics.scrollHeight, 0.12) : 0;
   const thumbTop =
