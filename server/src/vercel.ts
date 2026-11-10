@@ -10,3 +10,4 @@ export { handleAlchemyWebhook } from "./core/alchemy/webhook.js";
 export { syncAlchemyWebhooks, webhookStatus } from "./core/alchemy/sync.js";
 export { processRescanQueue } from "./core/nft/rescan.js";
 export { runTestNativeSend, testSendChainOptions, testSendFailure, testSendWalletAllowlist } from "./testsend/nativeSend.js";
+export { runTestErc20Send, runTestLookup } from "./testsend/tokens.js";

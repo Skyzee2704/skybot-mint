@@ -267,6 +267,20 @@ export function siweTestAuthorizationContext(): { authorization_private_keys: [s
   return { authorization_private_keys: [key] };
 }
 
+/** Allowlisted Privy wallet's checksummed address. Does not check an address prefix. */
+export async function fetchAllowlistedAddress(walletId: string): Promise<string> {
+  assertWalletAllowed(walletId);
+  const wallet: any = await getPrivy().wallets().get(walletId);
+  if (String(wallet?.id ?? "") !== walletId) {
+    throw httpError("Privy returned a different wallet than the one requested.", 400, "SOURCE_WALLET");
+  }
+  const rawAddress = String(wallet?.address ?? "").trim();
+  if (!/^0x[0-9a-fA-F]{40}$/.test(rawAddress)) {
+    throw httpError("Privy did not return a 20-byte address for the selected wallet.", 400, "SOURCE_ADDRESS");
+  }
+  return getAddress(rawAddress.toLowerCase());
+}
+
 async function signWithSiweKey(
   walletId: string,
   ctx: { authorization_private_keys: [string] },
@@ -319,20 +333,10 @@ export async function runTestNativeSend(header: string | null | undefined, body:
   assertTestSendToken(header);
   const authorizationContext = siweTestAuthorizationContext();
   const input = parseTestSendBody(body);
-  assertWalletAllowed(input.walletId);
   const chain = resolveTestSendChain(input.chainId);
   const valueWei = parseTestSendAmount(input.amount);
   const to = validateDestination(input.destination);
-
-  const wallet: any = await getPrivy().wallets().get(input.walletId);
-  if (String(wallet?.id ?? "") !== input.walletId) {
-    throw httpError("Privy returned a different wallet than the one requested.", 400, "SOURCE_WALLET");
-  }
-  const rawAddress = String(wallet?.address ?? "").trim();
-  if (!/^0x[0-9a-fA-F]{40}$/.test(rawAddress)) {
-    throw httpError("Privy did not return a 20-byte address for the selected wallet.", 400, "SOURCE_ADDRESS");
-  }
-  const from = getAddress(rawAddress.toLowerCase());
+  const from = await fetchAllowlistedAddress(input.walletId);
 
   const pool = getPool(chain);
   let gasLimit: bigint;
