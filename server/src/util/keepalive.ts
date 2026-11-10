@@ -6,11 +6,13 @@
 import { Agent, getGlobalDispatcher, setGlobalDispatcher } from "undici";
 
 export const KEEP_ALIVE_TIMEOUT_MS = 30_000;
+/** Room for a 100-wallet mint wave plus Privy signing and broadcast RPCs on the same agent. */
+export const KEEP_ALIVE_CONNECTIONS = 128;
 
 export const keepAliveDispatcher = new Agent({
   keepAliveTimeout: KEEP_ALIVE_TIMEOUT_MS,
   keepAliveMaxTimeout: 60_000,
-  connections: 64,
+  connections: KEEP_ALIVE_CONNECTIONS,
   pipelining: 1,
 });
 

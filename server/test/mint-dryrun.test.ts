@@ -121,20 +121,21 @@ describe("mint dry-run simulation (mocked OpenSea/RPC/Privy, nothing sent)", () 
     expect(r.timing).toMatch(/mode stream/);
   });
 
-  it("OpenSea builds early and the same tx after start → pre-signed tx reused (no gas/sign after start)", async () => {
+  it("stage open at the start signs each wallet once", async () => {
     sim.preBuild = "same";
     const r = await run();
-    console.log(`[sim presigned] send drift ms: ${r.sendDrift.join(", ")}\n  ${r.timing}`);
-    expect(r.timing).toMatch(/presigned 7/);
+    console.log(`[sim open] send drift ms: ${r.sendDrift.join(", ")}\n  ${r.timing}`);
+    expect(r.out.prepared).toHaveLength(7);
     expect(sim.signs).toBe(7);
-    expect(Math.max(...r.sendDrift)).toBeLessThan(LAT.build + 300);
+    expect(r.timing).toMatch(/presigned 0/);
+    expect(r.timing).toMatch(/mode stream/);
   });
 
-  it("early build differs from the post-start build → re-signed (pre-signed tx discarded)", async () => {
+  it("a closed stage before the start does not pre-sign a second copy", async () => {
     sim.preBuild = "different";
     const r = await run();
-    console.log(`[sim resigned] send drift ms: ${r.sendDrift.join(", ")}\n  ${r.timing}`);
-    expect(sim.signs).toBe(14);
+    console.log(`[sim once] send drift ms: ${r.sendDrift.join(", ")}\n  ${r.timing}`);
+    expect(sim.signs).toBe(7);
     expect(r.timing).toMatch(/presigned 0/);
     expect(r.out.prepared.every((p) => p.raw.startsWith("raw:0xmint"))).toBe(true);
   });
