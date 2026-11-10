@@ -520,6 +520,68 @@ html.tg-mini-app body {
   overflow-y: auto;
   padding-right: 4px;
 }
+
+/* Pagination: Prev on the left, Next on the right, page info centered — one line, even on phones. */
+.pager {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 10px;
+  flex-wrap: nowrap;
+}
+.pager button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+.pager .pager-info {
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* High-contrast scrollbars for wallet lists (Fund Wallets, Withdraw, Mint picker):
+   orange thumb on a dark track, always visible, so it's obvious the area scrolls. */
+.wallet-pick,
+.scroll-table {
+  scrollbar-width: thin;
+  scrollbar-color: var(--orange) var(--line);
+}
+.wallet-pick::-webkit-scrollbar,
+.scroll-table::-webkit-scrollbar {
+  width: 10px;
+}
+.wallet-pick::-webkit-scrollbar-track,
+.scroll-table::-webkit-scrollbar-track {
+  background: var(--line);
+  border-radius: 8px;
+}
+.wallet-pick::-webkit-scrollbar-thumb,
+.scroll-table::-webkit-scrollbar-thumb {
+  background: var(--orange);
+  border-radius: 8px;
+  border: 2px solid var(--panel);
+}
+.wallet-pick::-webkit-scrollbar-thumb:hover,
+.scroll-table::-webkit-scrollbar-thumb:hover {
+  background: var(--orange-hot);
+}
+
+/* Scrollable wallet table (Withdraw): header stays pinned while the rows scroll. */
+.scroll-table {
+  max-height: 320px;
+  overflow-y: auto;
+  margin-top: 10px;
+}
+.scroll-table thead th {
+  position: sticky;
+  top: 0;
+  background: var(--panel);
+  z-index: 1;
+}
 .wallet-pick label {
   display: flex;
   align-items: center;

@@ -191,74 +191,76 @@ export default function WithdrawPage() {
           </button>
           <span className="muted">{t("{selected} of {total} selected", { selected: ids.length, total: list.wallets.length })}</span>
         </div>
-        <table style={{ marginTop: 10 }}>
-          <thead>
-            <tr>
-              <th></th>
-              <th>{t("Wallet")}</th>
-              <th>{t("Balance")}</th>
-              <th>{t("Amount")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {list.loading &&
-              [0, 1].map((i) => (
-                <tr key={i}>
-                  <td colSpan={4}>
-                    <span className="skeleton" style={{ width: "60%" }} />
+        <div className="scroll-table">
+          <table>
+            <thead>
+              <tr>
+                <th></th>
+                <th>{t("Wallet")}</th>
+                <th>{t("Balance")}</th>
+                <th>{t("Amount")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {list.loading &&
+                [0, 1].map((i) => (
+                  <tr key={i}>
+                    <td colSpan={4}>
+                      <span className="skeleton" style={{ width: "60%" }} />
+                    </td>
+                  </tr>
+                ))}
+              {list.wallets.map((w) => (
+                <tr key={w.id}>
+                  <td>
+                    <input
+                      type="checkbox"
+                      checked={Boolean(picked[w.id])}
+                      onChange={(e) => {
+                        setPicked((p) => ({ ...p, [w.id]: e.target.checked }));
+                        reset();
+                      }}
+                      aria-label={t("Select {label}", { label: w.label })}
+                    />
+                  </td>
+                  <td>
+                    {w.label} <span className="mono muted">{short(w.address)}</span> <CopyAddress address={w.address} />
+                  </td>
+                  <td className="mono">
+                    {balances[w.id] === undefined ? (
+                      <span className="skeleton" style={{ width: 70 }} />
+                    ) : balances[w.id] === "error" ? (
+                      <span className="muted">{t("unavailable")}</span>
+                    ) : (
+                      fmtNative(balances[w.id], sym, 6)
+                    )}
+                  </td>
+                  <td>
+                    <input
+                      inputMode="decimal"
+                      placeholder={t("Max")}
+                      value={amounts[w.id] ?? ""}
+                      disabled={!picked[w.id]}
+                      onChange={(e) => {
+                        setAmounts((a) => ({ ...a, [w.id]: e.target.value.replace(/[^0-9.]/g, "") }));
+                        reset();
+                      }}
+                      style={{ width: 140 }}
+                      aria-label={t("Amount for {label}", { label: w.label })}
+                    />
                   </td>
                 </tr>
               ))}
-            {list.wallets.map((w) => (
-              <tr key={w.id}>
-                <td>
-                  <input
-                    type="checkbox"
-                    checked={Boolean(picked[w.id])}
-                    onChange={(e) => {
-                      setPicked((p) => ({ ...p, [w.id]: e.target.checked }));
-                      reset();
-                    }}
-                    aria-label={t("Select {label}", { label: w.label })}
-                  />
-                </td>
-                <td>
-                  {w.label} <span className="mono muted">{short(w.address)}</span> <CopyAddress address={w.address} />
-                </td>
-                <td className="mono">
-                  {balances[w.id] === undefined ? (
-                    <span className="skeleton" style={{ width: 70 }} />
-                  ) : balances[w.id] === "error" ? (
-                    <span className="muted">{t("unavailable")}</span>
-                  ) : (
-                    fmtNative(balances[w.id], sym, 6)
-                  )}
-                </td>
-                <td>
-                  <input
-                    inputMode="decimal"
-                    placeholder={t("Max")}
-                    value={amounts[w.id] ?? ""}
-                    disabled={!picked[w.id]}
-                    onChange={(e) => {
-                      setAmounts((a) => ({ ...a, [w.id]: e.target.value.replace(/[^0-9.]/g, "") }));
-                      reset();
-                    }}
-                    style={{ width: 140 }}
-                    aria-label={t("Amount for {label}", { label: w.label })}
-                  />
-                </td>
-              </tr>
-            ))}
-            {!list.loading && !list.wallets.length && (
-              <tr>
-                <td colSpan={4} className="muted">
-                  {t("No wallets yet. Add some on")} <Link href="/app/wallets">{t("Wallets")}</Link>.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+              {!list.loading && !list.wallets.length && (
+                <tr>
+                  <td colSpan={4} className="muted">
+                    {t("No wallets yet. Add some on")} <Link href="/app/wallets">{t("Wallets")}</Link>.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
         <div className="row" style={{ marginTop: 12 }}>
           <input
             className="mono"

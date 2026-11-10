@@ -386,13 +386,13 @@ export default function WalletsPage() {
           </tbody>
         </table>
         {pageCount > 1 && (
-          <div className="row" style={{ marginTop: 10, justifyContent: "space-between" }}>
+          <div className="pager">
             <button className="ghost" disabled={safePage <= 1} onClick={() => setWalletPage(safePage - 1)}>
               ← {t("Previous")}
             </button>
-            <span className="muted small">
-              {t("Page {page} of {pages}", { page: safePage, pages: pageCount })} ·{" "}
-              {t("{count} wallet(s) found", { count: filteredWallets.length })}
+            <span className="muted small pager-info">
+              {t("Page {page} of {pages}", { page: safePage, pages: pageCount })}
+              {walletQuery.trim() ? ` · ${t("{count} wallet(s) found", { count: filteredWallets.length })}` : ""}
             </span>
             <button className="ghost" disabled={safePage >= pageCount} onClick={() => setWalletPage(safePage + 1)}>
               {t("Next")} →
