@@ -12,7 +12,7 @@ import { ChainSelect } from "@/components/ChainSelect";
 import Link from "next/link";
 import { FundWallets } from "@/components/FundWallets";
 import { usePersistedChain } from "@/lib/chainPref";
-import { explainImportError, normalizePrivateKey, signImportCheck } from "@/lib/importCheck";
+import { BULK_IMPORT_MAX_KEYS, explainImportError, normalizePrivateKey, parseBulkKeys, signImportCheck } from "@/lib/importCheck";
 
 export default function WalletsPage() {
   const api = useApi();
@@ -34,6 +34,13 @@ export default function WalletsPage() {
   const [key, setKey] = useState("");
   const [label, setLabel] = useState("");
   const [genN, setGenN] = useState(3);
+  const [bulkKeys, setBulkKeys] = useState("");
+  const [bulkPrefix, setBulkPrefix] = useState("");
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number } | null>(null);
+  const [bulkResults, setBulkResults] = useState<
+    { line: number; address: string; label: string; status: "imported" | "already" | "failed"; detail: string }[]
+  >([]);
   const [chain, setChain] = usePersistedChain("balances");
   const [busy, setBusy] = useState(false);
   const now = useNow(5000);
@@ -143,6 +150,87 @@ export default function WalletsPage() {
     } finally {
       setBusy(false);
     }
+  };
+
+  // Bulk import: each pasted key goes through the same client-side Privy flow as a single import
+  // (normalize -> local import-check signature -> importWallet), then one batch sync at the end.
+  // Raw keys are never POSTed to SkyBOT; only addresses + Privy wallet ids are synced.
+  const bulkImport = async () => {
+    const keys = parseBulkKeys(bulkKeys);
+    if (!keys.length) {
+      setErr("Paste at least one private key.");
+      return;
+    }
+    if (keys.length > BULK_IMPORT_MAX_KEYS) {
+      setErr(`Bulk import is limited to ${BULK_IMPORT_MAX_KEYS} keys at a time.`);
+      return;
+    }
+    setErr(null);
+    setMsg(null);
+    setBulkBusy(true);
+    setBulkResults([]);
+    setBulkProgress({ done: 0, total: keys.length });
+    const toSync: any[] = [];
+    const results: { line: number; address: string; label: string; status: "imported" | "already" | "failed"; detail: string }[] = [];
+    for (let i = 0; i < keys.length; i++) {
+      const label = bulkPrefix ? `${bulkPrefix}-${i + 1}` : "";
+      let address = "";
+      try {
+        const pk = normalizePrivateKey(keys[i]);
+        const chk = await signImportCheck(pk)
+          .then((proof) => api("/api/wallets/import-check", { body: proof }))
+          .catch(() => ({ status: "unknown" }) as any);
+        if (chk.message && chk.status !== "available" && chk.status !== "in_your_account") throw new Error(chk.message);
+        address = chk.address ?? "";
+        if (chk.status === "in_your_account") {
+          // Already this account's wallet in Privy (e.g. hidden in SkyBOT earlier): add it back, no import.
+          toSync.push({ privyWalletId: chk.privyWalletId ?? "", address: chk.address, label, restore: true });
+          results.push({
+            line: i + 1,
+            address: chk.address,
+            label,
+            status: "already",
+            detail: "Already in your Privy account — added back.",
+          });
+        } else {
+          let w: any;
+          try {
+            w = await importWallet({ privateKey: pk });
+          } catch (e: any) {
+            throw new Error(explainImportError(e));
+          }
+          const addr = (w as any).address ?? (w as any).walletClient?.account?.address ?? chk.address ?? "";
+          address = addr;
+          toSync.push({
+            privyWalletId: (w as any).id ?? (w as any).walletId ?? "",
+            imported: true,
+            address: addr,
+            label,
+            source: "imported",
+            restore: true,
+          });
+          results.push({ line: i + 1, address: addr, label, status: "imported", detail: "Imported via Privy." });
+        }
+      } catch (e: any) {
+        results.push({ line: i + 1, address, label, status: "failed", detail: e?.message ?? "Import failed." });
+      }
+      setBulkProgress({ done: i + 1, total: keys.length });
+      setBulkResults([...results]);
+    }
+    if (toSync.length) {
+      try {
+        await api("/api/wallets/sync", { body: { wallets: toSync } });
+      } catch (e: any) {
+        setErr(`Imported ${toSync.length} wallet(s) in Privy, but syncing them to SkyBOT failed: ${e?.message ?? e}`);
+      }
+    }
+    setBulkKeys(""); // don't leave pasted keys in the page
+    setBulkBusy(false);
+    setBulkProgress(null);
+    const ok = results.filter((r) => r.status !== "failed").length;
+    const failed = results.length - ok;
+    setMsg(`Bulk import finished: ${ok} imported/added back, ${failed} failed.`);
+    await load();
   };
 
   return (
@@ -389,6 +477,57 @@ export default function WalletsPage() {
               </p>
               <p className="muted" style={{ fontSize: 12 }}>
                 Signed in as {user?.email?.address ?? "—"} · {privyWallets?.length ?? 0} Privy wallet(s) connected
+              </p>
+            </div>
+          )}
+        </div>
+        <div className="card">
+          <h2>Bulk Import Private Keys</h2>
+          <p className="muted">
+            Paste many private keys, one per line (max {BULK_IMPORT_MAX_KEYS}). Each goes through the same Privy import as a single key —
+            SkyBOT only keeps the address + Privy wallet id.
+          </p>
+          {!authenticated ? (
+            <div style={{ display: "grid", gap: 8 }}>
+              <p className="muted">Wallet import runs inside Privy, so it needs a Privy session. Connect with Telegram to continue.</p>
+              <button onClick={connectPrivy}>Connect with Privy</button>
+            </div>
+          ) : (
+            <div style={{ display: "grid", gap: 8 }}>
+              <textarea
+                rows={6}
+                autoComplete="off"
+                spellCheck={false}
+                placeholder={"0x… private key\n0x… private key\n…"}
+                value={bulkKeys}
+                onChange={(e) => setBulkKeys(e.target.value)}
+                style={{ fontFamily: "monospace", resize: "vertical" }}
+              />
+              <input placeholder="Label prefix (optional, e.g. WL)" value={bulkPrefix} onChange={(e) => setBulkPrefix(e.target.value)} />
+              <button disabled={!bulkKeys.trim() || bulkBusy} onClick={bulkImport}>
+                {bulkBusy && bulkProgress ? `Importing ${bulkProgress.done}/${bulkProgress.total}…` : "Import All via Privy"}
+              </button>
+              {bulkResults.length > 0 && (
+                <div>
+                  <p className="muted small" style={{ margin: "4px 0" }}>
+                    {bulkResults.filter((r) => r.status === "imported").length} imported ·{" "}
+                    {bulkResults.filter((r) => r.status === "already").length} already in account ·{" "}
+                    {bulkResults.filter((r) => r.status === "failed").length} failed
+                  </p>
+                  <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13 }}>
+                    {bulkResults.map((r, i) => (
+                      <li key={i}>
+                        <span className="mono">{r.address ? short(r.address) : `line ${r.line}`}</span>
+                        {r.label ? ` (${r.label})` : ""} —{" "}
+                        {r.status === "imported" ? "imported" : r.status === "already" ? "already in account" : "failed"}: {r.detail}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              <p className="muted" style={{ fontSize: 12 }}>
+                Keys are sent only to Privy in your browser, never to SkyBOT&apos;s server. The pasted keys are cleared when the import
+                finishes.
               </p>
             </div>
           )}

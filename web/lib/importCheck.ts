@@ -26,6 +26,29 @@ export async function signImportCheck(privateKey: `0x${string}`) {
   return { address: account.address, issuedAt, signature };
 }
 
+export const BULK_IMPORT_MAX_KEYS = 50;
+
+/**
+ * Split pasted bulk keys: one per line; commas and spaces also split a line.
+ * Trims, drops empties, dedupes (case-insensitive, ignoring a 0x prefix).
+ * Returned keys are left as pasted (normalizePrivateKey validates each later).
+ */
+export function parseBulkKeys(raw: string): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const line of raw.split(/\r?\n/)) {
+    for (const part of line.split(/[,\s]+/)) {
+      const k = part.trim();
+      if (!k) continue;
+      const n = k.replace(/^0x/i, "").toLowerCase();
+      if (seen.has(n)) continue;
+      seen.add(n);
+      out.push(k);
+    }
+  }
+  return out;
+}
+
 /** Privy's raw import error when the address already exists in this app (often archived by an earlier Remove). */
 export function explainImportError(e: any): string {
   const m = String(e?.message ?? e ?? "");
