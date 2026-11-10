@@ -544,7 +544,9 @@ html.tg-mini-app body {
 }
 
 /* High-contrast scrollbars for wallet lists (Fund Wallets, Withdraw, Mint picker):
-   orange thumb on a dark track, always visible, so it's obvious the area scrolls. */
+   orange thumb on a dark track, always visible, so it's obvious the area scrolls.
+   (Desktop + Android only — iOS ignores custom scrollbar styling, so touch
+   devices get the .scroll-track indicator below instead.) */
 .wallet-pick,
 .scroll-table {
   scrollbar-width: thin;
@@ -552,22 +554,58 @@ html.tg-mini-app body {
 }
 .wallet-pick::-webkit-scrollbar,
 .scroll-table::-webkit-scrollbar {
-  width: 10px;
+  width: 12px;
 }
 .wallet-pick::-webkit-scrollbar-track,
 .scroll-table::-webkit-scrollbar-track {
-  background: var(--line);
+  background: var(--panel-2);
+  border: 1px solid #3d3d3d;
   border-radius: 8px;
 }
 .wallet-pick::-webkit-scrollbar-thumb,
 .scroll-table::-webkit-scrollbar-thumb {
   background: var(--orange);
   border-radius: 8px;
-  border: 2px solid var(--panel);
+  border: 2px solid var(--orange-hot);
 }
 .wallet-pick::-webkit-scrollbar-thumb:hover,
 .scroll-table::-webkit-scrollbar-thumb:hover {
   background: var(--orange-hot);
+}
+
+/* Custom scroll indicator (touch devices only): a bordered dark track with an
+   orange thumb at the right edge, always visible while the list overflows.
+   iOS hides the native scrollbar, so this is the visible "this scrolls" cue. */
+.scroll-track {
+  display: none;
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  right: 3px;
+  width: 10px;
+  background: var(--panel-2);
+  border: 1px solid #3d3d3d;
+  border-radius: 8px;
+  pointer-events: none;
+  z-index: 3;
+}
+.scroll-thumb {
+  position: absolute;
+  left: 1px;
+  right: 1px;
+  background: var(--orange);
+  border: 1px solid var(--orange-hot);
+  border-radius: 8px;
+}
+@media (pointer: coarse) {
+  .scroll-track {
+    display: block;
+  }
+  /* Keep the list content clear of the indicator rail. */
+  .scroll-area-wrap .wallet-pick,
+  .scroll-area-wrap .scroll-table {
+    padding-right: 16px;
+  }
 }
 
 /* Scrollable wallet table (Withdraw): header stays pinned while the rows scroll. */
