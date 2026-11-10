@@ -44,6 +44,17 @@ export default function MintPage() {
   const [t, setT] = useState<any>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  // Eligibility check progress: shown right under the "Check Eligibility" button so a
+  // 50-wallet check never looks dead. eligErr is the failure reason, in the user's language.
+  const [eligRunning, setEligRunning] = useState(false);
+  const [eligElapsed, setEligElapsed] = useState(0);
+  const [eligErr, setEligErr] = useState<string | null>(null);
+  useEffect(() => {
+    if (!eligRunning) return;
+    const started = Date.now();
+    const id = setInterval(() => setEligElapsed(Math.floor((Date.now() - started) / 1000)), 1000);
+    return () => clearInterval(id);
+  }, [eligRunning]);
   const [strategy, setStrategy] = useState<Strategy | "">("");
   const [sig, setSig] = useState("");
   const [priceEth, setPriceEth] = useState("");
@@ -140,16 +151,28 @@ export default function MintPage() {
     let failed = ids.length - own.length;
     if (!own.length) return { proofs, failed };
     const { messages } = await api("/api/opensea/siwe/prepare", { body: { walletIds: own } });
-    for (const m of messages) {
-      try {
-        assertOpenSeaSiwe(m.message, m.address);
-        const { signature } = await withSignTimeout(
-          signMessage({ message: m.message }, { address: m.address, uiOptions: { showWalletUIs: false } }),
-          { what: "OpenSea sign-in" },
-        );
-        proofs.push({ walletId: m.walletId, fields: m.fields, signature });
-      } catch {
-        failed++;
+    // Sign in parallel (5 at a time): each message is independent (own wallet, own nonce),
+    // and Privy embedded-wallet signing is local. Sequential signing was ~1 s per wallet.
+    const SIGN_CONCURRENCY = 5;
+    for (let i = 0; i < messages.length; i += SIGN_CONCURRENCY) {
+      const batch = messages.slice(i, i + SIGN_CONCURRENCY);
+      const results = await Promise.all(
+        batch.map(async (m: any) => {
+          try {
+            assertOpenSeaSiwe(m.message, m.address);
+            const { signature } = await withSignTimeout(
+              signMessage({ message: m.message }, { address: m.address, uiOptions: { showWalletUIs: false } }),
+              { what: "OpenSea sign-in" },
+            );
+            return { walletId: m.walletId, fields: m.fields, signature };
+          } catch {
+            return null;
+          }
+        }),
+      );
+      for (const r of results) {
+        if (r) proofs.push(r);
+        else failed++;
       }
     }
     return { proofs, failed };
@@ -157,17 +180,22 @@ export default function MintPage() {
 
   const checkElig = async () => {
     setErr(null);
+    setEligErr(null);
     setSim(null);
     setVerifyNote(null);
+    setEligRunning(true);
+    setEligElapsed(0);
     setBusy(tr("Checking wallets…"));
     try {
       const base = { chain: t.chain.key, contract: t.contract, input: t.input, strategy, walletIds, generic: genericPayload() };
-      let r = await api("/api/eligibility", { body: base });
+      // 90 s: the server function is killed at 60 s, so a hung check surfaces here as a clear
+      // timeout instead of spinning forever with no feedback.
+      let r = await api("/api/eligibility", { body: base, timeoutMs: 90_000 });
       const need = r.rows.filter((x: any) => x.needsOpenSeaLogin).map((x: any) => x.walletId);
       if (need.length && authenticated) {
         setBusy(tr("Verifying {count} wallet(s) with OpenSea…", { count: need.length }));
         const { proofs, failed } = await openseaProofs(need);
-        if (proofs.length) r = await api("/api/eligibility", { body: { ...base, siwe: proofs } });
+        if (proofs.length) r = await api("/api/eligibility", { body: { ...base, siwe: proofs }, timeoutMs: 90_000 });
         if (failed) setVerifyNote(`${failed} ${tr("wallet(s) couldn't be verified with OpenSea from this device.")}`);
       }
       setElig(r);
@@ -178,8 +206,22 @@ export default function MintPage() {
       setQtys({});
       setForce({});
     } catch (e: any) {
+      // Name the failure next to the button (rate limit, timeout, network, server) — never silent.
+      const m = String(e?.message ?? e);
+      if (e?.name === "TimeoutError" || /timed out|timeout|aborted/i.test(m))
+        setEligErr(
+          tr(
+            "The check took too long (over 90 seconds). OpenSea is probably slow or rate-limiting right now — please try again in a minute.",
+          ),
+        );
+      else if (/429|rate limit|too many/i.test(m))
+        setEligErr(tr("OpenSea is rate-limiting requests right now. Please wait a minute and try again."));
+      else if (/failed to fetch|network|load failed|offline/i.test(m))
+        setEligErr(tr("Couldn't reach the server. Check your connection and try again."));
+      else setEligErr(tr("Eligibility check failed: {message}", { message: m.slice(0, 200) }));
       setErr(e.message);
     } finally {
+      setEligRunning(false);
       setBusy(null);
     }
   };
@@ -459,7 +501,14 @@ export default function MintPage() {
               </button>
             </div>
             <button disabled={!strategy || !!busy || (scope === "select" && !pickedIds.length)} onClick={() => checkElig()}>
-              {tr("Check Eligibility")}
+              {eligRunning ? (
+                <>
+                  <span className="spinner" aria-hidden />
+                  {tr("Checking…")}
+                </>
+              ) : (
+                tr("Check Eligibility")
+              )}
             </button>
             <span className="muted">
               {scope === "all"
@@ -469,6 +518,20 @@ export default function MintPage() {
                 : tr("{selected} of {total} selected", { selected: pickedIds.length, total: walletList.wallets.length })}
             </span>
           </div>
+          {eligRunning && (
+            <p className="muted small" style={{ marginTop: 6 }}>
+              {tr("Checking {count} wallet(s)… {elapsed}s", {
+                count: scope === "all" ? walletList.wallets.length : pickedIds.length,
+                elapsed: eligElapsed,
+              })}
+              {eligElapsed > 20 ? ` ${tr("50 wallets can take 1–2 minutes — still working.")}` : ""}
+            </p>
+          )}
+          {eligErr && (
+            <div className="err" style={{ marginTop: 6 }}>
+              {eligErr}
+            </div>
+          )}
           {scope === "select" && (
             <>
               <div className="row" style={{ marginTop: 8 }}>

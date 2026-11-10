@@ -39,7 +39,7 @@ export function parseCheckArgs(text: string): { input: string; chain?: string } 
 }
 
 function verdict(r: EligibilityRow): { label: "Eligible" | "Not eligible" | "Unknown"; why: string } {
-  if (r.needsOpenSeaLogin && r.access.status === "unknown") return { label: "Unknown", why: "not verified yet" };
+  if (r.needsOpenSeaLogin && r.access.status === "unknown") return { label: "Unknown", why: "belum terverifikasi" };
   const a = r.access;
   const other = r.reasons.filter((x) => !/^insufficient\b/i.test(x) && !x.startsWith("not allowlisted"));
   if (a.status === "no") return { label: "Not eligible", why: "" };
@@ -123,7 +123,7 @@ export function formatCheck(v: CheckView): string[] {
     }
     if (sum.unknown.length) {
       const what = sum.unknown.every((w) => w.state === "unverified")
-        ? "not verified yet"
+        ? "belum terverifikasi — lihat alasan di bawah"
         : sum.unknown.every((w) => w.state === "unknown")
           ? "unknown (OpenSea gave no verdict for this stage)"
           : "unknown";
@@ -172,13 +172,13 @@ export function formatCheck(v: CheckView): string[] {
 }
 
 const REASON_TEXT: Record<string, string> = {
-  rate_limited: "OpenSea is rate-limiting sign-ins right now. Run /check again in a minute; SkyBOT signs in again automatically.",
+  rate_limited: "OpenSea sedang membatasi sign-in saat ini. Jalankan /check lagi semenit lagi; SkyBOT akan sign-in lagi otomatis.",
   no_signer:
-    "Automatic checks aren't enabled for these wallets yet. Tap Open in SkyBOT once: it enables them silently (sign-in only, it can never send transactions).",
-  no_privy_wallet: "These aren't SkyBOT (Privy) wallets, so SkyBOT can't sign OpenSea's sign-in for them.",
-  not_configured: "Automatic OpenSea sign-in isn't available on this server. Open in SkyBOT to verify.",
-  error: "OpenSea didn't answer for these wallets. Run /check again shortly; SkyBOT retries automatically.",
-  unknown: "SkyBOT couldn't sign these wallets in to OpenSea yet. Run /check again; if it keeps happening, tap Open in SkyBOT once.",
+    "Pemeriksaan otomatis belum aktif untuk dompet ini. Buka SkyBOT sekali lewat tombol Open: aktifnya diam-diam (hanya sign-in, tidak bisa mengirim transaksi).",
+  no_privy_wallet: "Ini bukan dompet SkyBOT (Privy), jadi SkyBOT tidak bisa menandatangani sign-in OpenSea untuk dompet ini.",
+  not_configured: "Sign-in OpenSea otomatis tidak tersedia di server ini. Buka SkyBOT untuk memverifikasi.",
+  error: "OpenSea tidak menjawab untuk dompet ini. Jalankan /check lagi sebentar lagi; SkyBOT mencoba lagi otomatis.",
+  unknown: "SkyBOT belum bisa menandatangani dompet ini ke OpenSea. Jalankan /check lagi; kalau terus terjadi, buka SkyBOT sekali.",
 };
 
 /** One line per reason: which wallets, and the one thing that fixes it. */
@@ -192,7 +192,7 @@ export function unverifiedNotes(rows: Pick<EligibilityRow, "label" | "unverified
   for (const k of ["no_signer", "rate_limited", "error", "unknown", "no_privy_wallet", "not_configured"]) {
     const names = by.get(k);
     if (!names?.length) continue;
-    out.push("", `❔ Not verified: ${esc(names.join(", "))}. ${REASON_TEXT[k]}`);
+    out.push("", `❔ Belum terverifikasi: ${esc(names.join(", "))}. ${REASON_TEXT[k]}`);
   }
   return out;
 }

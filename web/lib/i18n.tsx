@@ -226,6 +226,15 @@ const ID_STRINGS: Record<string, string> = {
   "Check all wallets": "Periksa semua dompet",
   "Select wallets": "Pilih dompet",
   "Check Eligibility": "Periksa Kelayakan",
+  "Checking…": "Memeriksa…",
+  "Checking {count} wallet(s)… {elapsed}s": "Memeriksa {count} dompet… {elapsed} dtk",
+  "50 wallets can take 1–2 minutes — still working.": "50 dompet bisa memakan waktu 1–2 menit — masih berjalan.",
+  "The check took too long (over 90 seconds). OpenSea is probably slow or rate-limiting right now — please try again in a minute.":
+    "Pemeriksaan memakan waktu terlalu lama (lebih dari 90 detik). OpenSea kemungkinan sedang lambat atau membatasi permintaan — coba lagi dalam semenit.",
+  "OpenSea is rate-limiting requests right now. Please wait a minute and try again.":
+    "OpenSea sedang membatasi permintaan saat ini. Tunggu sebentar lalu coba lagi.",
+  "Couldn't reach the server. Check your connection and try again.": "Tidak bisa terhubung ke server. Periksa koneksi lalu coba lagi.",
+  "Eligibility check failed: {message}": "Pemeriksaan kelayakan gagal: {message}",
   "Loading wallets…": "Memuat dompet…",
   "{count} wallet(s)": "{count} dompet",
   "Select All": "Pilih Semua",

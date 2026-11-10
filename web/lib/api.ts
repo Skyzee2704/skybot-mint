@@ -17,6 +17,8 @@ export async function api<T = any>(
     token?: string | null;
     idToken?: string | null;
     telegramInitData?: string | null;
+    /** Abort the request after this many ms (e.g. a slow eligibility check). Throws a DOMException named "TimeoutError". */
+    timeoutMs?: number;
   } = {},
 ): Promise<T> {
   const headers: Record<string, string> = { "x-skybot-csrf": "1" };
@@ -24,15 +26,22 @@ export async function api<T = any>(
   if (opts.idToken) headers["privy-id-token"] = opts.idToken;
   if (opts.telegramInitData) headers["x-telegram-init-data"] = opts.telegramInitData;
   if (opts.body !== undefined) headers["content-type"] = "application/json";
-  const res = await fetch(url(path), {
-    method: opts.method ?? (opts.body !== undefined ? "POST" : "GET"),
-    headers,
-    credentials: "include",
-    body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
-  });
-  const json = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
-  return json as T;
+  const ctrl = opts.timeoutMs ? new AbortController() : null;
+  const timer = ctrl ? setTimeout(() => ctrl.abort(new DOMException("Request timed out", "TimeoutError")), opts.timeoutMs) : null;
+  try {
+    const res = await fetch(url(path), {
+      method: opts.method ?? (opts.body !== undefined ? "POST" : "GET"),
+      headers,
+      credentials: "include",
+      body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+      signal: ctrl?.signal,
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
+    return json as T;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 /** Authenticated binary fetch (e.g. admin Gallery media) → Blob. Same auth headers as api(). */

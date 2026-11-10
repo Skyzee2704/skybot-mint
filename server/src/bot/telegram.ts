@@ -386,6 +386,19 @@ export function createBot(token: string, opts: ConstructorParameters<typeof Bot>
       return ctx.reply("Too many checks in a minute. Please wait a moment and try again.");
     }
     await ctx.replyWithChatAction("typing").catch(() => {});
+    // A 50-wallet check takes 30–60 s: say so up front instead of silence, then remove the
+    // progress message once the result lands.
+    let progress: any = null;
+    try {
+      progress = await ctx.reply("Checking your wallets… 50 wallets can take 1–2 minutes, please wait.");
+    } catch {
+      /* progress message is best-effort */
+    }
+    const dropProgress = async () => {
+      if (!progress) return;
+      await ctx.api.deleteMessage(ctx.chat.id, progress.message_id).catch(() => {});
+      progress = null;
+    };
     try {
       const t = await resolveCached(args.input, args.chain);
       const kb = dropKeyboard(t, args.input, ctx.chat?.type, { check: false });
@@ -400,6 +413,7 @@ export function createBot(token: string, opts: ConstructorParameters<typeof Bot>
       const chunks = formatCheck({ target: t, rows, targetStage, timeZone: u.timezone ?? null });
       if (t.recommendedStrategy === "none")
         chunks[chunks.length - 1] += "\n\nSkyBOT can't find a supported mint function on this contract.";
+      await dropProgress();
       for (let i = 0; i < chunks.length; i++)
         await ctx.reply(chunks[i], {
           parse_mode: "HTML",
@@ -407,7 +421,14 @@ export function createBot(token: string, opts: ConstructorParameters<typeof Bot>
           ...(i === chunks.length - 1 ? { reply_markup: kb } : {}),
         });
     } catch (e: any) {
-      await ctx.reply(`Couldn't check that: ${esc(redactString(String(e?.message ?? e)).slice(0, 200))}`, { parse_mode: "HTML" });
+      await dropProgress();
+      const m = String(e?.message ?? e);
+      const why = /429|rate limit|too many/i.test(m)
+        ? "OpenSea is rate-limiting requests right now. Please wait a minute and try /check again."
+        : /timed out|timeout|aborted/i.test(m)
+          ? "The check timed out (OpenSea is slow right now). Please try /check again in a minute."
+          : `Couldn't check that: ${esc(redactString(m).slice(0, 200))}`;
+      await ctx.reply(why, { parse_mode: "HTML" });
     }
   }
 

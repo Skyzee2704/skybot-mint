@@ -294,7 +294,7 @@ export function useApi() {
   const { initData } = useTelegram();
   // Stable identity across renders: pages use it in effect/useCallback deps (an unstable fn caused request loops).
   return useCallback(
-    async function call<T = any>(path: string, opts: { method?: string; body?: unknown } = {}) {
+    async function call<T = any>(path: string, opts: { method?: string; body?: unknown; timeoutMs?: number } = {}) {
       const token = authenticated ? await getAccessToken() : null;
       const idToken = token ? await idTokenOrNull() : null;
       // Prefer Privy token; otherwise the httpOnly session cookie carries auth (initData header only as last resort).
