@@ -35,6 +35,16 @@ export default function WalletsPage() {
   const goneIds = useRef(new Set<string>());
   const goneAddrs = useRef(new Set<string>());
   const data = { wallets: (list.wallets as any[]).filter((w) => !goneIds.current.has(w.id)) };
+  // Compact list: search + 10 per page, so 50 wallets don't stretch the page.
+  const PAGE_SIZE = 10;
+  const [walletQuery, setWalletQuery] = useState("");
+  const [walletPage, setWalletPage] = useState(1);
+  const filteredWallets = data.wallets.filter(
+    (w) => !walletQuery.trim() || `${w.label ?? ""} ${w.address}`.toLowerCase().includes(walletQuery.trim().toLowerCase()),
+  );
+  const pageCount = Math.max(1, Math.ceil(filteredWallets.length / PAGE_SIZE));
+  const safePage = Math.min(walletPage, pageCount);
+  const pageWallets = filteredWallets.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
   const removedList = list.removedWallets as any[];
   const [removal, setRemoval] = useState<{ w: any; chk: any | null; loading: boolean } | null>(null);
   const load = list.reload;
@@ -277,6 +287,17 @@ export default function WalletsPage() {
             {bal.at ? t("Updated {time}", { time: ago(bal.at, now) }) : ""}
             {bal.validating && bal.data ? ` · ${t("checking…")}` : ""}
           </span>
+          <span className="spacer" />
+          <input
+            placeholder={t("Search wallets…")}
+            value={walletQuery}
+            onChange={(e) => {
+              setWalletQuery(e.target.value);
+              setWalletPage(1);
+            }}
+            style={{ width: 180 }}
+            aria-label={t("Search wallets…")}
+          />
         </div>
         <table className="cards">
           <thead>
@@ -288,7 +309,7 @@ export default function WalletsPage() {
             </tr>
           </thead>
           <tbody>
-            {data.wallets.map((w) => (
+            {pageWallets.map((w) => (
               <tr key={w.id}>
                 <td>
                   {w.label} {w.isMain && <span className="pill accent">{t("Main")}</span>}{" "}
@@ -355,8 +376,29 @@ export default function WalletsPage() {
                 </td>
               </tr>
             )}
+            {!list.loading && data.wallets.length > 0 && !filteredWallets.length && (
+              <tr>
+                <td colSpan={4} className="muted">
+                  {t("No wallets match this search.")}
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
+        {pageCount > 1 && (
+          <div className="row" style={{ marginTop: 10, justifyContent: "space-between" }}>
+            <button className="ghost" disabled={safePage <= 1} onClick={() => setWalletPage(safePage - 1)}>
+              ← {t("Previous")}
+            </button>
+            <span className="muted small">
+              {t("Page {page} of {pages}", { page: safePage, pages: pageCount })} ·{" "}
+              {t("{count} wallet(s) found", { count: filteredWallets.length })}
+            </span>
+            <button className="ghost" disabled={safePage >= pageCount} onClick={() => setWalletPage(safePage + 1)}>
+              {t("Next")} →
+            </button>
+          </div>
+        )}
         {removal && (
           <RemovalPanel
             removal={removal}

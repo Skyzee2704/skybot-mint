@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { Fragment, useEffect, useState } from "react";
 import { strategyLabel } from "@/lib/labels";
+import { useLang } from "@/lib/i18n";
 import { useApi } from "@/components/AppShell";
 import { short } from "@/lib/api";
 import { formatDateTime, formatShort, localTimeZone } from "@/lib/time";
@@ -28,6 +29,7 @@ const ISO_RE = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z/g;
 
 export default function JobsPage() {
   const api = useApi();
+  const { t } = useLang();
   const [jobs, setJobs] = useState<any[]>([]);
   const [open, setOpen] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -45,8 +47,8 @@ export default function JobsPage() {
   const cancel = (j: any) => {
     const msg =
       j.status === "running"
-        ? "Cancel this mint? It is about to start. If it sends its transactions before the cancel lands, it can't be stopped."
-        : "Cancel this scheduled mint? Nothing has been sent yet.";
+        ? t("Cancel this mint? It is about to start. If it sends its transactions before the cancel lands, it can't be stopped.")
+        : t("Cancel this scheduled mint? Nothing has been sent yet.");
     if (!confirm(msg)) return;
     setErr(null);
     setCancelling(j.id);
@@ -73,17 +75,17 @@ export default function JobsPage() {
   }, [active]); // eslint-disable-line
   return (
     <div className="card">
-      <h2>Jobs</h2>
+      <h2>{t("Jobs")}</h2>
       {err && <div className="err">{err}</div>}
       <table>
         <thead>
           <tr>
-            <th>When</th>
-            <th>Status</th>
-            <th>Chain</th>
-            <th>Contract</th>
-            <th>Strategy</th>
-            <th>Results</th>
+            <th>{t("When")}</th>
+            <th>{t("Status")}</th>
+            <th>{t("Chain")}</th>
+            <th>{t("Contract")}</th>
+            <th>{t("Strategy")}</th>
+            <th>{t("Results")}</th>
             <th></th>
           </tr>
         </thead>
@@ -94,20 +96,25 @@ export default function JobsPage() {
                 <td>
                   {j.runAt && ["scheduled", "waiting_unlock"].includes(j.status) ? (
                     <>
-                      Runs {fmt(j.runAt)}
-                      <div className="muted small">created {fmt(j.createdAt)}</div>
+                      {t("Runs {time}", { time: fmt(j.runAt) })}
+                      <div className="muted small">{t("created {time}", { time: fmt(j.createdAt) })}</div>
                     </>
                   ) : (
                     fmt(j.createdAt)
                   )}
                 </td>
-                <td className={j.status === "done" ? "ok" : j.status === "failed" ? "bad" : "warn"}>{STATUS[j.status] ?? j.status}</td>
+                <td className={j.status === "done" ? "ok" : j.status === "failed" ? "bad" : "warn"}>
+                  {STATUS[j.status] ? t(STATUS[j.status]) : j.status}
+                </td>
                 <td>{j.chain}</td>
                 <td className="mono">{short(j.target)}</td>
-                <td>{strategyLabel(j.strategy)}</td>
+                <td>{t(strategyLabel(j.strategy))}</td>
                 <td>
                   {(j.results || []).length
-                    ? `${(j.results || []).filter((r: any) => r.status === "confirmed").length}/${(j.results || []).length} confirmed`
+                    ? t("{count}/{total} confirmed", {
+                        count: (j.results || []).filter((r: any) => r.status === "confirmed").length,
+                        total: (j.results || []).length,
+                      })
                     : "—"}
                 </td>
                 <td>
@@ -120,7 +127,7 @@ export default function JobsPage() {
                         cancel(j);
                       }}
                     >
-                      {cancelling === j.id ? "Cancelling…" : "Cancel"}
+                      {cancelling === j.id ? t("Cancelling…") : t("Cancel")}
                     </button>
                   )}
                 </td>
@@ -132,11 +139,11 @@ export default function JobsPage() {
                     <table>
                       <thead>
                         <tr>
-                          <th>Wallet</th>
-                          <th>Qty</th>
-                          <th>Status</th>
-                          <th>Tx</th>
-                          <th>Token IDs</th>
+                          <th>{t("Wallet")}</th>
+                          <th>{t("Qty")}</th>
+                          <th>{t("Status")}</th>
+                          <th>{t("Tx")}</th>
+                          <th>{t("Token IDs")}</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -145,7 +152,7 @@ export default function JobsPage() {
                             <td className="mono">{short(r.address)}</td>
                             <td>{r.quantity}</td>
                             <td>
-                              {RESULT[r.status] ?? r.status}
+                              {RESULT[r.status] ? t(RESULT[r.status]) : r.status}
                               {r.error && <div className="err">{r.error}</div>}
                             </td>
                             <td>
@@ -173,7 +180,7 @@ export default function JobsPage() {
           {!jobs.length && (
             <tr>
               <td colSpan={7} className="muted">
-                No jobs yet. Simulate and confirm a mint on the Mint page to create one.
+                {t("No jobs yet. Simulate and confirm a mint on the Mint page to create one.")}
               </td>
             </tr>
           )}

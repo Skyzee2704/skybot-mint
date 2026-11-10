@@ -8,6 +8,7 @@
 import { useWindowVirtualizer } from "@tanstack/react-virtual";
 import { Grid2x2, Grid3x3, LayoutGrid, List, Columns4 } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useLang } from "@/lib/i18n";
 
 export const VIRTUALIZE_AT = 60;
 const GAP = 10;
@@ -43,10 +44,11 @@ export function useNftLayout(): [NftLayout, (l: NftLayout) => void] {
 }
 
 const LAYOUT_ICON = { list: List, 2: Grid2x2, 3: Grid3x3, 4: Columns4, 5: LayoutGrid } as const;
-const LAYOUT_LABEL = { list: "List", 2: "2 per row", 3: "3 per row", 4: "4 per row", 5: "5 per row" } as const;
 
 /** Compact segmented control: List, 2, 3, 4 or 5 per row (selected option is a tinted chip). */
 export function LayoutPicker({ value, onChange }: { value: NftLayout; onChange: (l: NftLayout) => void }) {
+  const { t } = useLang();
+  const layoutLabel = (l: NftLayout) => (l === "list" ? t("List") : t("{count} per row", { count: l }));
   return (
     <div className="segmented layout-picker" role="radiogroup" aria-label="Layout">
       {NFT_LAYOUTS.map((l) => {
@@ -57,8 +59,8 @@ export function LayoutPicker({ value, onChange }: { value: NftLayout; onChange: 
             type="button"
             role="radio"
             aria-checked={value === l}
-            aria-label={LAYOUT_LABEL[l]}
-            title={LAYOUT_LABEL[l]}
+            aria-label={layoutLabel(l)}
+            title={layoutLabel(l)}
             className={value === l ? "on" : ""}
             onClick={() => onChange(l)}
           >

@@ -1,11 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+"use client";
 /**
  * AGPL-3.0 §13: users interacting with this program over a network must be offered its
  * Corresponding Source. The link target is configurable via NEXT_PUBLIC_SOURCE_URL.
  */
+import { useLang } from "@/lib/i18n";
+
 export const SOURCE_URL = process.env.NEXT_PUBLIC_SOURCE_URL || "https://github.com/Skyzee2704/skybot-mint";
 
 export function SiteFooter() {
+  const { t } = useLang();
   const external = /^https?:\/\//.test(SOURCE_URL);
   return (
     <footer className="site-footer">
@@ -16,7 +20,7 @@ export function SiteFooter() {
       </a>
       <span aria-hidden>·</span>
       <a href={SOURCE_URL} {...(external ? { target: "_blank", rel: "noopener noreferrer" } : {})}>
-        Source
+        {t("Source")}
       </a>
     </footer>
   );

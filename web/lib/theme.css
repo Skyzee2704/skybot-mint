@@ -515,6 +515,10 @@ html.tg-mini-app body {
   grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
   gap: 6px;
   margin-top: 10px;
+  /* Long fleets (50 wallets) scroll inside the card instead of stretching the page. */
+  max-height: 240px;
+  overflow-y: auto;
+  padding-right: 4px;
 }
 .wallet-pick label {
   display: flex;

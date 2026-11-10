@@ -46,6 +46,11 @@ export function FundWallets({ api, wallets, onDone }: { api: ReturnType<typeof u
   const [run, setRun] = useState<RunState>({});
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  // Compact picker: search + scrollable list, so 50 wallets don't stretch the page.
+  const [pickQuery, setPickQuery] = useState("");
+  const visibleOthers = others.filter(
+    (w) => !pickQuery.trim() || `${w.label ?? ""} ${w.address}`.toLowerCase().includes(pickQuery.trim().toLowerCase()),
+  );
   const stopRef = useRef<AbortController | null>(null);
 
   const ids = others.filter((w) => picked[w.id]).map((w) => w.id);
@@ -231,8 +236,17 @@ export function FundWallets({ api, wallets, onDone }: { api: ReturnType<typeof u
             <span className="spacer" />
             <span className="muted">{t("{selected} of {total} selected", { selected: ids.length, total: others.length })}</span>
           </div>
+          <div className="row" style={{ marginTop: 8 }}>
+            <input
+              placeholder={t("Search wallets to fund…")}
+              value={pickQuery}
+              onChange={(e) => setPickQuery(e.target.value)}
+              style={{ flex: 1, minWidth: 200 }}
+              aria-label={t("Search wallets to fund…")}
+            />
+          </div>
           <div className="wallet-pick">
-            {others.map((w) => (
+            {visibleOthers.map((w) => (
               <label key={w.id} className={picked[w.id] ? "on" : ""}>
                 <input
                   type="checkbox"
@@ -250,6 +264,7 @@ export function FundWallets({ api, wallets, onDone }: { api: ReturnType<typeof u
                 )}
               </label>
             ))}
+            {!visibleOthers.length && <span className="muted small">{t("No wallets match this search.")}</span>}
           </div>
           <div className="row" style={{ marginTop: 12 }}>
             <input

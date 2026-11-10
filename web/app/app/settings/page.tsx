@@ -2,11 +2,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { useEffect, useState } from "react";
 import { useApi, useShell } from "@/components/AppShell";
+import { useLang } from "@/lib/i18n";
 import { useLinkAccount, usePrivy } from "@privy-io/react-auth";
 import { useTelegram } from "@/lib/telegram";
 
 export default function SettingsPage() {
   const api = useApi();
+  const { t } = useLang();
   const { tgOnly, connectPrivy } = useShell();
   const { isMiniApp, initData } = useTelegram();
   const [st, setSt] = useState<any>(null);
@@ -17,12 +19,13 @@ export default function SettingsPage() {
   const { authenticated, user } = usePrivy();
   const { linkEmail, linkGoogle, linkTelegram } = useLinkAccount({
     onSuccess: () => {
-      setMsg("Login linked. You can now sign in with it to reach this same account.");
+      setMsg(t("Login linked. You can now sign in with it to reach this same account."));
       // Let the server pick up the newly linked account (email / Telegram) from the refreshed identity token.
       api("/api/me").catch(() => {});
       load().catch(() => {});
     },
-    onError: (code: unknown) => setErr(`Could not link this login (${String(code)}). It may already belong to another account.`),
+    onError: (code: unknown) =>
+      setErr(t("Could not link this login ({code}). It may already belong to another account.", { code: String(code) })),
   });
 
   const load = () =>
@@ -44,7 +47,7 @@ export default function SettingsPage() {
     try {
       const s = await api("/api/settings", { method: "PUT", body: patch });
       setSt((x: any) => ({ ...x, ...s }));
-      setMsg("Saved");
+      setMsg(t("Saved"));
     } catch (e: any) {
       setErr(e.message);
     }
@@ -60,54 +63,56 @@ export default function SettingsPage() {
       {msg && <div className="notice">{msg}</div>}
 
       <div className="card">
-        <h2>Sign-In Methods</h2>
+        <h2>{t("Sign-In Methods")}</h2>
         <p className="muted">
-          Email, Google and Telegram all open the same SkyBOT account. Link each one once and use whichever is handy, on the web or inside
-          Telegram.
+          {t(
+            "Email, Google and Telegram all open the same SkyBOT account. Link each one once and use whichever is handy, on the web or inside Telegram.",
+          )}
         </p>
         {tgOnly || !authenticated ? (
           <>
             <p className="muted">
-              You are signed in with a Telegram session{st?.telegram?.username ? ` (@${st.telegram.username})` : ""}. Connect with Privy to
-              link email or Google and to import wallets.
+              {t("You are signed in with a Telegram session")}
+              {st?.telegram?.username ? ` (@${st.telegram.username})` : ""}
+              {t(". Connect with Privy to link email or Google and to import wallets.")}
             </p>
-            <button onClick={connectPrivy}>Connect with Privy</button>
+            <button onClick={connectPrivy}>{t("Connect with Privy")}</button>
           </>
         ) : (
           <table>
             <tbody>
               <tr>
                 <td>Telegram</td>
-                <td>{telegram ? <span className="pill accent">@{telegram}</span> : <span className="muted">Not linked</span>}</td>
+                <td>{telegram ? <span className="pill accent">@{telegram}</span> : <span className="muted">{t("Not linked")}</span>}</td>
                 <td>
                   {!telegram && (
                     <button
                       className="ghost"
                       onClick={() => linkTelegram(isMiniApp && initData ? { launchParams: { initDataRaw: initData } } : undefined)}
                     >
-                      Link Telegram
+                      {t("Link Telegram")}
                     </button>
                   )}
                 </td>
               </tr>
               <tr>
                 <td>Email</td>
-                <td>{email ? <span className="pill accent">{email}</span> : <span className="muted">Not linked</span>}</td>
+                <td>{email ? <span className="pill accent">{email}</span> : <span className="muted">{t("Not linked")}</span>}</td>
                 <td>
                   {!email && (
                     <button className="ghost" onClick={linkEmail}>
-                      Link Email
+                      {t("Link Email")}
                     </button>
                   )}
                 </td>
               </tr>
               <tr>
                 <td>Google</td>
-                <td>{google ? <span className="pill accent">{google}</span> : <span className="muted">Not linked</span>}</td>
+                <td>{google ? <span className="pill accent">{google}</span> : <span className="muted">{t("Not linked")}</span>}</td>
                 <td>
                   {!google && (
                     <button className="ghost" onClick={linkGoogle}>
-                      Link Google
+                      {t("Link Google")}
                     </button>
                   )}
                 </td>
@@ -121,32 +126,32 @@ export default function SettingsPage() {
             <a href={`https://t.me/${st.telegram.botUsername}`} target="_blank" rel="noreferrer">
               @{st.telegram.botUsername}
             </a>{" "}
-            for /mint, /wallets and job notifications.
+            {t("for /mint, /wallets and job notifications.")}
           </p>
         )}
       </div>
 
       {st && (
         <div className="card">
-          <h2>Spend Caps (Optional)</h2>
-          <p className="muted">Off = unlimited. Always on: {st.alwaysOn?.join(" · ")}</p>
+          <h2>{t("Spend Caps (Optional)")}</h2>
+          <p className="muted">{t("Off = unlimited. Always on: {list}", { list: st.alwaysOn?.join(" · ") ?? "" })}</p>
           <div className="row" style={{ marginBottom: 10 }}>
             <label>
-              <input type="checkbox" checked={st.priceCapEnabled} onChange={(e) => save({ priceCapEnabled: e.target.checked })} /> Max Price
-              / NFT
+              <input type="checkbox" checked={st.priceCapEnabled} onChange={(e) => save({ priceCapEnabled: e.target.checked })} />{" "}
+              {t("Max Price / NFT")}
             </label>
             <label>
-              <input type="checkbox" checked={st.dailyCapEnabled} onChange={(e) => save({ dailyCapEnabled: e.target.checked })} /> Max Daily
-              Spend
+              <input type="checkbox" checked={st.dailyCapEnabled} onChange={(e) => save({ dailyCapEnabled: e.target.checked })} />{" "}
+              {t("Max Daily Spend")}
             </label>
           </div>
           <table>
             <thead>
               <tr>
-                <th>Chain</th>
-                <th>Max / NFT</th>
-                <th>Max Daily</th>
-                <th>Spent Today</th>
+                <th>{t("Chain")}</th>
+                <th>{t("Max / NFT")}</th>
+                <th>{t("Max Daily")}</th>
+                <th>{t("Spent Today")}</th>
               </tr>
             </thead>
             <tbody>
@@ -179,16 +184,17 @@ export default function SettingsPage() {
             </tbody>
           </table>
           <button style={{ marginTop: 10 }} disabled={!st.priceCapEnabled && !st.dailyCapEnabled} onClick={() => save({ caps: edit })}>
-            Save Cap Values
+            {t("Save Cap Values")}
           </button>
         </div>
       )}
 
       <div className="card">
-        <h2>OpenSea Verification</h2>
+        <h2>{t("OpenSea Verification")}</h2>
         <p className="muted">
-          To check upcoming OpenSea stages, SkyBOT signs OpenSea&apos;s off-chain sign-in message for your wallets (free, no gas, never a
-          transaction), which accepts OpenSea&apos;s{" "}
+          {t(
+            "To check upcoming OpenSea stages, SkyBOT signs OpenSea's off-chain sign-in message for your wallets (free, no gas, never a transaction), which accepts OpenSea's",
+          )}{" "}
           <a href="https://opensea.io/tos" target="_blank" rel="noreferrer">
             Terms of Service
           </a>
@@ -197,17 +203,17 @@ export default function SettingsPage() {
       </div>
 
       <div className="card">
-        <h2>Chain Health</h2>
+        <h2>{t("Chain Health")}</h2>
         <button className="ghost" onClick={async () => setHealth(await api("/api/chains/health"))}>
-          Run Check
+          {t("Run Check")}
         </button>
         {health && (
           <table style={{ marginTop: 10 }}>
             <thead>
               <tr>
-                <th>Chain</th>
+                <th>{t("Chain")}</th>
                 <th>OK</th>
-                <th>Block</th>
+                <th>{t("Block")}</th>
               </tr>
             </thead>
             <tbody>

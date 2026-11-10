@@ -2,14 +2,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { useEffect, useState } from "react";
 import { useApi, useApiBlob } from "@/components/AppShell";
+import { useLang } from "@/lib/i18n";
 
 type Item = { name: string; title: string; aspect: string; type: string; size: number | null };
-
-const mb = (n: number | null) => (n == null ? "unavailable" : `${(n / 1024 / 1024).toFixed(1)} MB`);
 
 /** One private clip: fetched with the admin's auth → Blob → object URL (playback + download). */
 function Clip({ item }: { item: Item }) {
   const blob = useApiBlob();
+  const { t } = useLang();
+  const mb = (n: number | null) => (n == null ? t("unavailable") : `${(n / 1024 / 1024).toFixed(1)} MB`);
   const [src, setSrc] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   useEffect(() => {
@@ -31,7 +32,11 @@ function Clip({ item }: { item: Item }) {
     <div className="card gallery-item">
       <h3>{item.title}</h3>
       <div className="gallery-media" style={{ aspectRatio: item.aspect }}>
-        {src ? <video src={src} controls playsInline loop muted preload="metadata" /> : <span className="muted">{err ?? "Loading…"}</span>}
+        {src ? (
+          <video src={src} controls playsInline loop muted preload="metadata" />
+        ) : (
+          <span className="muted">{err ?? t("Loading…")}</span>
+        )}
       </div>
       <div className="row gallery-meta">
         <span className="muted">
@@ -44,7 +49,7 @@ function Clip({ item }: { item: Item }) {
           aria-disabled={!src}
           onClick={(e) => !src && e.preventDefault()}
         >
-          Download
+          {t("Download")}
         </a>
       </div>
     </div>
@@ -53,6 +58,7 @@ function Clip({ item }: { item: Item }) {
 
 export default function AdminGalleryPage() {
   const api = useApi();
+  const { t } = useLang();
   const [items, setItems] = useState<Item[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   useEffect(() => {
@@ -62,10 +68,10 @@ export default function AdminGalleryPage() {
   }, [api]);
   return (
     <div className="card">
-      <h2>Admin · Gallery</h2>
-      <p className="muted">Promo clips — private, admin-only. Not publicly hosted; share the downloaded file.</p>
+      <h2>{t("Admin · Gallery")}</h2>
+      <p className="muted">{t("Promo clips — private, admin-only. Not publicly hosted; share the downloaded file.")}</p>
       {err && <div className="err">{err}</div>}
-      {!items && !err && <p className="muted">Loading…</p>}
+      {!items && !err && <p className="muted">{t("Loading…")}</p>}
       <div className="gallery-grid">
         {items?.map((i) => (
           <Clip key={i.name} item={i} />

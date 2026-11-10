@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { STRATEGY_LABELS } from "@/lib/labels";
 import Link from "next/link";
 import { fmtEth, short } from "@/lib/api";
+import { useLang } from "@/lib/i18n";
 import { useApi, useShell } from "@/components/AppShell";
 import { usePrivy, useSignMessage, useWallets } from "@privy-io/react-auth";
 import { assertOpenSeaSiwe } from "@nft-mint-bot/server/siwe";
@@ -28,6 +29,8 @@ const STRAT = STRATEGY_LABELS as Record<Strategy, string>;
 
 export default function MintPage() {
   const api = useApi();
+  // `tr` (not `t`): this page already uses `t` for the resolved drop.
+  const { t: tr } = useLang();
   const { userId, tgOnly, connectPrivy } = useShell();
   const { authenticated } = usePrivy();
   const { signMessage } = useSignMessage();
@@ -75,7 +78,7 @@ export default function MintPage() {
     setElig(null);
     setSim(null);
     setJob(null);
-    setBusy("Resolving…");
+    setBusy(tr("Resolving…"));
     try {
       const r = await api("/api/resolve", { body: { input: inp.trim(), chain: ch || undefined } });
       setT(r);
@@ -155,16 +158,16 @@ export default function MintPage() {
     setErr(null);
     setSim(null);
     setVerifyNote(null);
-    setBusy("Checking wallets…");
+    setBusy(tr("Checking wallets…"));
     try {
       const base = { chain: t.chain.key, contract: t.contract, input: t.input, strategy, walletIds, generic: genericPayload() };
       let r = await api("/api/eligibility", { body: base });
       const need = r.rows.filter((x: any) => x.needsOpenSeaLogin).map((x: any) => x.walletId);
       if (need.length && authenticated) {
-        setBusy(`Verifying ${need.length} wallet(s) with OpenSea…`);
+        setBusy(tr("Verifying {count} wallet(s) with OpenSea…", { count: need.length }));
         const { proofs, failed } = await openseaProofs(need);
         if (proofs.length) r = await api("/api/eligibility", { body: { ...base, siwe: proofs } });
-        if (failed) setVerifyNote(`${failed} wallet(s) couldn't be verified with OpenSea from this device.`);
+        if (failed) setVerifyNote(`${failed} ${tr("wallet(s) couldn't be verified with OpenSea from this device.")}`);
       }
       setElig(r);
       // Selection and quantities follow the chosen stage (see viewFor), not the checker's target stage.
@@ -182,7 +185,7 @@ export default function MintPage() {
   const simulate = async (forceIds: string[] = []) => {
     setErr(null);
     setSim(null);
-    setBusy("Simulating…");
+    setBusy(tr("Simulating…"));
     try {
       setSim(
         await api("/api/simulate", {
@@ -220,16 +223,16 @@ export default function MintPage() {
   const stageWhen = (s: any) =>
     s.status === "active"
       ? s.end
-        ? `live · ends ${fmt(s.end)}`
-        : "live now"
+        ? tr("live · ends {time}", { time: fmt(s.end) })
+        : tr("live now")
       : s.status === "upcoming" && s.start
-        ? `starts ${fmt(s.start)}`
+        ? tr("starts {time}", { time: fmt(s.start) })
         : s.start
           ? fmt(s.start)
           : "";
   const sym = t?.chain?.nativeSymbol ?? "";
   const priceLabel = (s: { priceWei?: string | null; paymentSymbol?: string | null }) =>
-    s?.priceWei == null ? "Unknown" : s.priceWei === "0" ? "Free" : `${fmtEth(s.priceWei)} ${s.paymentSymbol || sym}`;
+    s?.priceWei == null ? tr("Unknown") : s.priceWei === "0" ? tr("Free") : `${fmtEth(s.priceWei)} ${s.paymentSymbol || sym}`;
   // One source of truth: every stage some wallet can still mint. Not the checker's target stage, and not
   // the current checkboxes (those are filled in from the stage the member picks).
   const options = useMemo(
@@ -284,8 +287,8 @@ export default function MintPage() {
   const optionsKey = options.map((o) => `${o.key}:${o.live}`).join("|");
   useEffect(() => {
     if (timing && fellBack && chosen) {
-      const gone = timing === "now" ? "No eligible stage is live any more" : `${timing} is no longer available`;
-      setTimingNote(`${gone}, so timing switched to ${chosen.kind === "now" ? "Now" : chosen.name}.`);
+      const gone = timing === "now" ? tr("No eligible stage is live any more") : `${timing} ${tr("is no longer available")}`;
+      setTimingNote(`${gone}, ${tr("so timing switched to {name}.", { name: chosen.kind === "now" ? "Now" : chosen.name })}`);
       setTiming(chosen.key);
       setSelStage(null);
       setQtyStage(null);
@@ -304,8 +307,8 @@ export default function MintPage() {
   return (
     <>
       <div className="card">
-        <h2>Mint</h2>
-        <p className="muted">Paste an OpenSea link, collection slug, or contract address.</p>
+        <h2>{tr("Mint")}</h2>
+        <p className="muted">{tr("Paste an OpenSea link, collection slug, or contract address.")}</p>
         <div className="row">
           <input
             style={{ flex: 1, minWidth: 260 }}
@@ -316,7 +319,7 @@ export default function MintPage() {
           />
           <ChainSelect value={chain} onChange={setChain} allowAuto />
           <button onClick={() => doResolve()} disabled={!!busy}>
-            Resolve
+            {tr("Resolve")}
           </button>
         </div>
         {busy && <p className="muted">{busy}</p>}
@@ -326,62 +329,65 @@ export default function MintPage() {
       {t && (
         <div className="card">
           <h2>
-            {t.name ?? "Contract"} {t.symbol && <span className="muted">({t.symbol})</span>}{" "}
+            {t.name ?? tr("Contract")} {t.symbol && <span className="muted">({t.symbol})</span>}{" "}
             <span className="pill">{t.dropSource === "kalos" ? "Kalos" : t.kind}</span> <span className="pill">{t.standard}</span>
           </h2>
           <div className="grid">
             <div className="kv">
-              <b>Chain</b>
+              <b>{tr("Chain")}</b>
               {t.chain.name}
             </div>
             <div className="kv">
-              <b>Contract</b>
+              <b>{tr("Contract")}</b>
               <span className="mono">{short(t.contract)}</span>
             </div>
             <div className="kv">
-              <b>Supply</b>
-              {t.supply.total ?? "?"} / {t.supply.max ?? "?"} ({t.supply.remaining ?? "?"} left)
+              <b>{tr("Supply")}</b>
+              {t.supply.total ?? "?"} / {t.supply.max ?? "?"} ({tr("({count} left)", { count: t.supply.remaining ?? "?" })})
             </div>
             <div className="kv">
-              <b>Recommended</b>
-              {STRAT[t.recommendedStrategy as Strategy] ?? "Not mintable with SkyBOT"}
+              <b>{tr("Recommended")}</b>
+              {STRAT[t.recommendedStrategy as Strategy] ? tr(STRAT[t.recommendedStrategy as Strategy]) : tr("Not mintable with SkyBOT")}
             </div>
           </div>
           {t.stages?.length > 0 && (
             <table style={{ marginTop: 12 }}>
               <thead>
                 <tr>
-                  <th>Stage</th>
-                  <th className="hide-sm">Type</th>
-                  <th>Price</th>
-                  <th className="hide-sm">Max / wallet</th>
-                  <th>Schedule</th>
+                  <th>{tr("Stage")}</th>
+                  <th className="hide-sm">{tr("Type")}</th>
+                  <th>{tr("Price")}</th>
+                  <th className="hide-sm">{tr("Max / wallet")}</th>
+                  <th>{tr("Schedule")}</th>
                 </tr>
               </thead>
               <tbody>
                 {t.stages.map((s: any, i: number) => (
                   <tr key={i}>
                     <td>{s.name}</td>
-                    <td className="hide-sm">{STAGE_TYPE[s.type] ?? s.type}</td>
+                    <td className="hide-sm">{STAGE_TYPE[s.type] ? tr(STAGE_TYPE[s.type]) : s.type}</td>
                     <td>{priceLabel(s)}</td>
                     <td className="hide-sm">{s.maxPerWallet ?? "—"}</td>
                     <td className={s.status === "active" ? "ok" : s.status === "upcoming" ? "warn" : "muted"}>
                       {s.status === "active" ? (
-                        <>Live now{s.end ? <div className="muted small">ends {fmt(s.end)}</div> : null}</>
+                        <>
+                          {tr("Live now")}
+                          {s.end ? <div className="muted small">{tr("ends {time}", { time: fmt(s.end) })}</div> : null}
+                        </>
                       ) : s.status === "upcoming" ? (
                         s.start ? (
-                          `Starts ${fmt(s.start)}`
+                          tr("Starts {time}", { time: fmt(s.start) })
                         ) : (
-                          "Upcoming"
+                          tr("Upcoming")
                         )
                       ) : s.status === "ended" ? (
                         s.end ? (
-                          `Ended ${fmt(s.end, false)}`
+                          tr("Ended {time}", { time: fmt(s.end, false) })
                         ) : (
-                          "Ended"
+                          tr("Ended")
                         )
                       ) : (
-                        "Unknown"
+                        tr("Unknown")
                       )}
                     </td>
                   </tr>
@@ -399,7 +405,7 @@ export default function MintPage() {
 
       {t && (
         <div className="card">
-          <h2>1 · Strategy</h2>
+          <h2>{tr("1 · Strategy")}</h2>
           <div className="row">
             <select
               value={strategy}
@@ -412,10 +418,10 @@ export default function MintPage() {
               }}
               style={{ width: "auto" }}
             >
-              <option value="">Choose…</option>
+              <option value="">{tr("Choose…")}</option>
               {strategies.map((s) => (
                 <option key={s} value={s}>
-                  {STRAT[s]}
+                  {tr(STRAT[s])}
                   {s === t.recommendedStrategy ? " ★" : ""}
                 </option>
               ))}
@@ -432,11 +438,11 @@ export default function MintPage() {
                     ))}
                 </select>
                 <label>
-                  price <input value={priceEth} onChange={(e) => setPriceEth(e.target.value)} style={{ width: 110 }} /> {sym}
+                  {tr("price")} <input value={priceEth} onChange={(e) => setPriceEth(e.target.value)} style={{ width: 110 }} /> {sym}
                 </label>
                 {cand?.needsTokenId && (
                   <label>
-                    tokenId <input value={tokenId} onChange={(e) => setTokenId(e.target.value)} style={{ width: 90 }} />
+                    {tr("tokenId")} <input value={tokenId} onChange={(e) => setTokenId(e.target.value)} style={{ width: 90 }} />
                   </label>
                 )}
               </>
@@ -445,31 +451,31 @@ export default function MintPage() {
           <div className="row" style={{ marginTop: 12 }}>
             <div className="segmented" role="radiogroup" aria-label="Wallets to check">
               <button className={scope === "all" ? "on" : ""} onClick={() => setScope("all")}>
-                Check all wallets
+                {tr("Check all wallets")}
               </button>
               <button className={scope === "select" ? "on" : ""} onClick={() => setScope("select")}>
-                Select wallets
+                {tr("Select wallets")}
               </button>
             </div>
             <button disabled={!strategy || !!busy || (scope === "select" && !pickedIds.length)} onClick={() => checkElig()}>
-              Check Eligibility
+              {tr("Check Eligibility")}
             </button>
             <span className="muted">
               {scope === "all"
                 ? walletList.loading
-                  ? "Loading wallets…"
-                  : `${walletList.wallets.length} wallet(s)`
-                : `${pickedIds.length} of ${walletList.wallets.length} selected`}
+                  ? tr("Loading wallets…")
+                  : tr("{count} wallet(s)", { count: walletList.wallets.length })
+                : tr("{selected} of {total} selected", { selected: pickedIds.length, total: walletList.wallets.length })}
             </span>
           </div>
           {scope === "select" && (
             <>
               <div className="row" style={{ marginTop: 8 }}>
                 <button className="ghost" onClick={() => setPicked(Object.fromEntries(walletList.wallets.map((w) => [w.id, true])))}>
-                  Select All
+                  {tr("Select All")}
                 </button>
                 <button className="ghost" onClick={() => setPicked({})}>
-                  Clear
+                  {tr("Clear")}
                 </button>
               </div>
               <div className="wallet-pick">
@@ -493,7 +499,7 @@ export default function MintPage() {
                 ))}
                 {!walletList.loading && !walletList.wallets.length && (
                   <span className="muted">
-                    No wallets yet. Add some on <Link href="/app/wallets">Wallets</Link>.
+                    {tr("No wallets yet. Add some on")} <Link href="/app/wallets">{tr("Wallets")}</Link>.
                   </span>
                 )}
               </div>
@@ -504,9 +510,9 @@ export default function MintPage() {
 
       {elig && (
         <div className="card">
-          <h2>2 · Wallet Eligibility</h2>
+          <h2>{tr("2 · Wallet Eligibility")}</h2>
           {elig.noteItems?.some((n: any) => n.kind === "no_stage") && (
-            <div className="notice">No mint stage is live or scheduled right now.</div>
+            <div className="notice">{tr("No mint stage is live or scheduled right now.")}</div>
           )}
           {elig.notes?.map((n: string) => (
             <div key={n} className="notice">
@@ -515,8 +521,8 @@ export default function MintPage() {
           ))}
           {rows.some((r: any) => r.needsOpenSeaLogin) && tgOnly && !authenticated && (
             <div className="notice row" style={{ justifyContent: "space-between" }}>
-              <span>Connect with Privy to verify upcoming OpenSea stages for your wallets automatically.</span>
-              <button onClick={connectPrivy}>Connect with Privy</button>
+              <span>{tr("Connect with Privy to verify upcoming OpenSea stages for your wallets automatically.")}</span>
+              <button onClick={connectPrivy}>{tr("Connect with Privy")}</button>
             </div>
           )}
           {verifyNote && <div className="notice">{verifyNote}</div>}
@@ -528,8 +534,8 @@ export default function MintPage() {
                 const active = chosen?.stage?.name === g.stage.name;
                 const count =
                   sum.unknown.length === g.total
-                    ? `${g.total} unknown`
-                    : `${g.eligible}/${g.total} eligible${sum.unknown.length ? `, ${sum.unknown.length} unknown` : ""}`;
+                    ? tr("{count} unknown", { count: g.total })
+                    : `${tr("{eligible}/{total} eligible", { eligible: g.eligible, total: g.total })}${sum.unknown.length ? `, ${tr("{count} unknown", { count: sum.unknown.length })}` : ""}`;
                 return (
                   <StagePick
                     key={g.stage.name}
@@ -539,7 +545,7 @@ export default function MintPage() {
                     onPick={() => pickStage(g.stage.name)}
                     count={count}
                     countClass={g.eligible ? "ok small" : sum.unknown.length ? "muted small" : "bad small"}
-                    meta={stageMeta(g.stage, sym, stageWhen)}
+                    meta={stageMeta(g.stage, sym, stageWhen, tr)}
                   />
                 );
               })}
@@ -550,18 +556,18 @@ export default function MintPage() {
                   active={chosen?.key === o.key || chosen?.stage?.name === o.stage?.name}
                   offered
                   onPick={() => pickStage(o.key)}
-                  count={`${eligibleIn(o.stage)}/${rows.length} eligible`}
+                  count={tr("{eligible}/{total} eligible", { eligible: eligibleIn(o.stage), total: rows.length })}
                   countClass="ok small"
-                  meta={stageMeta(o.stage, sym, stageWhen)}
+                  meta={stageMeta(o.stage, sym, stageWhen, tr)}
                 />
               ))}
               {nowOnly && (
                 <StagePick
-                  name="Now"
+                  name={tr("Now")}
                   active={chosen?.key === "now"}
                   offered
                   onPick={() => pickStage("now")}
-                  count="Mint immediately"
+                  count={tr("Mint immediately")}
                   countClass="ok small"
                   meta=""
                 />
@@ -576,26 +582,26 @@ export default function MintPage() {
                 setSelStage(stageKey ?? "");
               }}
             >
-              Clear
+              {tr("Clear")}
             </button>
             <span className="spacer" />
             <span className="muted">
-              {selRows.length} selected · {totalNfts} NFT(s) ·{" "}
+              {tr("{count} selected", { count: selRows.length })} · {totalNfts} NFT(s) ·{" "}
               {paySym
-                ? `~${fmtEth(selRows.reduce((a: bigint, r: any) => a + BigInt(viewFor(r).unitPriceWei ?? r.unitPriceWei ?? "0") * BigInt(qtyFor(r)), 0n).toString())} ${paySym} + ~${fmtEth(selRows.reduce((a: bigint, r: any) => a + BigInt(r.gasCostWei ?? "0"), 0n).toString())} ${sym} gas`
+                ? `~${fmtEth(selRows.reduce((a: bigint, r: any) => a + BigInt(viewFor(r).unitPriceWei ?? r.unitPriceWei ?? "0") * BigInt(qtyFor(r)), 0n).toString())} ${paySym} + ~${fmtEth(selRows.reduce((a: bigint, r: any) => a + BigInt(r.gasCostWei ?? "0"), 0n).toString())} ${sym} ${tr("Gas")}`
                 : `~${fmtEth(totalWei.toString())} ${sym}`}
             </span>
           </div>
-          {hiddenCount > 0 && <p className="muted small">{hiddenCount} not eligible hidden</p>}
+          {hiddenCount > 0 && <p className="muted small">{tr("{count} not eligible hidden", { count: hiddenCount })}</p>}
           <table className="mint-wallets">
             <thead>
               <tr>
                 <th className="col-check"></th>
-                <th>Wallet</th>
-                <th className="hide-sm">Simulation</th>
-                <th className="col-qty">Qty</th>
-                <th className="col-cost">Cost</th>
-                <th className="hide-sm">Balance</th>
+                <th>{tr("Wallet")}</th>
+                <th className="hide-sm">{tr("Simulation")}</th>
+                <th className="col-qty">{tr("Qty")}</th>
+                <th className="col-cost">{tr("Cost")}</th>
+                <th className="hide-sm">{tr("Balance")}</th>
               </tr>
             </thead>
             <tbody>
@@ -627,7 +633,7 @@ export default function MintPage() {
                     </td>
                     <td className="hide-sm">
                       {r.simulation?.ok === true ? (
-                        <span className="ok">passes</span>
+                        <span className="ok">{tr("passes")}</span>
                       ) : r.simulation?.ok === false ? (
                         <span className="bad">{r.simulation.reason}</span>
                       ) : (
@@ -635,12 +641,12 @@ export default function MintPage() {
                       )}
                     </td>
                     <td className="col-qty">
-                      <div className="stepper" aria-label={`Quantity for ${r.label}`}>
+                      <div className="stepper" aria-label={tr("Quantity for {label}", { label: r.label })}>
                         <button
                           className="ghost"
                           disabled={qtyFor(r) <= 1}
                           onClick={() => setQtyFor(r, qtyFor(r) - 1)}
-                          aria-label="Decrease"
+                          aria-label={tr("Decrease")}
                         >
                           −
                         </button>
@@ -648,18 +654,18 @@ export default function MintPage() {
                           inputMode="numeric"
                           value={qtyFor(r)}
                           onChange={(e) => setQtyFor(r, Number(e.target.value.replace(/\D/g, "")) || 1)}
-                          aria-label="Quantity"
+                          aria-label={tr("Quantity")}
                         />
                         <button
                           className="ghost"
                           disabled={qtyFor(r) >= maxFor(r)}
                           onClick={() => setQtyFor(r, qtyFor(r) + 1)}
-                          aria-label="Increase"
+                          aria-label={tr("Increase")}
                         >
                           +
                         </button>
                       </div>
-                      <div className="muted small">{view.maxQty > 0 ? `max ${view.maxQty}` : "none left"}</div>
+                      <div className="muted small">{view.maxQty > 0 ? tr("max {count}", { count: view.maxQty }) : tr("none left")}</div>
                       {view.reason && <div className={view.reason.startsWith("⚠️") ? "warn small" : "bad small"}>{view.reason}</div>}
                     </td>
                     <td className="mono col-cost">
@@ -679,10 +685,10 @@ export default function MintPage() {
                 <tr>
                   <td colSpan={6} className="muted">
                     {rows.length ? (
-                      "No wallets are eligible for this stage."
+                      tr("No wallets are eligible for this stage.")
                     ) : (
                       <>
-                        No wallets. Add some on <Link href="/app/wallets">Wallets</Link>.
+                        {tr("No wallets. Add some on")} <Link href="/app/wallets">{tr("Wallets")}</Link>.
                       </>
                     )}
                   </td>
@@ -690,33 +696,33 @@ export default function MintPage() {
               )}
             </tbody>
           </table>
-          <h2 style={{ marginTop: 16 }}>3 · Timing</h2>
+          <h2 style={{ marginTop: 16 }}>{tr("3 · Timing")}</h2>
           <div className="row">
             <label>
-              Gas{" "}
+              {tr("Gas")}{" "}
               <select value={gasMode} onChange={(e) => setGasMode(e.target.value)} style={{ width: "auto" }}>
-                <option value="eco">Eco</option>
-                <option value="normal">Normal</option>
-                <option value="aggressive">Aggressive</option>
+                <option value="eco">{tr("Eco")}</option>
+                <option value="normal">{tr("Normal")}</option>
+                <option value="aggressive">{tr("Aggressive")}</option>
               </select>
             </label>
             {chosen && !chosen.live && (
               <label title="Send this many milliseconds before (negative) or after (positive) the stage start">
-                Offset (ms){" "}
+                {tr("Offset (ms)")}{" "}
                 <input type="number" value={offsetMs} onChange={(e) => setOffsetMs(Number(e.target.value))} style={{ width: 72 }} />
               </label>
             )}
             <button disabled={!minting.length || !chosen || !!busy} onClick={() => simulate()}>
-              Simulate
+              {tr("Simulate")}
             </button>
           </div>
           {timingNote && <div className="notice">{timingNote}</div>}
           <p className="muted small" style={{ marginTop: 8 }}>
             {!chosen
-              ? "Pick a stage above."
+              ? tr("Pick a stage above.")
               : chosen.live || !chosen.runAt
-                ? `Runs now${chosen.stage ? ` · ${chosen.name}` : ""}${minting.length ? ` · ${minting.length} wallet(s)` : ""}.`
-                : `Scheduled ${fmt(chosen.runAt)}${offsetMs ? ` (${offsetMs > 0 ? "+" : ""}${offsetMs} ms)` : ""} · ${chosen.name}${minting.length ? ` · ${minting.length} wallet(s)` : ""}.`}
+                ? `${tr("Runs now")}${chosen.stage ? ` · ${chosen.name}` : ""}${minting.length ? ` · ${tr("{count} wallet(s)", { count: minting.length })}` : ""}.`
+                : `${tr("Scheduled {time}", { time: fmt(chosen.runAt) })}${offsetMs ? ` (${offsetMs > 0 ? "+" : ""}${offsetMs} ms)` : ""} · ${chosen.name}${minting.length ? ` · ${tr("{count} wallet(s)", { count: minting.length })}` : ""}.`}
             {tz ? ` ${zoneLabel(tz)}.` : ""}
           </p>
         </div>
@@ -724,45 +730,47 @@ export default function MintPage() {
 
       {sim && (
         <div className="card">
-          <h2>4 · Confirm</h2>
+          <h2>{tr("4 · Confirm")}</h2>
           <div className="grid">
             <div className="kv">
               <b>NFTs</b>
               {sim.summary.totalNfts}
             </div>
             <div className="kv">
-              <b>Value</b>
+              <b>{tr("Value")}</b>
               {sim.summary.totalValue} {sym}
             </div>
             <div className="kv">
-              <b>Max Gas</b>
+              <b>{tr("Max Gas")}</b>
               {sim.summary.totalMaxGas} {sym}
             </div>
             <div className="kv">
-              <b>Worst Case</b>
+              <b>{tr("Worst Case")}</b>
               {sim.summary.totalMax} {sym}
             </div>
             <div className="kv">
-              <b>Daily / Cap</b>
+              <b>{tr("Daily / Cap")}</b>
               {sim.summary.dailySpent} / {sim.summary.dailyCap} {sym}
             </div>
           </div>
           {sim.summary.stage && (
             <p className="muted">
-              Stage: {sim.summary.stage.name}
-              {sim.summary.runAt ? ` · scheduled for ${fmt(sim.summary.runAt)}` : " · runs immediately"}
+              {tr("Stage: {name}", { name: sim.summary.stage.name })}
+              {sim.summary.runAt ? ` · ${tr("scheduled for {time}", { time: fmt(sim.summary.runAt) })}` : ` · ${tr("runs immediately")}`}
               {sim.summary.runAt && sim.summary.offsetMs ? ` (${sim.summary.offsetMs > 0 ? "+" : ""}${sim.summary.offsetMs} ms)` : ""}
-              {sim.summary.skipped ? ` · ${sim.summary.skipped} wallet(s) skipped (not eligible)` : ""}
+              {sim.summary.skipped ? ` · ${tr("{count} wallet(s) skipped (not eligible)", { count: sim.summary.skipped })}` : ""}
             </p>
           )}
-          {!sim.summary.stage && sim.summary.runAt && <p className="muted">Scheduled for {fmt(sim.summary.runAt)}</p>}
+          {!sim.summary.stage && sim.summary.runAt && (
+            <p className="muted">{tr("Scheduled for {time}", { time: fmt(sim.summary.runAt) })}</p>
+          )}
           <table style={{ marginTop: 8 }}>
             <thead>
               <tr>
-                <th>Wallet</th>
-                <th>Qty</th>
-                <th>Result</th>
-                <th className="hide-sm">Max Cost</th>
+                <th>{tr("Wallet")}</th>
+                <th>{tr("Qty")}</th>
+                <th>{tr("Result")}</th>
+                <th className="hide-sm">{tr("Max Cost")}</th>
               </tr>
             </thead>
             <tbody>
@@ -774,9 +782,9 @@ export default function MintPage() {
                   <td className="mono">{r.quantity}</td>
                   <td>
                     {r.mintable ? (
-                      <span className="ok">{r.reason ? "Will mint · " : "Ready to mint"}</span>
+                      <span className="ok">{r.reason ? tr("Will mint · ") : tr("Ready to mint")}</span>
                     ) : (
-                      <span className="bad">Won&apos;t mint · </span>
+                      <span className="bad">{tr("Won't mint · ")}</span>
                     )}
                     {r.reason && <span className={r.mintable ? "muted" : ""}>{r.reason}</span>}
                     {r.overridable && (
@@ -786,12 +794,12 @@ export default function MintPage() {
                           checked={Boolean(force[r.walletId])}
                           onChange={(e) => setForce((f) => ({ ...f, [r.walletId]: e.target.checked }))}
                         />{" "}
-                        Public stage: include anyway (the transaction may fail and still cost gas)
+                        {tr("Public stage: include anyway (the transaction may fail and still cost gas)")}
                       </label>
                     )}
                     {r.error && r.reason && !r.mintable && (
                       <details className="small muted">
-                        <summary>Technical details</summary>
+                        <summary>{tr("Technical details")}</summary>
                         <span className="mono">{r.error}</span>
                       </details>
                     )}
@@ -806,7 +814,8 @@ export default function MintPage() {
           {sim.rows.some((r: any) => r.overridable) && (
             <div className="row" style={{ marginTop: 8 }}>
               <button className="ghost" disabled={!!busy} onClick={() => simulate(forceIds)}>
-                Re-simulate{forceIds.length ? ` including ${forceIds.length} override(s)` : ""}
+                {tr("Re-simulate")}
+                {forceIds.length ? ` ${tr("including {count} override(s)", { count: forceIds.length })}` : ""}
               </button>
             </div>
           )}
@@ -818,8 +827,13 @@ export default function MintPage() {
           {sim.planId && !job && (
             <ConfirmBox
               key={sim.planId}
-              statement={`I confirm this will broadcast real transactions (${sim.summary.totalNfts} mint${sim.summary.totalNfts === 1 ? "" : "s"}, est. cost up to ${sim.summary.totalMax} ${sym}${sim.summary.runAt ? `, at ${fmt(sim.summary.runAt, false)}` : ""}).`}
-              label={sim.summary.runAt ? "Schedule Mint" : "Mint Now"}
+              statement={tr("I confirm this will broadcast real transactions ({count} mint(s), est. cost up to {cost} {symbol}{suffix}).", {
+                count: sim.summary.totalNfts,
+                cost: sim.summary.totalMax,
+                symbol: sym,
+                suffix: sim.summary.runAt ? tr(", at {time}", { time: fmt(sim.summary.runAt, false) }) : "",
+              })}
+              label={sim.summary.runAt ? tr("Schedule Mint") : tr("Mint Now")}
               onConfirm={async () => {
                 try {
                   const r = await api("/api/mint/execute", { body: { planId: sim.planId, confirmed: true, nfts: sim.summary.totalNfts } });
@@ -833,8 +847,9 @@ export default function MintPage() {
           )}
           {job && (
             <div className="notice">
-              {job.status === "scheduled" ? "Mint scheduled" : "Mint started"}
-              {job.runAt ? ` for ${fmt(job.runAt)}` : ""}. Track it on <Link href="/app/jobs">Jobs</Link>.
+              {job.status === "scheduled" ? tr("Mint scheduled") : tr("Mint started")}
+              {job.runAt ? ` ${tr("for {time}", { time: fmt(job.runAt) })}` : ""}. {tr("Track it on")}{" "}
+              <Link href="/app/jobs">{tr("Jobs")}</Link>.
             </div>
           )}
         </div>
@@ -853,10 +868,10 @@ const STAGE_TYPE: Record<string, string> = {
 
 const tinyAddr = (a?: string | null) => (a ? `${a.slice(0, 4)}…${a.slice(-2)}` : "");
 
-function stageMeta(s: any, sym: string, when: (s: any) => string) {
+function stageMeta(s: any, sym: string, when: (s: any) => string, tr: (text: string, vars?: Record<string, string | number>) => string) {
   return [
-    s?.priceWei != null ? (s.priceWei === "0" ? "Free" : `${fmtEth(s.priceWei)} ${s.paymentSymbol || sym}`) : null,
-    s?.maxPerWallet ? `max ${s.maxPerWallet}/wallet` : null,
+    s?.priceWei != null ? (s.priceWei === "0" ? tr("Free") : `${fmtEth(s.priceWei)} ${s.paymentSymbol || sym}`) : null,
+    s?.maxPerWallet ? tr("max {count}/wallet", { count: s.maxPerWallet }) : null,
     when(s),
   ]
     .filter(Boolean)
@@ -881,6 +896,7 @@ function StagePick({
   countClass: string;
   meta: string;
 }) {
+  const { t: tr } = useLang();
   return (
     <div className={`stage-group${active ? " on" : ""}`}>
       <div
@@ -899,7 +915,7 @@ function StagePick({
         role={offered ? "radio" : undefined}
         aria-checked={offered ? active : undefined}
         tabIndex={offered ? 0 : undefined}
-        title={offered ? `Mint in ${name}` : undefined}
+        title={offered ? tr("Mint in {name}", { name }) : undefined}
       >
         {offered && <span className={`stage-radio${active ? " on" : ""}`} aria-hidden="true" />}
         <b>{name}</b>

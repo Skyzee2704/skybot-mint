@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePrivy, useSignTransaction } from "@privy-io/react-auth";
 import { fmtEth, short } from "@/lib/api";
+import { useLang } from "@/lib/i18n";
 import { useApi, useShell } from "@/components/AppShell";
 import { formatDateTime, localTimeZone } from "@/lib/time";
 import { useNow } from "@/lib/useNow";
@@ -44,7 +45,6 @@ type RunState = Record<string, { status: Status; hash?: string; explorer?: strin
 const ADDR_RE = /^0x[0-9a-fA-F]{40}$/;
 const shortId = (id: string) => (id.length > 12 ? `${id.slice(0, 6)}…${id.slice(-4)}` : id);
 const collectionOf = (i: Item) => i.collection ?? short(i.contract);
-const label = (s: Status) => s[0].toUpperCase() + s.slice(1);
 
 /** Unknown contract errors keep their raw 4-byte selector as a small monospace detail. */
 function withSelector(text: string) {
@@ -60,6 +60,7 @@ function withSelector(text: string) {
 
 export default function NftsPage() {
   const api = useApi();
+  const { t } = useLang();
   const { tgOnly, connectPrivy } = useShell();
   const { authenticated } = usePrivy();
   const { signTransaction } = useSignTransaction();
@@ -95,7 +96,7 @@ export default function NftsPage() {
   const scan = useCallback(
     async (mode: "missing" | "all") => {
       setErr(null);
-      setScanning(mode === "all" ? "Refreshing holdings…" : "Scanning wallets for NFTs (first time only)…");
+      setScanning(mode === "all" ? t("Refreshing holdings…") : t("Scanning wallets for NFTs (first time only)…"));
       try {
         let r = await api("/api/nfts/refresh", { body: { mode } });
         accept(r);
@@ -110,7 +111,7 @@ export default function NftsPage() {
         setScanning(null);
       }
     },
-    [api, accept],
+    [api, accept, t],
   );
 
   // Opening the page reads the DB cache only; a scan runs automatically just for wallets never scanned before
@@ -164,7 +165,7 @@ export default function NftsPage() {
       const w = walletById.get(g);
       return (
         <>
-          {w?.label ?? "Wallet"} <span className="mono muted">{short(w?.address)}</span> <CopyAddress address={w?.address} />
+          {w?.label ?? t("Wallet")} <span className="mono muted">{short(w?.address)}</span> <CopyAddress address={w?.address} />
         </>
       );
     }
@@ -212,7 +213,7 @@ export default function NftsPage() {
   const review = async (list?: QuoteIn[]) => {
     setErr(null);
     resetQuote();
-    setBusy("Checking ownership and gas…");
+    setBusy(t("Checking ownership and gas…"));
     try {
       setQuote(
         await api("/api/nfts/send/quote", {
@@ -275,11 +276,11 @@ export default function NftsPage() {
     for (const it of items.filter((i) => i.tx)) {
       const lane = `${it.walletId}:${it.chain}`;
       if (stop.signal.aborted) {
-        setRun((r) => ({ ...r, [it.key]: { status: "skipped", error: "stopped before signing" } }));
+        setRun((r) => ({ ...r, [it.key]: { status: "skipped", error: t("stopped before signing") } }));
         continue;
       }
       if (broken.has(lane)) {
-        setRun((r) => ({ ...r, [it.key]: { status: "skipped", error: "an earlier transfer from this wallet failed" } }));
+        setRun((r) => ({ ...r, [it.key]: { status: "skipped", error: t("an earlier transfer from this wallet failed") } }));
         continue;
       }
       setRun((r) => ({ ...r, [it.key]: { status: "signing" } }));
@@ -302,7 +303,7 @@ export default function NftsPage() {
           ),
           { signal: stop.signal, what: "Wallet signature" },
         );
-        if (stop.signal.aborted) throw new Error("Stopped. Nothing was sent.");
+        if (stop.signal.aborted) throw new Error(t("Stopped. Nothing was sent."));
         const r = await api("/api/nfts/send", {
           body: { chain: it.chain, walletId: it.walletId, tx: it.tx, quoteToken: it.quoteToken, signed: signature },
         });
@@ -358,46 +359,46 @@ export default function NftsPage() {
     <>
       <div className="card">
         <div className="row" style={{ justifyContent: "space-between" }}>
-          <h2 style={{ margin: 0 }}>NFTs</h2>
+          <h2 style={{ margin: 0 }}>{t("NFTs")}</h2>
           <div className="row">
             <span className="muted small">
-              {loadedAt ? `Updated ${ago(loadedAt, now)}` : ""}
-              {cached.validating && view ? " · checking…" : ""}
-              {view?.lastRefreshAt ? ` · last full refresh ${fmt(view.lastRefreshAt)}` : ""}
+              {loadedAt ? t("Updated {time}", { time: ago(loadedAt, now) }) : ""}
+              {cached.validating && view ? t(" · checking…") : ""}
+              {view?.lastRefreshAt ? t(" · last full refresh {time}", { time: fmt(view.lastRefreshAt) }) : ""}
             </span>
             <button className="ghost" disabled={!!scanning || cooldownLeft > 0 || !wallets.length} onClick={() => scan("all")}>
-              {cooldownLeft > 0 ? `Refresh in ${Math.ceil(cooldownLeft / 1000)}s` : "Refresh"}
+              {cooldownLeft > 0 ? t("Refresh in {count}s", { count: Math.ceil(cooldownLeft / 1000) }) : t("Refresh")}
             </button>
           </div>
         </div>
         <p className="muted">
-          NFTs held by your wallets on every supported chain. Holdings are scanned once and saved, so opening this page doesn&apos;t use RPC
-          calls. Names and images are checked against each token&apos;s on-chain metadata, so revealed collections update automatically. Use
-          Refresh after receiving NFTs elsewhere. Each transfer is signed by your Privy wallet in this browser, and SkyBOT checks it matches
-          what you reviewed before broadcasting.
+          {t(
+            "NFTs held by your wallets on every supported chain. Holdings are scanned once and saved, so opening this page doesn't use RPC calls. Names and images are checked against each token's on-chain metadata, so revealed collections update automatically. Use Refresh after receiving NFTs elsewhere. Each transfer is signed by your Privy wallet in this browser, and SkyBOT checks it matches what you reviewed before broadcasting.",
+          )}
         </p>
         {!authenticated && tgOnly && (
           <div className="notice row" style={{ justifyContent: "space-between" }}>
-            <span>Transfers are signed with your Privy wallet. Connect with Privy to send.</span>
-            <button onClick={connectPrivy}>Connect with Privy</button>
+            <span>{t("Transfers are signed with your Privy wallet. Connect with Privy to send.")}</span>
+            <button onClick={connectPrivy}>{t("Connect with Privy")}</button>
           </div>
         )}
         {scanning && <p className="muted">{scanning}</p>}
         {(err ?? (!view ? cached.error : null)) && <div className="err">{err ?? cached.error}</div>}
         {scanErrors.length > 0 && (
           <div className="notice small">
-            Couldn&apos;t scan {scanErrors.length} wallet/chain pair{scanErrors.length === 1 ? "" : "s"} (
-            {[...new Set(scanErrors.map((s) => chainByKey.get(s.chain)?.name ?? s.chain))].join(", ")}). Previous results are kept; try
-            Refresh later.
+            {t("Couldn't scan {count} wallet/chain pairs ({chains}). Previous results are kept; try Refresh later.", {
+              count: scanErrors.length,
+              chains: [...new Set(scanErrors.map((s) => chainByKey.get(s.chain)?.name ?? s.chain))].join(", "),
+            })}
           </div>
         )}
         {truncated.length > 0 && (
-          <div className="notice small">Some wallets hold more than 1,000 NFTs on a chain; only the first 1,000 are listed.</div>
+          <div className="notice small">{t("Some wallets hold more than 1,000 NFTs on a chain; only the first 1,000 are listed.")}</div>
         )}
 
         <div className="row" style={{ marginTop: 10 }}>
           <select value={wallet} onChange={(e) => setWallet(e.target.value)} style={{ width: "auto", minWidth: 160 }} aria-label="Wallet">
-            <option value="">All wallets</option>
+            <option value="">{t("All wallets")}</option>
             {wallets.map((w) => (
               <option key={w.id} value={w.id}>
                 {w.label} ({short(w.address)})
@@ -405,7 +406,7 @@ export default function NftsPage() {
             ))}
           </select>
           <select value={chain} onChange={(e) => setChain(e.target.value)} style={{ width: "auto", minWidth: 140 }} aria-label="Chain">
-            <option value="">All chains</option>
+            <option value="">{t("All chains")}</option>
             {(view?.chains ?? []).map((c) => (
               <option key={c.key} value={c.key}>
                 {c.name}
@@ -418,7 +419,7 @@ export default function NftsPage() {
             style={{ width: "auto", minWidth: 160 }}
             aria-label="Collection"
           >
-            <option value="">All collections</option>
+            <option value="">{t("All collections")}</option>
             {collections.map((c) => (
               <option key={c} value={c}>
                 {c}
@@ -426,7 +427,7 @@ export default function NftsPage() {
             ))}
           </select>
           <input
-            placeholder="Search name, collection or token ID"
+            placeholder={t("Search name, collection or token ID")}
             value={q}
             onChange={(e) => setQ(e.target.value)}
             style={{ flex: 1, minWidth: 200 }}
@@ -435,31 +436,29 @@ export default function NftsPage() {
         <div className="row" style={{ marginTop: 10 }}>
           <div className="segmented">
             <button className={group === "wallet" ? "on" : ""} onClick={() => setGroup("wallet")}>
-              By Wallet
+              {t("By Wallet")}
             </button>
             <button className={group === "collection" ? "on" : ""} onClick={() => setGroup("collection")}>
-              By Collection
+              {t("By Collection")}
             </button>
           </div>
           <button className="ghost" disabled={!visible.length} onClick={() => setMany(visible, !allVisiblePicked)}>
-            {allVisiblePicked ? "Clear Visible" : `Select All (${visible.length})`}
+            {allVisiblePicked ? t("Clear Visible") : t("Select All ({count})", { count: visible.length })}
           </button>
           {selected.length > 0 && (
             <button className="ghost" onClick={() => setMany(selected, false)}>
-              Clear Selection
+              {t("Clear Selection")}
             </button>
           )}
           {spamCount > 0 && (
             <label className="row small muted" style={{ gap: 6 }}>
               <input type="checkbox" checked={showSpam} onChange={(e) => setShowSpam(e.target.checked)} style={{ width: "auto" }} />
-              Show {spamCount} likely spam
+              {t("Show {count} likely spam", { count: spamCount })}
             </label>
           )}
           <span className="spacer" />
           <LayoutPicker value={layout} onChange={setLayout} />
-          <span className="muted">
-            {selected.length} selected · {visible.length} shown
-          </span>
+          <span className="muted">{t("{count} selected · {count2} shown", { count: selected.length, count2: visible.length })}</span>
         </div>
 
         {!view && (
@@ -474,11 +473,11 @@ export default function NftsPage() {
         )}
         {view && !wallets.length && (
           <p className="muted">
-            No wallets yet. Add some on <Link href="/app/wallets">Wallets</Link>.
+            {t("No wallets yet. Add some on")} <Link href="/app/wallets">{t("Wallets")}</Link>.
           </p>
         )}
         {view && wallets.length > 0 && !visible.length && !scanning && (
-          <p className="muted">{view.items.length ? "No NFTs match these filters." : "No NFTs found in your wallets yet."}</p>
+          <p className="muted">{view.items.length ? t("No NFTs match these filters.") : t("No NFTs found in your wallets yet.")}</p>
         )}
 
         <NftGrid
@@ -492,7 +491,7 @@ export default function NftsPage() {
                   {groupTitle(g, items)} <span className="muted small">· {items.length}</span>
                 </b>
                 <button className="ghost small" style={{ padding: "4px 12px" }} onClick={() => setMany(items, !all)}>
-                  {all ? "Clear" : "Select All"}
+                  {all ? t("Clear") : t("Select All")}
                 </button>
               </div>
             );
@@ -506,13 +505,13 @@ export default function NftsPage() {
                   {i.image ? (
                     <LazyImg src={thumb(i.image, layout === "list" || layout >= 4 ? 160 : 256) ?? i.image} />
                   ) : (
-                    <span className="muted small">No image</span>
+                    <span className="muted small">{t("No image")}</span>
                   )}
                   <input
                     type="checkbox"
                     checked={on}
                     onChange={(e) => setMany([i], e.target.checked)}
-                    aria-label={`Select ${i.name ?? i.tokenId}`}
+                    aria-label={t("Select {name}", { name: i.name ?? i.tokenId })}
                   />
                 </div>
                 <div className="nft-meta">
@@ -526,12 +525,12 @@ export default function NftsPage() {
                   <span className="row small nft-tags" style={{ gap: 4 }}>
                     <span className="pill">{chainByKey.get(i.chain)?.name ?? i.chain}</span>
                     <span className="tag">{i.standard === "erc721" ? "ERC-721" : `ERC-1155 × ${i.quantity ?? "?"}`}</span>
-                    {i.spam && <span className="tag warn">Spam?</span>}
+                    {i.spam && <span className="tag warn">{t("Spam?")}</span>}
                   </span>
                   {group !== "wallet" && <span className="small muted">{w?.label ?? short(w?.address)}</span>}
                   {i.standard === "erc1155" && on && (
                     <span className="row small" style={{ gap: 6 }} onClick={(e) => e.preventDefault()}>
-                      Qty
+                      {t("Qty")}
                       <input
                         inputMode="numeric"
                         value={qty[i.key] ?? i.quantity ?? "1"}
@@ -540,7 +539,7 @@ export default function NftsPage() {
                           resetQuote();
                         }}
                         style={{ width: 80, padding: "4px 8px" }}
-                        aria-label="Quantity"
+                        aria-label={t("Quantity")}
                       />
                       {i.quantity && (
                         <button
@@ -551,12 +550,14 @@ export default function NftsPage() {
                             resetQuote();
                           }}
                         >
-                          Max
+                          {t("Max")}
                         </button>
                       )}
                     </span>
                   )}
-                  {!qtyValid(i) && on && <span className="bad small">Quantity must be 1 to {i.quantity ?? "your balance"}</span>}
+                  {!qtyValid(i) && on && (
+                    <span className="bad small">{t("Quantity must be 1 to {max}", { max: i.quantity ?? t("your balance") })}</span>
+                  )}
                 </div>
               </label>
             );
@@ -565,12 +566,12 @@ export default function NftsPage() {
       </div>
 
       <div className="card">
-        <h2>Send Selected NFTs</h2>
+        <h2>{t("Send Selected NFTs")}</h2>
         <div className="row">
           <input
             className="mono"
             style={{ flex: 1, minWidth: 280 }}
-            placeholder="Destination address (0x…)"
+            placeholder={t("Destination address (0x…)")}
             value={to}
             spellCheck={false}
             autoComplete="off"
@@ -580,26 +581,28 @@ export default function NftsPage() {
             }}
           />
           <button disabled={!selected.length || !toValid || !selected.every(qtyValid) || !!busy || running} onClick={() => review()}>
-            Review {selected.length || ""} Transfer{selected.length === 1 ? "" : "s"}
+            {selected.length === 1 ? t("Review 1 Transfer") : t("Review {count} Transfers", { count: selected.length })}
           </button>
         </div>
-        {to && !toValid && <p className="bad">Enter a full 0x address (42 characters). ENS names are not supported.</p>}
-        {selected.length > 100 && <p className="bad">Select up to 100 NFTs per batch.</p>}
+        {to && !toValid && <p className="bad">{t("Enter a full 0x address (42 characters). ENS names are not supported.")}</p>}
+        {selected.length > 100 && <p className="bad">{t("Select up to 100 NFTs per batch.")}</p>}
         {busy && <p className="muted">{busy}</p>}
       </div>
 
       {quote && (
         <div className="card">
-          <h2>Confirm Transfer</h2>
+          <h2>{t("Confirm Transfer")}</h2>
           <div className="kv">
-            <b>Destination</b>
+            <b>{t("Destination")}</b>
             <div className="mono" style={{ fontSize: 16, wordBreak: "break-all", padding: "8px 0" }}>
               {quote.destination.address}
             </div>
             <span className="muted">
-              {quote.destination.isContract ? `Smart contract on ${quote.destination.contractOn.join(", ")}` : "Regular wallet (EOA)"}
-              {quote.destination.ownWallet ? ` · your wallet "${quote.destination.ownWallet}"` : ""}
-              {quote.destination.seenBefore ? " · used before" : ""}
+              {quote.destination.isContract
+                ? t("Smart contract on {chains}", { chains: quote.destination.contractOn.join(", ") })
+                : t("Regular wallet (EOA)")}
+              {quote.destination.ownWallet ? t(' · your wallet "{label}"', { label: quote.destination.ownWallet }) : ""}
+              {quote.destination.seenBefore ? t(" · used before") : ""}
             </span>
           </div>
           {quote.warnings.map((w: string) => (
@@ -610,18 +613,19 @@ export default function NftsPage() {
           <table className="cards send-table" style={{ marginTop: 10 }}>
             <thead>
               <tr>
-                <th>NFT</th>
-                <th>From</th>
-                <th>Chain</th>
-                <th>Qty</th>
-                <th>Network Fee</th>
-                <th>Status</th>
+                <th>{t("NFT")}</th>
+                <th>{t("From")}</th>
+                <th>{t("Chain")}</th>
+                <th>{t("Qty")}</th>
+                <th>{t("Network Fee")}</th>
+                <th>{t("Status")}</th>
               </tr>
             </thead>
             <tbody>
               {quote.items.map((i: any) => {
                 const st = run[i.key];
                 const it = view?.items.find((x) => x.key === i.key);
+                const stLabel = st ? t(st.status) : "";
                 return (
                   <tr key={i.key}>
                     <td className="full wrap" data-label="NFT">
@@ -642,9 +646,12 @@ export default function NftsPage() {
                     <td className="full wrap" data-label="Status">
                       {!st ? (
                         i.skip ? (
-                          <span className="warn">Skipped: {withSelector(i.skip)}</span>
+                          <span className="warn">
+                            {t("Skipped: ")}
+                            {withSelector(i.skip)}
+                          </span>
                         ) : (
-                          <span className="muted">Ready</span>
+                          <span className="muted">{t("Ready")}</span>
                         )
                       ) : (
                         <span
@@ -652,11 +659,11 @@ export default function NftsPage() {
                             st.status === "confirmed" ? "ok" : st.status === "failed" ? "bad" : st.status === "skipped" ? "warn" : ""
                           }
                         >
-                          {label(st.status)}
+                          {stLabel[0].toUpperCase() + stLabel.slice(1)}
                           {st.error ? <>: {withSelector(st.error)}</> : ""}{" "}
                           {st.explorer && (
                             <a href={st.explorer} target="_blank" rel="noreferrer">
-                              View
+                              {t("View")}
                             </a>
                           )}
                         </span>
@@ -669,14 +676,14 @@ export default function NftsPage() {
           </table>
           <div className="grid" style={{ marginTop: 12 }}>
             <div className="kv">
-              <b>Transfers</b>
-              {ready.length} of {quote.items.length}
+              <b>{t("Transfers")}</b>
+              {ready.length} {t("of {total}", { total: quote.items.length })}
             </div>
             {quote.chains
               .filter((c: any) => quote.items.some((i: any) => i.chain === c.chain && i.tx))
               .map((c: any) => (
                 <div key={c.chain} className="kv">
-                  <b>Fees on {c.chainName}</b>
+                  <b>{t("Fees on {chain}", { chain: c.chainName })}</b>
                   {fmtEth(
                     quote.items
                       .filter((i: any) => i.chain === c.chain && i.tx)
@@ -690,17 +697,17 @@ export default function NftsPage() {
           </div>
           {signingNow && (
             <div className="row" style={{ marginTop: 12 }}>
-              <span className="muted">Waiting for your wallet signature (up to 60s per transfer)…</span>
+              <span className="muted">{t("Waiting for your wallet signature (up to 60s per transfer)…")}</span>
               <button className="ghost" onClick={() => stopRef.current?.abort()}>
-                Stop
+                {t("Stop")}
               </button>
             </div>
           )}
           {!signingNow && Object.keys(run).length > 0 && (
             <div className="row" style={{ marginTop: 12 }}>
-              {unsent > 0 && <button onClick={retryUnsent}>Retry {unsent} Unsent</button>}
+              {unsent > 0 && <button onClick={retryUnsent}>{t("Retry {count} Unsent", { count: unsent })}</button>}
               <button className="ghost" onClick={resetQuote}>
-                Close
+                {t("Close")}
               </button>
             </div>
           )}
@@ -708,14 +715,14 @@ export default function NftsPage() {
             <>
               <label className="confirm-check" style={{ marginTop: 12 }}>
                 <input type="checkbox" checked={checked} onChange={(e) => setChecked(e.target.checked)} />
-                <span>I checked the full destination address above. NFT transfers cannot be reversed.</span>
+                <span>{t("I checked the full destination address above. NFT transfers cannot be reversed.")}</span>
               </label>
               <div className="row" style={{ marginTop: 8 }}>
                 <button disabled={!checked || !ready.length || !authenticated} onClick={send}>
-                  Send {ready.length} Transfer{ready.length === 1 ? "" : "s"}
+                  {ready.length === 1 ? t("Send 1 Transfer") : t("Send {count} Transfers", { count: ready.length })}
                 </button>
                 <button className="ghost" onClick={resetQuote}>
-                  Cancel
+                  {t("Cancel")}
                 </button>
               </div>
             </>

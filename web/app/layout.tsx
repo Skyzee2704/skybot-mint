@@ -2,6 +2,7 @@
 import "../lib/theme.css";
 import { SkyPrivyProvider } from "@/lib/privy";
 import { TelegramProvider } from "@/lib/telegram";
+import { LangProvider } from "@/lib/i18n";
 import type { Metadata, Viewport } from "next";
 import Script from "next/script";
 import { SiteFooter } from "@/components/SiteFooter";
@@ -72,8 +73,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         <Script src="https://telegram.org/js/telegram-web-app.js" strategy="beforeInteractive" />
         <TelegramProvider>
-          <SkyPrivyProvider>{children}</SkyPrivyProvider>
-          <SiteFooter />
+          <LangProvider>
+            <SkyPrivyProvider>{children}</SkyPrivyProvider>
+            <SiteFooter />
+          </LangProvider>
         </TelegramProvider>
       </body>
     </html>

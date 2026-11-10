@@ -7,7 +7,7 @@
  */
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { LANGS, useLang } from "@/lib/i18n";
+import { LangSwitch, useLang } from "@/lib/i18n";
 import { telegramBotLinkProps, telegramBotUsername, useIsWebBrowser, useTelegram } from "@/lib/telegram";
 import {
   ArrowUpRight,
@@ -39,20 +39,6 @@ const SECONDARY: Item[] = [
 const ADMIN: Item = { href: "/app/admin", label: "Admin", icon: ShieldCheck };
 
 const isActive = (path: string, href: string) => path === href || path.startsWith(href + "/");
-
-/** English / Bahasa Indonesia switch (default English, choice saved in localStorage). */
-function LangSwitch() {
-  const { lang, setLang, t } = useLang();
-  return (
-    <span className="lang-switch" role="group" aria-label={t("Language")}>
-      {LANGS.map((l) => (
-        <button key={l.code} type="button" className={lang === l.code ? "active" : ""} onClick={() => setLang(l.code)}>
-          {l.code.toUpperCase()}
-        </button>
-      ))}
-    </span>
-  );
-}
 
 export function ShellNav(props: {
   path: string;

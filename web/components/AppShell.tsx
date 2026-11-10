@@ -8,7 +8,7 @@ import { api, apiBlob } from "@/lib/api";
 import { telegramBotUsername, useTelegram } from "@/lib/telegram";
 import { clearWalletCache } from "@/lib/wallets";
 import { clearSwrCache, prefetchMenus, setCacheScope } from "@/lib/swr";
-import { LangProvider, useLang } from "@/lib/i18n";
+import { useLang } from "@/lib/i18n";
 import { ShellNav } from "./ShellNav";
 
 /** How long the Mini App waits for Privy's seamless Telegram login before using the verified-initData fallback. */
@@ -51,14 +51,6 @@ function saveTimeZone(saved: string | null | undefined, auth: { token?: string |
 }
 
 export function AppShell({ children }: { children: React.ReactNode }) {
-  return (
-    <LangProvider>
-      <AppShellInner>{children}</AppShellInner>
-    </LangProvider>
-  );
-}
-
-function AppShellInner({ children }: { children: React.ReactNode }) {
   const { ready, authenticated, login, logout, getAccessToken, user } = usePrivy();
   const { t } = useLang();
   const { isMiniApp, initData, webApp } = useTelegram();

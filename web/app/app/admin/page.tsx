@@ -2,10 +2,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { useEffect, useState } from "react";
 import { useApi } from "@/components/AppShell";
+import { useLang } from "@/lib/i18n";
 import { formatDateTime } from "@/lib/time";
 
 export default function AdminPage() {
   const api = useApi();
+  const { t } = useLang();
   const [users, setUsers] = useState<any[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [keys, setKeys] = useState<any[] | null>(null);
@@ -19,7 +21,7 @@ export default function AdminPage() {
   }, []); // eslint-disable-line
   return (
     <div className="card">
-      <h2>Admin · Users</h2>
+      <h2>{t("Admin · Users")}</h2>
       <p>
         <button
           className="ghost"
@@ -30,7 +32,7 @@ export default function AdminPage() {
               .catch((e) => setKeyErr(e.message));
           }}
         >
-          Test OpenSea keys
+          {t("Test OpenSea keys")}
         </button>
       </p>
       {keyErr && <div className="err">{keyErr}</div>}
@@ -43,19 +45,19 @@ export default function AdminPage() {
                     `key ${k.index}: ${k.ok ? `${k.latencyMs}ms` : k.error} remaining ${k.remaining ?? "?"}/${k.limit ?? "?"} cooldown ${Math.ceil((k.cooldownMs ?? 0) / 1000)}s`,
                 )
                 .join(" · ")
-            : "No OpenSea API keys configured."}
+            : t("No OpenSea API keys configured.")}
         </p>
       )}
       {err && <div className="err">{err}</div>}
       <table>
         <thead>
           <tr>
-            <th>Email</th>
-            <th>Role</th>
-            <th>Wallets</th>
-            <th>Jobs</th>
+            <th>{t("Email")}</th>
+            <th>{t("Role")}</th>
+            <th>{t("Wallets")}</th>
+            <th>{t("Jobs")}</th>
             <th>Telegram</th>
-            <th>Last Seen</th>
+            <th>{t("Last Seen")}</th>
             <th></th>
           </tr>
         </thead>
@@ -63,12 +65,12 @@ export default function AdminPage() {
           {users.map((u) => (
             <tr key={u.id}>
               <td>
-                {u.email ?? u.id.slice(0, 8)} {u.disabled && <span className="pill">disabled</span>}
+                {u.email ?? u.id.slice(0, 8)} {u.disabled && <span className="pill">{t("disabled")}</span>}
               </td>
               <td>{u.role}</td>
               <td>{u.walletCount}</td>
               <td>{u.jobCount}</td>
-              <td>{u.telegramLinked ? `@${u.telegramUsername || "linked"}` : "—"}</td>
+              <td>{u.telegramLinked ? `@${u.telegramUsername || t("linked")}` : "—"}</td>
               <td className="muted">{u.lastSeenAt ? formatDateTime(u.lastSeenAt) : "—"}</td>
               <td>
                 {u.role !== "admin" && (
@@ -76,7 +78,7 @@ export default function AdminPage() {
                     className="ghost"
                     onClick={() => api(`/api/admin/users/${u.id}/disable`, { body: { disabled: !u.disabled } }).then(load)}
                   >
-                    {u.disabled ? "Enable" : "Disable"}
+                    {u.disabled ? t("Enable") : t("Disable")}
                   </button>
                 )}
               </td>

@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { assertSignableChain, withSignTimeout } from "@/lib/signing";
 import { usePrivy, useSignTransaction } from "@privy-io/react-auth";
 import { fmtEth, fmtNative, short } from "@/lib/api";
+import { useLang } from "@/lib/i18n";
 import { useApi, useShell } from "@/components/AppShell";
 import { ChainSelect } from "@/components/ChainSelect";
 import { useWalletList } from "@/lib/wallets";
@@ -18,6 +19,7 @@ const ADDR_RE = /^0x[0-9a-fA-F]{40}$/;
 
 export default function WithdrawPage() {
   const api = useApi();
+  const { t } = useLang();
   const { userId, tgOnly, connectPrivy } = useShell();
   const { authenticated } = usePrivy();
   const { signTransaction } = useSignTransaction();
@@ -74,7 +76,7 @@ export default function WithdrawPage() {
   const review = async (only?: string[]) => {
     setErr(null);
     reset();
-    setBusy("Preparing withdrawal…");
+    setBusy(t("Preparing withdrawal…"));
     try {
       const q = await api("/api/withdraw/quote", {
         body: {
@@ -116,7 +118,7 @@ export default function WithdrawPage() {
     // Sequential: one Privy signature at a time, each broadcast immediately.
     for (const it of items.filter((i) => i.tx)) {
       if (stop.signal.aborted) {
-        setRun((r) => ({ ...r, [it.walletId]: { status: "skipped", error: "stopped before signing" } }));
+        setRun((r) => ({ ...r, [it.walletId]: { status: "skipped", error: t("stopped before signing") } }));
         continue;
       }
       setRun((r) => ({ ...r, [it.walletId]: { status: "signing" } }));
@@ -139,7 +141,7 @@ export default function WithdrawPage() {
           ),
           { signal: stop.signal, what: "Wallet signature" },
         );
-        if (stop.signal.aborted) throw new Error("Stopped. Nothing was sent.");
+        if (stop.signal.aborted) throw new Error(t("Stopped. Nothing was sent."));
         const r = await api("/api/withdraw/send", {
           body: { chain: quote.chain, walletId: it.walletId, tx: it.tx, quoteToken: it.quoteToken, signed: signature },
         });
@@ -161,15 +163,16 @@ export default function WithdrawPage() {
   return (
     <>
       <div className="card">
-        <h2>Withdraw</h2>
+        <h2>{t("Withdraw")}</h2>
         <p className="muted">
-          Send the native token from one or more of your wallets to a single address. Each transfer is signed by your Privy wallet in this
-          browser; SkyBOT checks that the signed transaction matches what you reviewed before broadcasting it.
+          {t(
+            "Send the native token from one or more of your wallets to a single address. Each transfer is signed by your Privy wallet in this browser; SkyBOT checks that the signed transaction matches what you reviewed before broadcasting it.",
+          )}
         </p>
         {!authenticated && tgOnly && (
           <div className="notice row" style={{ justifyContent: "space-between" }}>
-            <span>Withdrawals are signed with your Privy wallet. Connect with Privy to continue.</span>
-            <button onClick={connectPrivy}>Connect with Privy</button>
+            <span>{t("Withdrawals are signed with your Privy wallet. Connect with Privy to continue.")}</span>
+            <button onClick={connectPrivy}>{t("Connect with Privy")}</button>
           </div>
         )}
         <div className="row">
@@ -181,22 +184,20 @@ export default function WithdrawPage() {
             }}
           />
           <button className="ghost" onClick={() => setPicked(allPicked ? {} : Object.fromEntries(list.wallets.map((w) => [w.id, true])))}>
-            {allPicked ? "Clear" : "Select All"}
+            {allPicked ? t("Clear") : t("Select All")}
           </button>
           <button className="ghost" onClick={() => setAmounts({})}>
-            Max for All
+            {t("Max for All")}
           </button>
-          <span className="muted">
-            {ids.length} of {list.wallets.length} selected
-          </span>
+          <span className="muted">{t("{selected} of {total} selected", { selected: ids.length, total: list.wallets.length })}</span>
         </div>
         <table style={{ marginTop: 10 }}>
           <thead>
             <tr>
               <th></th>
-              <th>Wallet</th>
-              <th>Balance</th>
-              <th>Amount</th>
+              <th>{t("Wallet")}</th>
+              <th>{t("Balance")}</th>
+              <th>{t("Amount")}</th>
             </tr>
           </thead>
           <tbody>
@@ -218,7 +219,7 @@ export default function WithdrawPage() {
                       setPicked((p) => ({ ...p, [w.id]: e.target.checked }));
                       reset();
                     }}
-                    aria-label={`Select ${w.label}`}
+                    aria-label={t("Select {label}", { label: w.label })}
                   />
                 </td>
                 <td>
@@ -228,7 +229,7 @@ export default function WithdrawPage() {
                   {balances[w.id] === undefined ? (
                     <span className="skeleton" style={{ width: 70 }} />
                   ) : balances[w.id] === "error" ? (
-                    <span className="muted">unavailable</span>
+                    <span className="muted">{t("unavailable")}</span>
                   ) : (
                     fmtNative(balances[w.id], sym, 6)
                   )}
@@ -236,7 +237,7 @@ export default function WithdrawPage() {
                 <td>
                   <input
                     inputMode="decimal"
-                    placeholder="Max"
+                    placeholder={t("Max")}
                     value={amounts[w.id] ?? ""}
                     disabled={!picked[w.id]}
                     onChange={(e) => {
@@ -244,7 +245,7 @@ export default function WithdrawPage() {
                       reset();
                     }}
                     style={{ width: 140 }}
-                    aria-label={`Amount for ${w.label}`}
+                    aria-label={t("Amount for {label}", { label: w.label })}
                   />
                 </td>
               </tr>
@@ -252,7 +253,7 @@ export default function WithdrawPage() {
             {!list.loading && !list.wallets.length && (
               <tr>
                 <td colSpan={4} className="muted">
-                  No wallets yet. Add some on <Link href="/app/wallets">Wallets</Link>.
+                  {t("No wallets yet. Add some on")} <Link href="/app/wallets">{t("Wallets")}</Link>.
                 </td>
               </tr>
             )}
@@ -262,7 +263,7 @@ export default function WithdrawPage() {
           <input
             className="mono"
             style={{ flex: 1, minWidth: 280 }}
-            placeholder="Destination address (0x…)"
+            placeholder={t("Destination address (0x…)")}
             value={to}
             spellCheck={false}
             autoComplete="off"
@@ -272,26 +273,26 @@ export default function WithdrawPage() {
             }}
           />
           <button disabled={!ids.length || !toValid || !!busy || running} onClick={() => review()}>
-            Review Withdrawal
+            {t("Review Withdrawal")}
           </button>
         </div>
-        {to && !toValid && <p className="bad">Enter a full 0x address (42 characters). ENS names are not supported.</p>}
+        {to && !toValid && <p className="bad">{t("Enter a full 0x address (42 characters). ENS names are not supported.")}</p>}
         {busy && <p className="muted">{busy}</p>}
         {err && <div className="err">{err}</div>}
       </div>
 
       {quote && (
         <div className="card">
-          <h2>Confirm Withdrawal</h2>
+          <h2>{t("Confirm Withdrawal")}</h2>
           <div className="kv">
-            <b>Destination on {quote.chainName}</b>
+            <b>{t("Destination on {chain}", { chain: quote.chainName })}</b>
             <div className="mono" style={{ fontSize: 16, wordBreak: "break-all", padding: "8px 0" }}>
               {quote.destination.address}
             </div>
             <span className="muted">
-              {quote.destination.isContract ? "Smart contract" : "Regular wallet (EOA)"}
-              {quote.destination.ownWallet ? ` · your wallet "${quote.destination.ownWallet}"` : ""}
-              {quote.destination.seenBefore ? " · used before" : ""}
+              {quote.destination.isContract ? t("Smart contract") : t("Regular wallet (EOA)")}
+              {quote.destination.ownWallet ? t(' · your wallet "{label}"', { label: quote.destination.ownWallet }) : ""}
+              {quote.destination.seenBefore ? t(" · used before") : ""}
             </span>
           </div>
           {quote.warnings.map((w: string) => (
@@ -302,16 +303,17 @@ export default function WithdrawPage() {
           <table style={{ marginTop: 10 }}>
             <thead>
               <tr>
-                <th>From</th>
-                <th>Amount</th>
-                <th>Network Fee</th>
-                <th>Left in Wallet</th>
-                <th>Status</th>
+                <th>{t("From")}</th>
+                <th>{t("Amount")}</th>
+                <th>{t("Network Fee")}</th>
+                <th>{t("Left in Wallet")}</th>
+                <th>{t("Status")}</th>
               </tr>
             </thead>
             <tbody>
               {quote.items.map((i: any) => {
                 const st = run[i.walletId];
+                const stLabel = st ? t(st.status) : "";
                 return (
                   <tr key={i.walletId}>
                     <td>
@@ -323,9 +325,12 @@ export default function WithdrawPage() {
                     <td>
                       {!st ? (
                         i.skip ? (
-                          <span className="warn">Skipped: {i.skip}</span>
+                          <span className="warn">
+                            {t("Skipped: ")}
+                            {i.skip}
+                          </span>
                         ) : (
-                          <span className="muted">Ready</span>
+                          <span className="muted">{t("Ready")}</span>
                         )
                       ) : (
                         <span
@@ -333,11 +338,11 @@ export default function WithdrawPage() {
                             st.status === "confirmed" ? "ok" : st.status === "failed" ? "bad" : st.status === "skipped" ? "warn" : ""
                           }
                         >
-                          {st.status[0].toUpperCase() + st.status.slice(1)}
+                          {stLabel[0].toUpperCase() + stLabel.slice(1)}
                           {st.error ? `: ${st.error}` : ""}{" "}
                           {st.explorer && (
                             <a href={st.explorer} target="_blank" rel="noreferrer">
-                              View
+                              {t("View")}
                             </a>
                           )}
                         </span>
@@ -350,31 +355,31 @@ export default function WithdrawPage() {
           </table>
           <div className="grid" style={{ marginTop: 12 }}>
             <div className="kv">
-              <b>Total Sent</b>
+              <b>{t("Total Sent")}</b>
               {fmtEth(quote.totals.valueWei, 8)} {sym}
             </div>
             <div className="kv">
-              <b>Total Network Fees</b>
+              <b>{t("Total Network Fees")}</b>
               {fmtEth(quote.totals.feeWei, 9)} {sym}
             </div>
             <div className="kv">
-              <b>Transfers</b>
+              <b>{t("Transfers")}</b>
               {ready.length}
             </div>
           </div>
           {signingNow && (
             <div className="row" style={{ marginTop: 12 }}>
-              <span className="muted">Waiting for your wallet signature (up to 60s per transfer)…</span>
+              <span className="muted">{t("Waiting for your wallet signature (up to 60s per transfer)…")}</span>
               <button className="ghost" onClick={() => stopRef.current?.abort()}>
-                Stop
+                {t("Stop")}
               </button>
             </div>
           )}
           {!signingNow && Object.keys(run).length > 0 && (
             <div className="row" style={{ marginTop: 12 }}>
-              {unsent.length > 0 && <button onClick={() => review(unsent)}>Retry {unsent.length} Unsent</button>}
+              {unsent.length > 0 && <button onClick={() => review(unsent)}>{t("Retry {count} Unsent", { count: unsent.length })}</button>}
               <button className="ghost" onClick={reset}>
-                Close
+                {t("Close")}
               </button>
             </div>
           )}
@@ -382,14 +387,14 @@ export default function WithdrawPage() {
             <>
               <label className="confirm-check" style={{ marginTop: 12 }}>
                 <input type="checkbox" checked={checked} onChange={(e) => setChecked(e.target.checked)} />
-                <span>I checked the full destination address above. Transfers cannot be reversed.</span>
+                <span>{t("I checked the full destination address above. Transfers cannot be reversed.")}</span>
               </label>
               <div className="row" style={{ marginTop: 8 }}>
                 <button disabled={!checked || !ready.length || !authenticated} onClick={send}>
-                  Send {ready.length} Transfer{ready.length === 1 ? "" : "s"}
+                  {ready.length === 1 ? t("Send 1 Transfer") : t("Send {count} Transfers", { count: ready.length })}
                 </button>
                 <button className="ghost" onClick={reset}>
-                  Cancel
+                  {t("Cancel")}
                 </button>
               </div>
             </>
