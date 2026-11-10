@@ -87,6 +87,18 @@ async function siweSignerStatus(user: { id: string; privyUserId: string | null }
   ])) as Awaited<ReturnType<typeof ensureSiweSigners>> | null;
 }
 
+/**
+ * Background pre-warm of OpenSea scoped PATs (fire-and-forget, never blocks the response):
+ * after login the server signs every wallet that lacks a stored PAT into OpenSea, so the first
+ * eligibility check is fast instead of doing the SIWE sign-in then. Idempotent and guarded
+ * against stacking inside warmOpenSeaPats; safe to call on every session load.
+ */
+function warmOpenSeaPatsInBackground(user: { id: string }) {
+  void import("../core/resolver/openseaSession.js")
+    .then((m) => m.warmOpenSeaPats(user.id))
+    .catch((e) => log.warn("opensea pat warm", redactString(String(e?.message ?? e)).slice(0, 160)));
+}
+
 /** Mint signer status of a member's wallets (time-boxed, never fails the request). */
 async function mintSignerStatusTimed(user: { id: string; privyUserId: string | null }, opts: { force?: boolean } = {}) {
   const { mintSignerReady, mintSignerStatus } = await import("../users/mintSigner.js");
@@ -261,6 +273,8 @@ export async function buildServer(): Promise<FastifyInstance> {
       const [st, ms] = req.privyAccessToken
         ? await Promise.all([siweSignerStatus(req.user!), mintSignerStatusTimed(req.user!)])
         : [null, null];
+      // Pre-warm OpenSea scoped PATs in the background so the first eligibility check is fast.
+      if (req.privyAccessToken) warmOpenSeaPatsInBackground(req.user!);
       const { mintSignerReady, mintSignerDiag } = await import("../users/mintSigner.js");
       // Only hand the app a signer to attach when the server key really belongs to that quorum.
       const diag = mintSignerReady() ? await mintSignerDiag().catch(() => null) : null;
@@ -301,6 +315,8 @@ export async function buildServer(): Promise<FastifyInstance> {
     a.post("/api/wallets/siwe-signer/verify", async (req) => {
       const st = await siweSignerStatus(req.user!);
       if (st) log.info("siwe signer verify", { attached: st.attachedAddresses.length, missing: st.missingAddresses.length });
+      // The signer is now attached, so the server can sign in: pre-warm the scoped PATs.
+      warmOpenSeaPatsInBackground(req.user!);
       return { attached: st?.attachedAddresses ?? [], missing: st?.missingAddresses ?? [] };
     });
 

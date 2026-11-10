@@ -219,6 +219,8 @@ export function createBot(token: string, opts: ConstructorParameters<typeof Bot>
       const code = payload.slice(5);
       try {
         const u = await consumeTelegramLink(code, String(ctx.from!.id), ctx.from?.username ?? null);
+        // Newly linked: pre-warm OpenSea scoped PATs in the background so the first /check is fast.
+        void import("../core/resolver/openseaSession.js").then((m) => m.warmOpenSeaPats(u.id)).catch(() => {});
         await ctx.reply(`✅ Linked to SkyBOT as <b>${esc(u.email ?? u.name ?? u.id.slice(0, 8))}</b>.\nYou can /mint, /wallets, /jobs.`, {
           parse_mode: "HTML",
           reply_markup: openDashboardKeyboard(),
@@ -233,12 +235,14 @@ export function createBot(token: string, opts: ConstructorParameters<typeof Bot>
     }
     const u = await linkedUser(ctx);
     const kb = openDashboardKeyboard();
-    if (u)
+    if (u) {
+      // Returning user: top up any missing scoped PATs in the background (idempotent).
+      void import("../core/resolver/openseaSession.js").then((m) => m.warmOpenSeaPats(u.id)).catch(() => {});
       await ctx.reply(`Welcome back to <b>SkyBOT Mint</b> ✅\nLinked as ${esc(u.email ?? u.name ?? "user")}.\n\n${HELP}`, {
         parse_mode: "HTML",
         reply_markup: kb,
       });
-    else await ctx.reply(`Welcome to <b>SkyBOT Mint</b>.\n\n${HELP}`, { parse_mode: "HTML", reply_markup: kb });
+    } else await ctx.reply(`Welcome to <b>SkyBOT Mint</b>.\n\n${HELP}`, { parse_mode: "HTML", reply_markup: kb });
   });
 
   // Legacy command: link codes are replaced by Privy sign-in. Kept so old instructions get a helpful answer.
@@ -386,11 +390,11 @@ export function createBot(token: string, opts: ConstructorParameters<typeof Bot>
       return ctx.reply("Too many checks in a minute. Please wait a moment and try again.");
     }
     await ctx.replyWithChatAction("typing").catch(() => {});
-    // A 50-wallet check takes 30–60 s: say so up front instead of silence, then remove the
-    // progress message once the result lands.
+    // Brief progress note instead of silence (scoped PATs are pre-warmed on login, so the
+    // check itself is only a few seconds); removed once the result lands.
     let progress: any = null;
     try {
-      progress = await ctx.reply("Checking your wallets… 50 wallets can take 1–2 minutes, please wait.");
+      progress = await ctx.reply("Checking your wallets…");
     } catch {
       /* progress message is best-effort */
     }

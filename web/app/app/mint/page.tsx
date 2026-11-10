@@ -524,7 +524,7 @@ export default function MintPage() {
                 count: scope === "all" ? walletList.wallets.length : pickedIds.length,
                 elapsed: eligElapsed,
               })}
-              {eligElapsed > 20 ? ` ${tr("50 wallets can take 1–2 minutes — still working.")}` : ""}
+              {eligElapsed > 20 ? ` ${tr("Still working…")}` : ""}
             </p>
           )}
           {eligErr && (

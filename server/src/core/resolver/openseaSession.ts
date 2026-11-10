@@ -155,12 +155,28 @@ export type SignInFailure =
 
 export type JwtResult = { jwt: string; via: "cache" | "pat" | "signin"; reason?: undefined } | { jwt: null; reason: SignInFailure };
 
-// One full SIWE sign-in at a time per instance: each is ~5 OpenSea auth requests, and parallel bursts hit 429.
-let signInChain: Promise<unknown> = Promise.resolve();
-function serialized<T>(fn: () => Promise<T>): Promise<T> {
-  const run = signInChain.then(fn, fn);
-  signInChain = run.catch(() => {});
-  return run;
+/**
+ * Bounded concurrent OpenSea server sign-ins. Each sign-in is ~5 sequential auth requests
+ * (nonce → Privy sign → SIWE verify → create scoped PAT → exchange PAT for JWT). Running them
+ * strictly one at a time made a 50-wallet first check take ~2 minutes; 10 in parallel brings
+ * the same warm-up to ~10 s. A transient 429 is retried by osFetch (2 retries with backoff),
+ * and a sign-in that still fails just leaves that wallet cold — the next eligibility check
+ * signs it in on demand. Tune down if OpenSea's auth endpoints start rate-limiting hard.
+ */
+const SIGNIN_CONCURRENCY = 10;
+let signInRunning = 0;
+const signInWaiters: Array<() => void> = [];
+async function signInSlot<T>(fn: () => Promise<T>): Promise<T> {
+  while (signInRunning >= SIGNIN_CONCURRENCY) {
+    await new Promise<void>((resolve) => signInWaiters.push(resolve));
+  }
+  signInRunning++;
+  try {
+    return await fn();
+  } finally {
+    signInRunning--;
+    signInWaiters.shift()?.();
+  }
 }
 
 type Wallet = { id?: string; address: string; privyWalletId: string | null };
@@ -184,7 +200,7 @@ export async function serverSignInDetailed(userId: string, wallet: Wallet): Prom
     privyWalletId = null;
   }
   if (!privyWalletId) return { jwt: null, reason: "no_privy_wallet" };
-  return serialized(async () => {
+  return signInSlot(async () => {
     // Another check may have signed this wallet in while we waited.
     const again = await loadJwt(userId, wallet.address);
     if (again) return { jwt: again, via: "cache" as const };
@@ -233,6 +249,53 @@ async function signerMissing(privyWalletId: string): Promise<boolean> {
 export async function serverSignIn(userId: string, wallet: Wallet): Promise<string | null> {
   const r = await serverSignInDetailed(userId, wallet);
   return r.jwt;
+}
+
+/** Users with a warm-up already running (fire-and-forget triggers must not stack). */
+const warmingUsers = new Set<string>();
+
+/**
+ * Background pre-warm: sign every wallet that lacks a stored scoped PAT into OpenSea, so the
+ * next eligibility check skips the SIWE sign-in and just exchanges the PAT (1 request) — a
+ * 50-wallet first check drops from ~2 min to ~3–4 s. Best effort and idempotent: wallets
+ * with a valid PAT are skipped, per-wallet failures are logged and left cold (the next check
+ * signs them in on demand), and a run cut off mid-way resumes cleanly on the next login.
+ * Never throws.
+ */
+export async function warmOpenSeaPats(userId: string): Promise<{ warmed: number; skipped: number; failed: number }> {
+  const done = { warmed: 0, skipped: 0, failed: 0 };
+  if (!privySiweSignerReady() || warmingUsers.has(userId)) return done;
+  warmingUsers.add(userId);
+  try {
+    const { listWallets } = await import("../../users/service.js");
+    const wallets = await listWallets(userId);
+    await Promise.all(
+      wallets.map(async (w) => {
+        try {
+          if (await loadPat(userId, w.address)) {
+            done.skipped++;
+            return;
+          }
+          const r = await serverSignInDetailed(userId, { id: w.id, address: w.address, privyWalletId: w.privyWalletId });
+          if (r.jwt) done.warmed++;
+          else {
+            done.failed++;
+            log.warn("opensea pat warm skipped", `${w.address.slice(0, 10)}: ${r.reason}`);
+          }
+        } catch (e: any) {
+          done.failed++;
+          log.warn("opensea pat warm failed", redactString(String(e?.message ?? e)).slice(0, 160));
+        }
+      }),
+    );
+    log.info("opensea pat warm", { userId, ...done });
+    return done;
+  } catch (e: any) {
+    log.warn("opensea pat warm failed", redactString(String(e?.message ?? e)).slice(0, 160));
+    return done;
+  } finally {
+    warmingUsers.delete(userId);
+  }
 }
 
 /**
