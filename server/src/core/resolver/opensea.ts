@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { env } from "../../config/env.js";
+import { honoredRetryMs, readOpenSeaMintHeaders, type OpenSeaMintSample } from "../mint/openseaLimit.js";
 
 /**
  * Client for OpenSea's OFFICIAL REST API (api.opensea.io/api/v2) only.
@@ -16,14 +17,17 @@ export class OpenSeaUnavailable extends Error {
 }
 export class OpenSeaHttpError extends Error {
   retryAfterMs?: number;
+  rateLimit?: OpenSeaMintSample;
   constructor(
     public status: number,
     message: string,
     retryAfterMs?: number,
+    rateLimit?: OpenSeaMintSample,
   ) {
     super(message);
     this.name = "OpenSeaHttpError";
     if (retryAfterMs !== undefined) this.retryAfterMs = retryAfterMs;
+    if (rateLimit) this.rateLimit = rateLimit;
   }
 }
 
@@ -78,13 +82,21 @@ export class OpenSeaClient {
     return Boolean(this.apiKey);
   }
 
-  private async req<T>(method: "GET" | "POST", path: string, body?: unknown, allowNoKey = false, timeoutMs = 10_000): Promise<T> {
+  private async req<T>(
+    method: "GET" | "POST",
+    path: string,
+    body?: unknown,
+    allowNoKey = false,
+    timeoutMs = 10_000,
+    hook?: { jobId?: string; onSample?: (sample: OpenSeaMintSample) => void },
+  ): Promise<T> {
     if (!this.apiKey && !allowNoKey) throw new OpenSeaUnavailable("OPENSEA_API_KEY not set — OpenSea features disabled");
     const headers: Record<string, string> = { accept: "application/json", "user-agent": "nft-mint-bot/0.1" };
     if (this.apiKey) headers["x-api-key"] = this.apiKey;
     if (body) headers["content-type"] = "application/json";
     // A short timeout is one attempt: the caller retries. The default keeps the longer interactive lookup.
     const fast = timeoutMs < 10_000;
+    const mintPost = method === "POST" && path.endsWith("/mint");
     let lastErr: unknown;
     for (let attempt = 0; attempt < (fast ? 1 : 3); attempt++) {
       const ctrl = new AbortController();
@@ -103,16 +115,18 @@ export class OpenSeaClient {
         } catch {
           /* non-json */
         }
+        const sample = mintPost ? readOpenSeaMintHeaders(res.headers, res.status) : undefined;
+        if (sample) hook?.onSample?.(sample);
         if (res.ok) return json as T;
         const msg = (json?.errors?.join?.("; ") ?? json?.detail ?? json?.message ?? text ?? "").toString().slice(0, 300);
-        const retryAfter = Number(res.headers.get("retry-after"));
-        const retryAfterMs = Number.isFinite(retryAfter) && retryAfter > 0 ? Math.min(retryAfter, 5) * 1000 : undefined;
+        const retryAfterMs = sample?.retryAfterMs;
+        const honored = sample ? honoredRetryMs(sample, Date.now()) : undefined;
         if (!fast && (res.status === 429 || res.status >= 500) && attempt < 2) {
-          await new Promise((r) => setTimeout(r, retryAfterMs ?? 500 * 2 ** attempt));
-          lastErr = new OpenSeaHttpError(res.status, msg, retryAfterMs);
+          await new Promise((r) => setTimeout(r, honored ?? 500 * 2 ** attempt));
+          lastErr = new OpenSeaHttpError(res.status, msg, retryAfterMs, sample);
           continue;
         }
-        throw new OpenSeaHttpError(res.status, msg || `HTTP ${res.status}`, retryAfterMs);
+        throw new OpenSeaHttpError(res.status, msg || `HTTP ${res.status}`, retryAfterMs, sample);
       } catch (e) {
         if (e instanceof OpenSeaHttpError) throw e;
         lastErr = e;
@@ -140,8 +154,21 @@ export class OpenSeaClient {
    * Build a ready-to-sign mint tx (official). 200 = eligible now; 409 = stage not active;
    * 422 = not eligible (allowlist / limit / funds) with a reason message. Read-only: nothing is minted.
    */
-  buildMint(slug: string, minter: string, quantity: number, timeoutMs?: number) {
-    return this.req<OsMintTx>("POST", `/api/v2/drops/${encodeURIComponent(slug)}/mint`, { minter, quantity }, false, timeoutMs ?? 10_000);
+  buildMint(
+    slug: string,
+    minter: string,
+    quantity: number,
+    timeoutMs?: number,
+    hook?: { jobId?: string; onSample?: (sample: OpenSeaMintSample) => void },
+  ) {
+    return this.req<OsMintTx>(
+      "POST",
+      `/api/v2/drops/${encodeURIComponent(slug)}/mint`,
+      { minter, quantity },
+      false,
+      timeoutMs ?? 10_000,
+      hook,
+    );
   }
 }
 

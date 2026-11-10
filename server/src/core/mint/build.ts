@@ -2,6 +2,7 @@
 import { Contract, Interface, getAddress } from "ethers";
 import { requireChain } from "../../config/chains.js";
 import { OpenSeaClient, OpenSeaHttpError } from "../resolver/opensea.js";
+import type { OpenSeaMintSample } from "./openseaLimit.js";
 import { ResolvedTarget } from "../resolver/resolver.js";
 import { SEADROP_ADDRESS, encodeMintPublic } from "../resolver/seadrop.js";
 import { encodeKalosMintPublic, encodeMintAllowList } from "../kalos/calldata.js";
@@ -25,6 +26,7 @@ export function osErrorCode(status: number, message = ""): string {
 export class MintBuildError extends Error {
   statusCode = 422;
   retryAfterMs?: number;
+  rateLimit?: OpenSeaMintSample;
   constructor(
     m: string,
     public code = "BUILD",
@@ -50,7 +52,7 @@ export async function buildMintTx(
   quantity: number,
   os = new OpenSeaClient(),
   userId = "system",
-  call: { mintTimeoutMs?: number } = {},
+  call: { mintTimeoutMs?: number; mintJobId?: string; onMintSample?: (sample: OpenSeaMintSample) => void } = {},
 ): Promise<BuiltTx> {
   const chain = requireChain(t.chain.key);
   const chosen = req.stage ? (t.stages.find((s) => s.name === req.stage) ?? null) : null;
@@ -87,7 +89,10 @@ export async function buildMintTx(
       if (!slug) throw new MintBuildError("OpenSea slug unknown for this contract — cannot use OpenSea mint API");
       if (!os.available) throw new MintBuildError("OPENSEA_API_KEY not set — OpenSea mint API unavailable");
       try {
-        const r = await os.buildMint(slug, wallet, quantity, call.mintTimeoutMs);
+        const r = await os.buildMint(slug, wallet, quantity, call.mintTimeoutMs, {
+          jobId: call.mintJobId,
+          onSample: call.onMintSample,
+        });
         const value = BigInt(r.value || "0x0");
         tx = { to: getAddress(r.to), data: r.data, value };
         if (r.chain && r.chain !== chain.openseaChain && r.chain !== chain.key && chain.openseaChain)
@@ -96,7 +101,8 @@ export async function buildMintTx(
         if (e instanceof OpenSeaHttpError) {
           const code = osErrorCode(e.status, e.message);
           const err = new MintBuildError(`OpenSea: ${e.message || e.status}`, code);
-          if (e.retryAfterMs) err.retryAfterMs = e.retryAfterMs;
+          if (e.retryAfterMs !== undefined) err.retryAfterMs = e.retryAfterMs;
+          if (e.rateLimit) err.rateLimit = e.rateLimit;
           throw err;
         }
         if (call.mintTimeoutMs && /abort|timeout/i.test(`${e?.name ?? ""} ${e?.message ?? e}`))

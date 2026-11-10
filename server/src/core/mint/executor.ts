@@ -19,6 +19,9 @@ import { describeTxError } from "../tx/revert.js";
 import { MintRequest } from "./types.js";
 import { signRawTransaction } from "../../auth/privy.js";
 import { log } from "../../util/log.js";
+import { BUILD_CONCURRENCY, MintRateLog, OPENSEA_LEAD_MS, probeAndRelease, type ProbeCall } from "./openseaLimit.js";
+
+export { BUILD_CONCURRENCY, NOT_ACTIVE_RETRY_MS, OPENSEA_LEAD_MS, RATE_LIMIT_RETRY_MS, nextRetryDelay } from "./openseaLimit.js";
 
 export interface WalletResult {
   walletId: string;
@@ -47,18 +50,8 @@ export interface Prepared {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-/** Stage-not-open retry interval for the mint build (OpenSea 409 / NOT_ACTIVE). Tight so a 409 does not cost 300ms. */
-export const NOT_ACTIVE_RETRY_MS = 75;
-/** First OpenSea mint-signature attempt is this far before T0; 409s then retry until the stage opens. */
-export const OPENSEA_LEAD_MS = 150;
-/** Backoff when OpenSea answers 429. Wait at least this long, or Retry-After when that is longer, and never more than 2s. */
-export const RATE_LIMIT_RETRY_MS = 500;
-/** How long after the start a 422 "not eligible" from the mint API is retried for a chosen stage. */
-export const NOT_ELIGIBLE_GRACE_MS = 5000;
 /** Max time a gas estimate may add after the start before the fallback/hint gas is used instead. */
 export const GAS_ESTIMATE_BUDGET_MS = 400;
-/** Parallel build/sign per job (keeps OpenSea and Privy below their burst limits). */
-export const BUILD_CONCURRENCY = 8;
 /** Simulation gas hint is raised by this much so a slightly heavier live stage still fits. */
 export function gasFromHint(hint: bigint): bigint {
   if (hint <= 0n) return 0n;
@@ -81,15 +74,6 @@ export async function mapLimit<T>(items: T[], limit: number, fn: (item: T, i: nu
     }
   };
   await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
-}
-
-/**
- * Delay before the next build retry. Retries are aligned so one attempt lands exactly at `fireAt` instead of up to
- * one interval after it (pure, unit-tested).
- */
-export function nextRetryDelay(now: number, fireAt: number | undefined, interval = NOT_ACTIVE_RETRY_MS): number {
-  if (fireAt !== undefined && now < fireAt && fireAt < now + interval) return fireAt - now;
-  return interval;
 }
 
 /** Wait until `at` (coarse sleep, then a short spin for the last ms). `check` runs about once a second. */
@@ -208,39 +192,12 @@ export async function prepareAll(
   const sameTx = (a: BuiltTx, b: BuiltTx) =>
     a.to.toLowerCase() === b.to.toLowerCase() && a.data.toLowerCase() === b.data.toLowerCase() && a.value === b.value;
 
-  const buildWithRetry = async (i: number): Promise<BuiltTx> => {
-    for (;;) {
-      timing[i].attempts++;
-      if (timing[i].firstAttemptAt < 0) timing[i].firstAttemptAt = Date.now();
-      try {
-        return await buildMintTx(t, req, results[i].address, req.wallets[i].quantity, undefined, job.userId, {
-          mintTimeoutMs: MINT_API_TIMEOUT_MS,
-        });
-      } catch (e: any) {
-        // 422 right around the start can mean the chosen stage isn't live on OpenSea's side yet: retry briefly.
-        const earlyNotEligible =
-          e instanceof MintBuildError &&
-          e.code === "NOT_ELIGIBLE" &&
-          Boolean(req.stage) &&
-          Date.now() < (fireAt ?? 0) + NOT_ELIGIBLE_GRACE_MS;
-        if (
-          e instanceof MintBuildError &&
-          (e.code === "NOT_ACTIVE" || e.code === "RETRY" || e.code === "RATE_LIMIT" || earlyNotEligible) &&
-          Date.now() < buildDeadline
-        ) {
-          const wait =
-            e.code === "RATE_LIMIT"
-              ? Math.min(2_000, Math.max(RATE_LIMIT_RETRY_MS, e.retryAfterMs ?? RATE_LIMIT_RETRY_MS))
-              : e.code === "RETRY"
-                ? 50
-                : nextRetryDelay(Date.now(), fireAt);
-          await sleep(wait);
-          if (await cancelled()) throw new JobCancelledError();
-          continue;
-        }
-        throw e;
-      }
-    }
+  const buildOnce = async (i: number): Promise<BuiltTx> => {
+    timing[i].attempts++;
+    if (timing[i].firstAttemptAt < 0) timing[i].firstAttemptAt = Date.now();
+    return buildMintTx(t, req, results[i].address, req.wallets[i].quantity, undefined, job.userId, {
+      mintTimeoutMs: MINT_API_TIMEOUT_MS,
+    });
   };
 
   const hintOf = (i: number): bigint => {
@@ -294,26 +251,8 @@ export async function prepareAll(
     });
   };
 
-  // Speculative pre-build + pre-sign (OpenSea API only, before the start). OpenSea normally answers 409 until the stage
-  // opens, so this usually yields nothing; when it does build (stage already open / a previous stage), the signed tx is
-  // only used if OpenSea's build right after the start returns the identical to/data/value (and the nonce is unchanged).
+  // OpenSea is not fanned out before the stage opens. One probe polls; the rest wait for it.
   const pre: ({ tx: BuiltTx; gas: bigint; nonce: number; raw: string } | null)[] = req.wallets.map(() => null);
-  if (opts.buildNotBefore !== undefined && Date.now() < opts.buildNotBefore - 500) {
-    await mapLimit(req.wallets, BUILD_CONCURRENCY, async (_w, i) => {
-      try {
-        const tx = await buildMintTx(t, req, results[i].address, req.wallets[i].quantity, undefined, job.userId, {
-          mintTimeoutMs: MINT_API_TIMEOUT_MS,
-        });
-        const gas = await gasFor(tx, i);
-        const nonce = await nonces[i];
-        pre[i] = { tx, gas, nonce, raw: await sign(i, tx, gas, nonce) };
-      } catch {
-        /* 409 before the stage opens is expected; the normal path below handles it */
-      }
-    });
-    const n = pre.filter(Boolean).length;
-    void jobLog(job, `pre-build: ${n}/${req.wallets.length} pre-signed before start (+${Date.now() - t0}ms)`).catch(() => {});
-  }
 
   // Worst-case budget up front when the price is known, so wallets can be signed and sent one by one (no barrier).
   const priceWei = stagePriceWei(t, req.strategy);
@@ -364,22 +303,33 @@ export async function prepareAll(
     }
   };
 
-  // Per-wallet pipeline (bounded concurrency): build → gas → sign → (stream) send. One slow wallet never holds the rest.
-  // A low balance is not a reason to skip: the wallet may be topped up before the start. If the network rejects
-  // the broadcast for insufficient funds, that wallet is reported failed then.
-  await mapLimit(req.wallets, BUILD_CONCURRENCY, async (_w, i) => {
-    const w = walletRows[i];
-    let s = Date.now();
-    let tx: BuiltTx;
-    try {
-      tx = await buildWithRetry(i);
-      timing[i].build = Date.now() - s;
-    } catch (e: any) {
-      if (e instanceof JobCancelledError) throw e;
-      results[i].status = "failed";
-      results[i].error = await buildFailureMessage(e, { chain, contract: req.contract });
-      return;
+  const rateLog = new MintRateLog();
+  let probeAttempts = 0;
+  let releaseAt: number | undefined;
+  let waited = 0;
+
+  const classify = (e: unknown): ProbeCall<BuiltTx> => {
+    if (e instanceof JobCancelledError) throw e;
+    if (e instanceof MintBuildError) {
+      const base = {
+        error: e,
+        retryAfterMs: e.retryAfterMs,
+        resetAt: e.rateLimit?.resetAt,
+        limit: e.rateLimit?.limit,
+        remaining: e.rateLimit?.remaining,
+      };
+      if (e.code === "NOT_ACTIVE") return { kind: "closed", ...base };
+      if (e.code === "RATE_LIMIT") return { kind: "rate", ...base };
+      if (e.code === "NOT_ELIGIBLE" || e.code === "INSUFFICIENT_FUNDS") return { kind: "live", ...base };
+      if (e.code === "RETRY" || e.code === "HTTP_401" || e.code === "HTTP_403" || /^HTTP_5/.test(e.code))
+        return { kind: "promote", ...base };
+      return { kind: "fail", ...base };
     }
+    return { kind: "fail", error: e };
+  };
+
+  const afterBuild = async (i: number, tx: BuiltTx) => {
+    const w = walletRows[i];
     built[i] = tx;
     try {
       if (await cancelled()) throw new JobCancelledError();
@@ -391,7 +341,7 @@ export async function prepareAll(
         timing[i].path = "presigned";
       } else {
         if (pr) timing[i].path = "resigned";
-        s = Date.now();
+        let s = Date.now();
         gasLimits[i] = await gasFor(tx, i);
         timing[i].gas = Date.now() - s;
         if (streaming && tx.value + gasLimits[i] * fees.maxFeePerGas > upfront[i])
@@ -416,10 +366,64 @@ export async function prepareAll(
         e instanceof JobCancelledError
           ? "Cancelled before signing"
           : await signFailureMessage(e, w.address, { chain, contract: req.contract });
+      if (e instanceof JobCancelledError) throw e;
       return;
     }
     if (streaming && raws[i]) await finish(i);
-  });
+  };
+
+  // Per-wallet pipeline: build → gas → sign → (stream) send. A low balance is not a reason to skip.
+  if (req.strategy === "opensea_api") {
+    const report = await probeAndRelease<BuiltTx>({
+      count: req.wallets.length,
+      fireAt,
+      deadline: buildDeadline,
+      maxConcurrency: BUILD_CONCURRENCY,
+      tick: async () => {
+        if (await cancelled()) throw new JobCancelledError();
+      },
+      call: async (i) => {
+        const s = Date.now();
+        timing[i].attempts++;
+        if (timing[i].firstAttemptAt < 0) timing[i].firstAttemptAt = Date.now();
+        try {
+          const tx = await buildMintTx(t, req, results[i].address, req.wallets[i].quantity, undefined, job.userId, {
+            mintTimeoutMs: MINT_API_TIMEOUT_MS,
+            mintJobId: job.id,
+            onMintSample: (sample) => rateLog.note(sample),
+          });
+          timing[i].build = Date.now() - s;
+          return { kind: "ok", value: tx };
+        } catch (e) {
+          return classify(e);
+        }
+      },
+      onOk: (i, tx) => afterBuild(i, tx),
+      onFail: async (i, error) => {
+        if (results[i].status === "failed") return;
+        results[i].status = "failed";
+        results[i].error = await buildFailureMessage(error, { chain, contract: req.contract });
+      },
+    });
+    probeAttempts = report.probeAttempts;
+    releaseAt = report.releaseAt;
+    waited = report.released;
+  } else {
+    await mapLimit(req.wallets, BUILD_CONCURRENCY, async (_w, i) => {
+      let tx: BuiltTx;
+      try {
+        const s = Date.now();
+        tx = await buildOnce(i);
+        timing[i].build = Date.now() - s;
+      } catch (e: any) {
+        if (e instanceof JobCancelledError) throw e;
+        results[i].status = "failed";
+        results[i].error = await buildFailureMessage(e, { chain, contract: req.contract });
+        return;
+      }
+      await afterBuild(i, tx);
+    });
+  }
 
   const reserve = built.map((tx, i) => (tx ? tx.value + gasLimits[i] * fees.maxFeePerGas : 0n));
   const total = reserve.reduce((a, b) => a + b, 0n);
@@ -440,7 +444,7 @@ export async function prepareAll(
     })
     .join(" | ");
   deferredLogs.push(
-    `prepared ${prepared.length}/${req.wallets.length} txs (maxFee ${Number(fees.maxFeePerGas) / 1e9} gwei, worst-case total ${formatEther(total)} ${chain.nativeSymbol}) · build ${ms("build")}, gas ${ms("gas")}, sign ${ms("sign")}, ready ${ms("ready")}, presigned ${timing.filter((x) => x.path === "presigned").length}, setup ${tStart - t0}ms, mode ${streaming ? "stream" : "batch"} · ${perWallet}`,
+    `prepared ${prepared.length}/${req.wallets.length} txs (maxFee ${Number(fees.maxFeePerGas) / 1e9} gwei, worst-case total ${formatEther(total)} ${chain.nativeSymbol}) · build ${ms("build")}, gas ${ms("gas")}, sign ${ms("sign")}, ready ${ms("ready")}, presigned ${timing.filter((x) => x.path === "presigned").length}, setup ${tStart - t0}ms, mode ${streaming ? "stream" : "batch"} · probe ${probeAttempts} release ${off(releaseAt ?? -1)} waited ${waited}${rateLog.seen ? ` · ${rateLog.format()}` : ""} · ${perWallet}`,
   );
   log.info(`[job ${job.id.slice(0, 8)}] ${deferredLogs[deferredLogs.length - 1]}`);
   if (deferredLogs.length) void appendJobLog(job.id, deferredLogs.join(" · ")).catch(() => {});

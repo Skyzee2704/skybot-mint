@@ -6,6 +6,8 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { BUILD_CONCURRENCY, GAS_ESTIMATE_BUDGET_MS, NOT_ACTIVE_RETRY_MS, OPENSEA_LEAD_MS } from "../src/core/mint/executor.js";
+import { FIRST_WAVE_OFFSET_MS, inOpenSeaTightWindow, probeRetryDelay } from "../src/core/mint/openseaLimit.js";
+import { KEEP_ALIVE_CONNECTIONS } from "../src/util/keepalive.js";
 
 const schedulerSrc = readFileSync(new URL("../src/jobs/scheduler.ts", import.meta.url), "utf8");
 const envSrc = readFileSync(new URL("../src/config/env.ts", import.meta.url), "utf8");
@@ -60,8 +62,9 @@ export interface DryRun {
 /**
  * Mirror of runJob + prepareAll.
  * Resolve and fees start when the function wakes. Nonces and local signing start at T−PRESIGN_LEAD_MS
- * (or when resolve finishes, if that is later). opensea_api starts the mint API at T0−OPENSEA_LEAD_MS,
- * retries 409 every NOT_ACTIVE_RETRY_MS, and caps a late gas estimate at GAS_ESTIMATE_BUDGET_MS.
+ * (or when resolve finishes, if that is later). opensea_api sends the first wave at T0. If the stage
+ * is still closed, the probe keeps a 75ms grid until it opens. Gas after T0 is capped at
+ * GAS_ESTIMATE_BUDGET_MS.
  * direct_contract is the same local path, for a proof or signature already in hand.
  * beginBroadcast runs before T0, so it is not on the post-T0 send path. Kalos builds locally and does not use this API loop.
  */
@@ -75,18 +78,26 @@ export function dryRun(strategy: DryRun["strategy"], p: DryPhases): DryRun {
 
   const readyAt: number[] = [];
   if (!LOCAL.has(strategy)) {
-    // The mint build starts OPENSEA_LEAD_MS before T0. A 409 costs one round trip plus NOT_ACTIVE_RETRY_MS.
-    let attempt = Math.max(-OPENSEA_LEAD_MS, setupDone);
-    for (;;) {
-      if (attempt >= p.openseaOpensAt) break;
-      attempt += p.openseaRtt + NOT_ACTIVE_RETRY_MS;
-      if (attempt > 60_000) throw new Error("opensea never opened in the model");
-    }
+    // The first wave is at T0 (plus a 0ms offset). If the stage is still closed, only the probe
+    // keeps the 75ms grid; the successful build is the first slot at or after the open.
     const gas = Math.min(p.gasEstimate, GAS_ESTIMATE_BUDGET_MS);
     const one = p.openseaRtt + gas + p.privySign;
+    const waveAt = Math.max(0, setupDone, FIRST_WAVE_OFFSET_MS);
+    let successAt = waveAt;
+    if (p.openseaOpensAt > waveAt) {
+      let slot = waveAt;
+      let post = 0;
+      while (slot < p.openseaOpensAt) {
+        const delay = probeRetryDelay(slot, 0, post);
+        if (!inOpenSeaTightWindow(slot, 0)) post++;
+        slot += delay;
+        if (slot > 60_000) throw new Error("opensea never opened in the model");
+      }
+      successAt = slot;
+    }
     for (let i = 0; i < p.wallets; i++) {
       const wave = Math.floor(i / BUILD_CONCURRENCY);
-      readyAt.push(attempt + one * (wave + 1));
+      readyAt.push(successAt + one * (wave + 1));
     }
   } else {
     const one = p.buildLocal + p.gasEstimate + p.privySign;
@@ -135,8 +146,10 @@ describe("scheduled mint dry run", () => {
     expect(JOB_LEAD_MS).toBe(60_000);
     expect(NOT_ACTIVE_RETRY_MS).toBe(75);
     expect(OPENSEA_LEAD_MS).toBe(150);
+    expect(FIRST_WAVE_OFFSET_MS).toBe(0);
     expect(GAS_ESTIMATE_BUDGET_MS).toBe(400);
-    expect(BUILD_CONCURRENCY).toBe(8);
+    expect(BUILD_CONCURRENCY).toBe(100);
+    expect(BUILD_CONCURRENCY).toBeLessThanOrEqual(KEEP_ALIVE_CONNECTIONS);
     expect(schedulerSrc).toContain("buildNotBefore: fireAt - OPENSEA_LEAD_MS");
     expect(schedulerSrc).toContain("await waitUntil(fireAt");
     expect(schedulerSrc).toContain("beginBroadcast");
@@ -183,30 +196,29 @@ describe("scheduled mint dry run", () => {
     const api = dryRun("opensea_api", base);
     expect(direct.firstMempool).toBe(40);
     expect(direct.wallets.every((w) => w.ready < 0)).toBe(true);
-    expect(api.firstMempool).toBe(545);
+    expect(api.firstMempool).toBe(500);
     expect(api.wallets.every((w) => w.ready > 0)).toBe(true);
-    expect(api.firstMempool - direct.firstMempool).toBe(505);
+    expect(api.firstMempool - direct.firstMempool).toBe(460);
   });
 
-  it("OpenSea: the successful signature is after T0; 409 retries add 75ms after each round trip", () => {
+  it("OpenSea: the successful signature is after T0; a stage open at T0 does not wait on a 409 retry", () => {
     const open = dryRun("opensea_api", { ...base, wallets: 1 });
-    // First try at T−150 returns before the stage opens, then the next try is after T0.
-    expect(open.wallets[0]!.ready).toBe(45 + 120 + Math.min(40, 400) + 300);
-    expect(open.firstSend).toBe(505);
-    expect(open.firstMempool).toBe(545);
+    // First wave at T0. One round trip, gas, and the signature.
+    expect(open.wallets[0]!.ready).toBe(120 + Math.min(40, 400) + 300);
+    expect(open.firstSend).toBe(460);
+    expect(open.firstMempool).toBe(500);
     expect(open.firstSend).toBeGreaterThan(0);
 
-    // API still 409 at T0 (opens at +250). Attempts walk forward by RTT + 75ms.
+    // Still closed at T0. The probe steps 75ms until the first slot at or after +250, which is +300.
     const late = dryRun("opensea_api", { ...base, wallets: 1, openseaOpensAt: 250 });
-    expect(late.wallets[0]!.ready).toBe(435 + 120 + 40 + 300);
-    expect(late.firstSend).toBe(895);
+    expect(late.wallets[0]!.ready).toBe(300 + 120 + 40 + 300);
+    expect(late.firstSend).toBe(760);
   });
 
-  it("16 SeaDrop wallets: two waves, both still inside the presign window at these speeds", () => {
+  it("16 SeaDrop wallets stay in one wave at this concurrency", () => {
     const r = dryRun("seadrop_public", { ...base, wallets: 16 });
-    expect(r.wallets[0]!.ready).toBe(r.wallets[7]!.ready);
-    expect(r.wallets[8]!.ready).toBe(r.wallets[0]!.ready + 341);
-    expect(r.wallets[15]!.ready).toBeLessThan(0);
+    expect(r.wallets.every((w) => w.ready === r.wallets[0]!.ready)).toBe(true);
+    expect(r.wallets[0]!.ready).toBeLessThan(0);
     expect(r.firstSend).toBe(0);
     expect(r.lastSend).toBe(0);
   });

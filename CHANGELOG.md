@@ -26,7 +26,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
-- Scheduled mint execution after T0: `/api/jobs/run` runs in `iad1` (the rest of the app stays in `sin1`). The OpenSea mint request starts 150ms before the stage and retries a 409 every 75ms (429 backs off). TLS sockets to OpenSea, Privy, and the broadcast RPCs are warmed about 8s beforehand. The post-T0 path does not wait on the database. Each wallet logs its first-attempt offset, attempt count, and build/sign/broadcast times.
+- Scheduled mint execution after T0: `/api/jobs/run` runs in `iad1` (the rest of the app stays in `sin1`). The OpenSea probe starts 150ms early; every wallet sends once at T0. A 409 parks that wallet and only the probe keeps polling. TLS sockets to OpenSea, Privy, and the broadcast RPCs are warmed about 8s beforehand. The post-T0 path does not wait on the database. Each wallet logs its first-attempt offset, attempt count, and build/sign/broadcast times.
 - Scheduled mints resolve the drop and fees when the function wakes, and read nonces only in the last few seconds. Public, generic, and a readable merkle allowlist are signed before the start using the simulation gas plus 30%, and broadcast at the start second. Signed GTD/FCFS still use the OpenSea mint API, with a 1.5s timeout and the gas hint when one was saved.
 - The landing page no longer shows the $SKYBOT contract address or the Volta.family link.
 - Elysium Mainnet (chain id 99901, native HYPE). SeaDrop and Multicall3 are deployed. OpenSea chain slug is `elysium`. Etherscan v2 does not list the chain. Optional private RPC: `RPC_ELYSIUM`.
