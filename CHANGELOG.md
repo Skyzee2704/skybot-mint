@@ -7,7 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
-- **Draft test, do not merge.** `/test/server-sign-native-send` lists held ERC-20s and NFTs with checkboxes and sends each selected item as its own transaction, one nonce after another. ERC-1155s in one collection can be one `safeBatchTransferFrom`. Native send and a pasted contract stay as fallback. There is no amount cap. Disabled unless `TEST_SEND_TOKEN` is set. The production selector denylist is unchanged.
+- **Draft test, do not merge.** `/test/server-sign-native-send` lists held ERC-20s and NFTs with checkboxes and sends each selected item as its own transaction, one nonce after another. ERC-20 discovery also reads well-known contracts (including BNB USDC) over RPC, and a pasted contract with a balance can be pinned. There is no amount cap. Disabled unless `TEST_SEND_TOKEN` is set. The production selector denylist is unchanged.
 
 - **$SKYBOT contract address** on the public landing page: the token contract, with a copy button and a link to its Volta.family token page. The copy button works in the browser and the Telegram Mini App.
 

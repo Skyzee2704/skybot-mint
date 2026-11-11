@@ -3,8 +3,9 @@
  * Draft-only balance read and ERC-20 transfer. DO NOT MERGE.
  *
  * Native balances use the repo RPC registry. ERC-20 discovery reuses the Alchemy key the NFT indexer already
- * reads (ALCHEMY_API_KEY, or the key inside an Alchemy RPC URL). Chains with no Alchemy slug in that indexer
- * are not queried. A pasted contract is always read with balanceOf/symbol/decimals over the chain RPC.
+ * reads (ALCHEMY_API_KEY, or the key inside an Alchemy RPC URL). alchemy_getTokenBalances with the
+ * "erc20" scan is unreliable on BNB (it errors or omits Binance-Peg USDC), so every chain also reads a
+ * fixed list of well-known contracts over the repo RPC. A pasted contract is read the same way.
  * The transfer is signed here with the SIWE authorization key. It does not call signRawTransaction, so the
  * production selector denylist (which blocks 0xa9059cbb) is not involved.
  */
@@ -13,7 +14,9 @@ import { getPrivy } from "../auth/privy.js";
 import { CHAINS, explorerTx, type ChainConfig } from "../config/chains.js";
 import { ALCHEMY_NFT_NETWORK, alchemyKey } from "../core/nft/indexer.js";
 import { getFees } from "../core/mint/fees.js";
+import { aggregate } from "../core/rpc/multicall.js";
 import { getPool } from "../core/rpc/pool.js";
+import { KNOWN_TOKENS } from "./knownTokens.js";
 import { describeTxError } from "../core/tx/revert.js";
 import { parseAmount, validateDestination } from "../core/withdraw.js";
 import { redactString } from "../util/log.js";
@@ -25,7 +28,6 @@ import {
   parseOptionalNonce,
   resolveTestSendChain,
   siweTestAuthorizationContext,
-  testSendChainOptions,
 } from "./nativeSend.js";
 
 export const ERC20_TRANSFER_SELECTOR = "0xa9059cbb";
@@ -69,7 +71,30 @@ export interface TestLookupResult {
   nfts: HeldNft[];
   nftDiscovery: { note: string; errors: string[]; truncated: boolean };
   zeroReads: { chainId: number; address: string; symbol: string | null; decimals: number | null }[];
-  discovery: { provider: "alchemy" | null; configured: boolean; note: string; errors: string[] };
+  discovery: {
+    provider: "alchemy" | null;
+    configured: boolean;
+    note: string;
+    errors: string[];
+    chains: { chainId: number; name: string; alchemy: "ok" | "error" | "unsupported"; alchemyTokens: number; error: string | null }[];
+  };
+}
+
+/** Keep every non-zero balance. Known-token RPC rows fill contracts Alchemy did not return. */
+export function mergeHeldTokens(alchemy: HeldToken[], known: HeldToken[]): HeldToken[] {
+  const map = new Map<string, HeldToken>();
+  const id = (t: HeldToken) => `${t.chainId}:${t.address.toLowerCase()}`;
+  for (const t of known) {
+    if (BigInt(t.balanceRaw) > 0n) map.set(id(t), t);
+  }
+  for (const t of alchemy) {
+    if (BigInt(t.balanceRaw) <= 0n) continue;
+    const key = id(t);
+    const prev = map.get(key);
+    if (!prev) map.set(key, t);
+    else if (prev.decimals == null && t.decimals != null) map.set(key, { ...t, source: "alchemy" });
+  }
+  return [...map.values()];
 }
 
 function httpError(message: string, statusCode: number, code: string): Error {
@@ -239,6 +264,70 @@ async function discoverAlchemy(chain: ChainConfig, holder: string, key: string, 
   return out;
 }
 
+async function readKnownOnChain(chain: ChainConfig, holder: string): Promise<HeldToken[]> {
+  const list = KNOWN_TOKENS[chain.key] ?? [];
+  if (!list.length) return [];
+  assertTestSendRpc(chain);
+  const pool = getPool(chain);
+  const calls = list.flatMap((item) => [
+    { target: item.address, data: ERC20_IFACE.encodeFunctionData("balanceOf", [holder]) },
+    { target: item.address, data: ERC20_IFACE.encodeFunctionData("decimals") },
+    { target: item.address, data: ERC20_IFACE.encodeFunctionData("symbol") },
+  ]);
+  let rows: { success: boolean; returnData: string }[];
+  try {
+    rows = await aggregate(pool, calls, "known-erc20");
+  } catch {
+    const out: HeldToken[] = [];
+    for (const item of list) {
+      try {
+        const read = await readErc20(chain, holder, item.address);
+        if (BigInt(read.balanceRaw) <= 0n) continue;
+        out.push({ ...read, chainId: chain.chainId, chainName: chain.name, symbol: read.symbol ?? item.symbol, source: "rpc" });
+      } catch {
+        /* one missing contract must not hide the rest of the list */
+      }
+    }
+    return out;
+  }
+  const out: HeldToken[] = [];
+  for (let i = 0; i < list.length; i++) {
+    const balRow = rows[i * 3];
+    const decRow = rows[i * 3 + 1];
+    const symRow = rows[i * 3 + 2];
+    if (!balRow?.success) continue;
+    let balance: bigint;
+    try {
+      balance = BigInt(ERC20_IFACE.decodeFunctionResult("balanceOf", balRow.returnData)[0]);
+    } catch {
+      continue;
+    }
+    if (balance <= 0n) continue;
+    let decimals: number | null = null;
+    if (decRow?.success) {
+      try {
+        const n = Number(ERC20_IFACE.decodeFunctionResult("decimals", decRow.returnData)[0]);
+        if (Number.isInteger(n) && n >= 0 && n <= 36) decimals = n;
+      } catch {
+        decimals = null;
+      }
+    }
+    const symbol = (symRow?.success ? decodeSymbol(symRow.returnData) : null) ?? list[i].symbol;
+    out.push({
+      chainId: chain.chainId,
+      chainName: chain.name,
+      address: list[i].address,
+      symbol,
+      name: list[i].symbol,
+      decimals,
+      balanceRaw: balance.toString(),
+      balance: formatTokenAmount(balance, decimals),
+      source: "rpc",
+    });
+  }
+  return out;
+}
+
 function pastedContracts(body: unknown): { chainId: number; address: string }[] {
   if (!body || typeof body !== "object" || Array.isArray(body)) return [];
   const list = (body as { contracts?: unknown }).contracts;
@@ -307,27 +396,61 @@ export async function runTestLookup(
 
   const key = alchemyKey();
   const errors: string[] = [];
-  const unsupported = testSendChainOptions()
-    .filter((c) => !ALCHEMY_NFT_NETWORK[CHAINS.find((x) => x.chainId === c.chainId)?.key ?? ""])
-    .map((c) => c.name);
-  let tokens: HeldToken[] = [];
-  if (!key) {
-    errors.push("ALCHEMY_API_KEY is not set, and no Alchemy RPC URL contains a key. Paste a token contract to read it over RPC.");
-  } else {
-    const discovered = await Promise.all(
-      CHAINS.filter((c) => ALCHEMY_NFT_NETWORK[c.key]).map(async (chain) => {
-        try {
-          return await discoverAlchemy(chain, address, key, fetchImpl);
-        } catch (e: any) {
-          errors.push(`${chain.name}: ${redactString(String(e?.message ?? e)).slice(0, 200)}`);
-          return [] as HeldToken[];
-        }
-      }),
-    );
-    tokens = discovered.flat();
-  }
+  const chainScans = await Promise.all(
+    CHAINS.map(async (chain) => {
+      const slug = ALCHEMY_NFT_NETWORK[chain.key];
+      if (!slug) {
+        return {
+          chainId: chain.chainId,
+          name: chain.name,
+          alchemy: "unsupported" as const,
+          alchemyTokens: 0,
+          error: null,
+          tokens: [] as HeldToken[],
+        };
+      }
+      if (!key) {
+        const error = "ALCHEMY_API_KEY is not set, and no Alchemy RPC URL contains a key.";
+        return { chainId: chain.chainId, name: chain.name, alchemy: "error" as const, alchemyTokens: 0, error, tokens: [] as HeldToken[] };
+      }
+      try {
+        const found = await discoverAlchemy(chain, address, key, fetchImpl);
+        return {
+          chainId: chain.chainId,
+          name: chain.name,
+          alchemy: "ok" as const,
+          alchemyTokens: found.length,
+          error: null,
+          tokens: found,
+        };
+      } catch (e: any) {
+        const error = redactString(String(e?.message ?? e)).slice(0, 200);
+        return { chainId: chain.chainId, name: chain.name, alchemy: "error" as const, alchemyTokens: 0, error, tokens: [] as HeldToken[] };
+      }
+    }),
+  );
+  for (const scan of chainScans) if (scan.error) errors.push(`${scan.name}: ${scan.error}`);
+  const unsupported = chainScans.filter((s) => s.alchemy === "unsupported").map((s) => s.name);
   if (unsupported.length)
-    errors.push(`No Alchemy token API in the repo for: ${unsupported.join(", ")}. Paste a contract to read those over RPC.`);
+    errors.push(`No Alchemy token API in the repo for: ${unsupported.join(", ")}. Known contracts are still read over RPC.`);
+
+  const knownLists = await Promise.all(
+    CHAINS.map(async (chain) => {
+      try {
+        return await readKnownOnChain(chain, address);
+      } catch (e: any) {
+        const msg = `${chain.name}: known-token RPC read failed: ${redactString(String(e?.shortMessage ?? e?.message ?? e)).slice(0, 180)}`;
+        errors.push(msg);
+        const scan = chainScans.find((s) => s.chainId === chain.chainId);
+        if (scan && !scan.error) scan.error = msg;
+        return [] as HeldToken[];
+      }
+    }),
+  );
+  let tokens = mergeHeldTokens(
+    chainScans.flatMap((s) => s.tokens),
+    knownLists.flat(),
+  );
 
   const zeroReads: TestLookupResult["zeroReads"] = [];
   for (const paste of pastedContracts(body)) {
@@ -355,8 +478,8 @@ export async function runTestLookup(
   }
 
   const note = key
-    ? "Non-zero ERC-20 balances come from Alchemy (the same ALCHEMY_API_KEY / Alchemy RPC key the NFT indexer uses). A pasted contract is read with balanceOf, symbol, and decimals on the chain RPC."
-    : "Token discovery needs ALCHEMY_API_KEY, or an Alchemy RPC URL (RPC_<CHAIN>=https://….g.alchemy.com/v2/<key>) like the NFT indexer. Paste a token contract to read its balance, symbol, and decimals over RPC.";
+    ? "Non-zero ERC-20s come from Alchemy plus a balanceOf read of well-known contracts (BNB USDC included) on the chain RPC. Alchemy's all-token scan on BNB often omits Binance-Peg USDC."
+    : "ALCHEMY_API_KEY is unset, so only well-known contracts and pasted addresses are read over RPC. Set ALCHEMY_API_KEY, or an Alchemy RPC URL, to scan the rest.";
 
   let nfts: HeldNft[] = [];
   let nftDiscovery: TestLookupResult["nftDiscovery"] = { note: "", errors: [], truncated: false };
@@ -371,11 +494,17 @@ export async function runTestLookup(
   return {
     address,
     native,
-    tokens: tokens.slice(0, TOKEN_CAP),
+    tokens,
     nfts,
     nftDiscovery,
     zeroReads,
-    discovery: { provider: key ? "alchemy" : null, configured: Boolean(key), note, errors },
+    discovery: {
+      provider: key ? "alchemy" : null,
+      configured: Boolean(key),
+      note,
+      errors,
+      chains: chainScans.map(({ chainId, name, alchemy, alchemyTokens, error }) => ({ chainId, name, alchemy, alchemyTokens, error })),
+    },
   };
 }
 

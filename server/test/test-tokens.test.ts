@@ -2,11 +2,13 @@
 import { generateKeyPairSync } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
 import { Wallet, getAddress } from "ethers";
+import { KNOWN_TOKENS } from "../src/testsend/knownTokens.js";
 import {
   ERC20_TRANSFER_SELECTOR,
   assertSignedErc20Transfer,
   encodeErc20Transfer,
   formatTokenAmount,
+  mergeHeldTokens,
   nonZeroTokenBalances,
   parseErc20Amount,
   runTestErc20Send,
@@ -28,6 +30,28 @@ afterEach(() => {
     if (value === undefined) delete process.env[name];
     else process.env[name] = value;
   }
+});
+
+describe("known tokens", () => {
+  it("includes Binance-Peg USDC and drops a zero balance when merging", () => {
+    const usdc = KNOWN_TOKENS.bnb.find((t) => t.symbol === "USDC");
+    expect(usdc?.address.toLowerCase()).toBe("0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d");
+    for (const list of Object.values(KNOWN_TOKENS)) for (const t of list) expect(getAddress(t.address)).toBe(t.address);
+    const row = {
+      chainId: 56,
+      chainName: "BNB Smart Chain",
+      address: usdc!.address,
+      symbol: "USDC",
+      name: "USDC",
+      decimals: 18,
+      balanceRaw: "1000",
+      balance: "0.000000000000001",
+      source: "rpc" as const,
+    };
+    expect(mergeHeldTokens([], [row]).map((t) => t.symbol)).toEqual(["USDC"]);
+    expect(mergeHeldTokens([], [{ ...row, balanceRaw: "0" }])).toEqual([]);
+    expect(mergeHeldTokens([{ ...row, source: "alchemy", symbol: "USDC" }], [row])).toHaveLength(1);
+  });
 });
 
 describe("erc20 transfer encoding", () => {

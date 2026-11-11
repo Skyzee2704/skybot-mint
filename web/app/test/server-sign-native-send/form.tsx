@@ -48,8 +48,31 @@ type Lookup = {
   nfts?: HeldNft[];
   nftDiscovery?: { note: string; errors: string[]; truncated: boolean };
   zeroReads: { chainId: number; address: string }[];
-  discovery: { note: string; errors: string[] };
+  discovery: {
+    note: string;
+    errors: string[];
+    chains?: { chainId: number; name: string; alchemy: string; alchemyTokens: number; error: string | null }[];
+  };
 };
+type Pinned = { chainId: number; address: string };
+const PIN_KEY = "skybot-test-pinned-erc20";
+
+function readPins(): Pinned[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = JSON.parse(localStorage.getItem(PIN_KEY) || "[]");
+    if (!Array.isArray(raw)) return [];
+    return raw.filter(
+      (row) => row && Number.isInteger(row.chainId) && typeof row.address === "string" && /^0x[0-9a-fA-F]{40}$/.test(row.address),
+    );
+  } catch {
+    return [];
+  }
+}
+
+function writePins(pins: Pinned[]) {
+  localStorage.setItem(PIN_KEY, JSON.stringify(pins));
+}
 type Job = {
   id: string;
   chainId: number;
@@ -161,13 +184,25 @@ export function TestSendForm({ wallets, chains }: { wallets: string[]; chains: T
     setBusy(true);
     setErrorText(null);
     try {
-      const contracts = extra?.address ? [extra] : paste.trim() ? [{ chainId: chainNum, address: paste.trim() }] : [];
+      const requested = [...readPins(), ...(extra?.address ? [extra] : paste.trim() ? [{ chainId: chainNum, address: paste.trim() }] : [])];
+      const contracts = requested.filter(
+        (row, i) => requested.findIndex((x) => x.chainId === row.chainId && x.address.toLowerCase() === row.address.toLowerCase()) === i,
+      );
       const res = await postJson("/api/test/server-sign-native-send/lookup", gate, { walletId, contracts });
       if (!res.ok || !res.json?.native) {
         setErrorText(errorTextOf(res));
         return;
       }
       const data = res.json as Lookup;
+      const pins = readPins();
+      let pinnedChanged = false;
+      for (const req of extra?.address ? [extra] : paste.trim() ? [{ chainId: chainNum, address: paste.trim() }] : []) {
+        const hit = (data.tokens ?? []).find((t) => t.chainId === req.chainId && t.address.toLowerCase() === req.address.toLowerCase());
+        if (!hit || pins.some((p) => p.chainId === hit.chainId && p.address.toLowerCase() === hit.address.toLowerCase())) continue;
+        pins.push({ chainId: hit.chainId, address: hit.address });
+        pinnedChanged = true;
+      }
+      if (pinnedChanged) writePins(pins);
       setLookup(data);
       setErc20Amt((prev) => {
         const next = { ...prev };
@@ -450,13 +485,27 @@ export function TestSendForm({ wallets, chains }: { wallets: string[]; chains: T
 
           <h2>ERC-20</h2>
           <p className="muted">{lookup.discovery.note}</p>
-          {lookup.discovery.errors.map((err) => (
-            <p key={err} className="warn">
-              {err}
+          {!allChains && (
+            <p className="muted">
+              Showing {chain?.name ?? "the selected chain"} only. Choose All chains to include tokens on other networks, including BNB.
             </p>
-          ))}
+          )}
+          {(lookup.discovery.chains ?? [])
+            .filter((row) => row.error)
+            .map((row) => (
+              <p key={row.chainId} className="warn">
+                <b>{row.name}:</b> {row.error}
+              </p>
+            ))}
+          {lookup.discovery.errors
+            .filter((err) => !(lookup.discovery.chains ?? []).some((row) => row.error && err.includes(row.error)))
+            .map((err) => (
+              <p key={err} className="warn">
+                {err}
+              </p>
+            ))}
           {visibleTokens.length === 0 ? (
-            <p className="muted">No non-zero ERC-20 on this view. Use the paste fallback below.</p>
+            <p className="muted">No non-zero ERC-20 on this view. Switch chain or All chains, or paste a contract below.</p>
           ) : (
             <>
               <label>
