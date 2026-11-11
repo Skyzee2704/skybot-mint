@@ -7,6 +7,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- **Draft test, do not merge.** `/test/server-sign-native-send` lists held ERC-20s and NFTs with checkboxes and sends each selected item as its own transaction, one nonce after another. ERC-20 discovery also reads well-known contracts (including BNB USDC) over RPC, and a pasted contract with a balance can be pinned. There is no amount cap. Disabled unless `TEST_SEND_TOKEN` is set. The production selector denylist is unchanged.
+
 - **$SKYBOT contract address** on the public landing page: the token contract, with a copy button and a link to its Volta.family token page. The copy button works in the browser and the Telegram Mini App.
 
 - **Remove wallets that still hold funds or NFTs**: the remove dialog lists balances per chain and cached NFTs, offers Withdraw first / Send NFTs first and (for Privy-created wallets) Export Private Key, and requires ticking an acknowledgement and typing the wallet name. Removal archives the wallet in Privy, the strongest removal Privy supports (there is no wallet delete endpoint, and embedded or imported wallets can't be unlinked from a Privy user). Removing the Main wallet asks which wallet becomes Main (default: the oldest remaining).
