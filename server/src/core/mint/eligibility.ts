@@ -447,8 +447,32 @@ export async function checkEligibility(
                 if (!cached) throw e; // fall back to the saved verdict when OpenSea is unavailable
               }
             }
-            const res = live ?? cached!.stages;
-            if (live) await saveVerdicts(userId, w.id, t.slug, live);
+            let res = live ?? cached!.stages;
+            // The mint API is the ground truth for the live (target) stage: it actually built
+            // (or refused) the mint tx for this wallet. The eligibility API can disagree
+            // (stale list, different check), and its per-stage verdict is what gets saved
+            // and later drives stage offers and job creation — so a wallet the mint API
+            // rejects must never be recorded as eligible for that stage. Reconcile the
+            // target stage's verdict to the mint API before saving or mapping it.
+            if (decided && targetOs && (access.status === "yes" || access.status === "no" || access.status === "public")) {
+              const want = access.status !== "no";
+              const base = Array.isArray(res) ? res : [];
+              const hit = base.find((r) => sameStage(r.stage_uuid, targetOs.uuid));
+              if (hit) {
+                if (hit.is_eligible !== want) res = base.map((r) => (r === hit ? { ...r, is_eligible: want } : r));
+              } else if (live && targetOs.uuid) {
+                res = [
+                  ...base,
+                  {
+                    stage_uuid: targetOs.uuid,
+                    is_eligible: want,
+                    price: null,
+                    max_total_mintable_by_wallet: null,
+                  },
+                ];
+              }
+            }
+            if (live) await saveVerdicts(userId, w.id, t.slug, res);
             const all = drop?.stages?.length
               ? drop.stages
               : [activeOs, nextOs].filter(Boolean as any as (x: OsStage | null) => x is OsStage);

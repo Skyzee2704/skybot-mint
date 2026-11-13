@@ -80,19 +80,24 @@ export function walletStageVerdict(
   const isTarget = Boolean(targetStage && (norm(targetStage.label) === norm(stage.name) || norm(targetStage.type) === norm(stage.name)));
   const blockers = isTarget ? (r.reasons ?? []).filter((x) => !/^insufficient balance|^not allowlisted|^simulation reverts/i.test(x)) : [];
   const note = blockers[0] ?? null;
+  // For the live (target) stage the mint API verdict is the ground truth: it actually
+  // built (or refused) the mint tx for this wallet. A per-stage eligibility-API verdict
+  // can disagree with it (stale list, different check), so a wallet the mint API
+  // rejected must never read as eligible for the live stage — that is how a job for
+  // e.g. Team Round got created for a wallet that is not on that stage.
+  if (isTarget && r.access && (r.access.status === "yes" || r.access.status === "no"))
+    return {
+      ...base,
+      state: r.access.status === "yes" ? "eligible" : "not_eligible",
+      max: sv?.maxPerWallet ?? stage.maxPerWallet ?? null,
+      note: r.access.status === "yes" ? note : null,
+    };
   if (sv && sv.eligible !== null)
     return {
       ...base,
       state: sv.eligible ? "eligible" : "not_eligible",
       max: sv.maxPerWallet ?? stage.maxPerWallet ?? null,
       note: sv.eligible ? note : null,
-    };
-  if (isTarget && r.access && (r.access.status === "yes" || r.access.status === "no"))
-    return {
-      ...base,
-      state: r.access.status === "yes" ? "eligible" : "not_eligible",
-      max: stage.maxPerWallet ?? null,
-      note: r.access.status === "yes" ? note : null,
     };
   return { ...base, state: r.needsOpenSeaLogin ? "unverified" : "unknown", max: null, note: null };
 }

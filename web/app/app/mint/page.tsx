@@ -592,27 +592,35 @@ export default function MintPage() {
           {verifyNote && <div className="notice">{verifyNote}</div>}
           {(stageGroups.length > 0 || extraStages.length > 0 || nowOnly) && (
             <div className="stage-groups" role="radiogroup" aria-label="Mint stage">
-              {stageGroups.map((g) => {
-                const sum = summarizeGroup(g);
-                const offered = options.some((o) => o.kind === "stage" && o.stage?.name === g.stage.name);
-                const active = chosen?.stage?.name === g.stage.name;
-                const count =
-                  sum.unknown.length === g.total
-                    ? tr("{count} unknown", { count: g.total })
-                    : `${tr("{eligible}/{total} eligible", { eligible: g.eligible, total: g.total })}${sum.unknown.length ? `, ${tr("{count} unknown", { count: sum.unknown.length })}` : ""}`;
-                return (
-                  <StagePick
-                    key={g.stage.name}
-                    name={g.stage.name}
-                    active={active}
-                    offered={offered}
-                    onPick={() => pickStage(g.stage.name)}
-                    count={count}
-                    countClass={g.eligible ? "ok small" : sum.unknown.length ? "muted small" : "bad small"}
-                    meta={stageMeta(g.stage, sym, stageWhen, tr)}
-                  />
-                );
-              })}
+              {stageGroups
+                .filter((g) => {
+                  // A stage no wallet can mint — and none is still unverified for — is not
+                  // shown at all: it cannot be picked, simulated, or scheduled. (Public is
+                  // never in this list; every wallet can mint it.)
+                  const sum = summarizeGroup(g);
+                  return g.eligible > 0 || sum.unknown.length > 0;
+                })
+                .map((g) => {
+                  const sum = summarizeGroup(g);
+                  const offered = options.some((o) => o.kind === "stage" && o.stage?.name === g.stage.name);
+                  const active = chosen?.stage?.name === g.stage.name;
+                  const count =
+                    sum.unknown.length === g.total
+                      ? tr("{count} unknown", { count: g.total })
+                      : `${tr("{eligible}/{total} eligible", { eligible: g.eligible, total: g.total })}${sum.unknown.length ? `, ${tr("{count} unknown", { count: sum.unknown.length })}` : ""}`;
+                  return (
+                    <StagePick
+                      key={g.stage.name}
+                      name={g.stage.name}
+                      active={active}
+                      offered={offered}
+                      onPick={() => pickStage(g.stage.name)}
+                      count={count}
+                      countClass={g.eligible ? "ok small" : sum.unknown.length ? "muted small" : "bad small"}
+                      meta={stageMeta(g.stage, sym, stageWhen, tr)}
+                    />
+                  );
+                })}
               {extraStages.map((o) => (
                 <StagePick
                   key={o.key}

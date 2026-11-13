@@ -144,4 +144,30 @@ describe("mint stage selection", () => {
     expect(c.req.wallets.every((w) => w.quantity === 1)).toBe(true);
     expect(c.skipped.map((s) => s.walletId).sort()).toEqual(["1", "5"]);
   });
+
+  it("the mint API verdict wins for the live stage when the per-stage verdict disagrees", () => {
+    // Regression: a wallet the mint API rejected for the live Team stage was offered a
+    // Team job because the eligibility API's per-stage verdict said eligible. The mint
+    // API actually built (or refused) the tx, so it is the ground truth for that stage.
+    const team = drop[0];
+    const disagree = {
+      ...row("9", "wallet-9", [v("Team Mint", true, 699), v("GTD list", false, 1), v("FCFS list", false, 1)]),
+      access: { status: "no", source: "OpenSea mint API" },
+      reasons: ["not allowlisted (OpenSea mint API)"],
+    };
+    expect(stageWalletView(disagree, team, target).eligible).toBe(false);
+    expect(stageWalletView(disagree, team, target).access).toBe("no");
+    // Nobody can mint Team, so it is not offered at all — only GTD, FCFS, Public.
+    const opts = mintStageOptions(drop, [disagree], target, before);
+    expect(opts.map((o) => o.name)).toEqual(["Public"]);
+    expect(opts.map((o) => o.key)).not.toContain("Team Mint");
+    // And the reverse: the mint API accepting the wallet beats a "not eligible" per-stage verdict.
+    const accepted = {
+      ...row("8", "wallet-8", [v("Team Mint", false, 699), v("GTD list", false, 1), v("FCFS list", false, 1)]),
+      access: { status: "yes", source: "OpenSea mint API" },
+      reasons: [],
+    };
+    expect(stageWalletView(accepted, team, target).eligible).toBe(true);
+    expect(mintStageOptions(drop, [accepted], target, before).map((o) => o.name)).toContain("Team Mint");
+  });
 });
