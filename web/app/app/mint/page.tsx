@@ -151,9 +151,9 @@ export default function MintPage() {
     let failed = ids.length - own.length;
     if (!own.length) return { proofs, failed };
     const { messages } = await api("/api/opensea/siwe/prepare", { body: { walletIds: own } });
-    // Sign in parallel (5 at a time): each message is independent (own wallet, own nonce),
+    // Sign in parallel (10 at a time): each message is independent (own wallet, own nonce),
     // and Privy embedded-wallet signing is local. Sequential signing was ~1 s per wallet.
-    const SIGN_CONCURRENCY = 5;
+    const SIGN_CONCURRENCY = 10;
     for (let i = 0; i < messages.length; i += SIGN_CONCURRENCY) {
       const batch = messages.slice(i, i + SIGN_CONCURRENCY);
       const results = await Promise.all(

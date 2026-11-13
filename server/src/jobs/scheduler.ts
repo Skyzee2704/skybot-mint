@@ -30,6 +30,7 @@ import {
 import type { MintRequest } from "../core/mint/types.js";
 import {
   broadcastAndTrack,
+  mapLimit,
   prepareAll,
   trackReceipts,
   waitUntil,
@@ -330,7 +331,10 @@ export async function runJob(id: string, budgetMs = env.jobMaxDurationSec * 1000
 export async function housekeeping() {
   const now = Date.now();
   const out = { finished: 0, stuck: 0, missed: 0, purgedCodes: 0 };
-  for (const j of await listActiveJobs()) {
+  // Jobs are independent: sweep them in parallel (bounded, so a burst of stuck jobs
+  // does not hammer the DB or Telegram). The conditional updates below make each job's
+  // transition safe even if two sweeps overlap.
+  await mapLimit(await listActiveJobs(), 5, async (j) => {
     const req = j.request as MintRequest;
     const fireAt = runAtMs(j);
     if (j.status === "running" && j.results.some((r: any) => r.status === "broadcast")) {
@@ -355,7 +359,7 @@ export async function housekeeping() {
         out.missed++;
       }
     }
-  }
+  });
   const del = await getDb()
     .delete(telegramLinks)
     .where(lt(telegramLinks.expiresAt, new Date(now).toISOString()))

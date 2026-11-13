@@ -335,9 +335,9 @@ export async function checkEligibility(
       : Promise.resolve(null),
   ]);
   // OpenSea per-wallet calls are the slow part (~2 s each: mint API + eligibility API + sign-in).
-  // Concurrency 8 keeps a 50-wallet check around 30–40 s, inside the 60 s serverless limit;
+  // Concurrency 16 keeps a 50-wallet check around 15–20 s, inside the 60 s serverless limit;
   // a 429 on any wallet degrades to "unknown" with a rate_limited reason instead of failing the check.
-  const rows = await mapLimit(list, useOs ? 8 : 6, async (w): Promise<EligibilityRow> => {
+  const rows = await mapLimit(list, useOs ? 16 : 12, async (w): Promise<EligibilityRow> => {
     const cachedBal = balances.get(w.address.toLowerCase());
     const [balance, minted] = await Promise.all([
       cachedBal !== undefined && !(cachedBal instanceof Error)

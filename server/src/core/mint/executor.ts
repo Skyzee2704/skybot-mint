@@ -484,7 +484,7 @@ export async function prepareAll(
   if (!streaming) {
     // Barrier mode (price unknown up front): budget check on the real total before anything is released.
     await assertDailyBudget(job.userId, chain, total);
-    for (let i = 0; i < raws.length; i++) if (raws[i]) await finish(i);
+    await Promise.all(raws.map((raw, i) => (raw ? finish(i) : Promise.resolve())));
   }
   const ms = (k: "build" | "gas" | "sign" | "ready") => {
     const v = timing.map((x) => x[k]).filter((x) => x >= 0);
