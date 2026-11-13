@@ -128,4 +128,49 @@ describe("OpenSea probe and release", () => {
     );
     expect(err?.retryAfterMs).toBe(12_000);
   });
+
+  it("a transient timeout on the only wallet retries until it succeeds instead of failing the job", async () => {
+    // Regression: a 1-wallet FCFS job used to fail with "OpenSea mint timed out" after two
+    // timeouts (~3 s) even though the build budget was still open — the probe gave up and the
+    // first wave marked the timeout as terminal. Now it retries until the deadline.
+    const fireAt = 10_000;
+    const c = clock(fireAt - OPENSEA_LEAD_MS);
+    let attempts = 0;
+    const report = await probeAndRelease<number>({
+      count: 1,
+      fireAt,
+      deadline: fireAt + 30_000,
+      now: c.now,
+      sleep: c.sleep,
+      call: async () => {
+        attempts++;
+        await c.sleep(1_500); // the mint API call hangs until its timeout
+        if (attempts <= 2) return { kind: "promote", error: new Error("OpenSea mint timed out") };
+        return { kind: "ok", value: 0 };
+      },
+    });
+    expect(attempts).toBe(3);
+    expect(report.results[0]?.state).toBe("ok");
+  });
+
+  it("a wallet that keeps timing out fails at the build deadline instead of hanging", async () => {
+    const fireAt = 10_000;
+    const c = clock(fireAt - OPENSEA_LEAD_MS);
+    let attempts = 0;
+    const report = await probeAndRelease<number>({
+      count: 1,
+      fireAt,
+      deadline: fireAt + 30_000,
+      now: c.now,
+      sleep: c.sleep,
+      call: async () => {
+        attempts++;
+        await c.sleep(1_500);
+        return { kind: "promote", error: new Error("OpenSea mint timed out") };
+      },
+    });
+    expect(attempts).toBeGreaterThan(2);
+    expect(report.results[0]?.state).toBe("error");
+    expect(c.now()).toBeLessThanOrEqual(fireAt + 30_000 + 1_500);
+  });
 });

@@ -334,9 +334,17 @@ export async function probeAndRelease<T>(opts: {
       if (strikes < PROBE_PROMOTE_AFTER) return "closed";
     }
     if (res.kind === "promote" || res.kind === "fail") {
+      const next = results.findIndex((r, i) => i !== probe && r.state === "pending" && !parked.has(i));
+      if (next < 0 && res.kind === "promote") {
+        // Last wallet standing: a transient error (timeout / 5xx / auth) is not a verdict.
+        // Keep polling this wallet until the deadline instead of failing the job after
+        // PROBE_PROMOTE_AFTER attempts — a 1-wallet FCFS job has nobody to promote to.
+        strikes = 0;
+        postWindow = 0;
+        return "closed";
+      }
       remember(probe, res);
       void settle(probe, res, false);
-      const next = results.findIndex((r, i) => i !== probe && r.state === "pending" && !parked.has(i));
       strikes = 0;
       postWindow = 0;
       if (next < 0) return "stop";
@@ -395,6 +403,13 @@ export async function probeAndRelease<T>(opts: {
                   queue.push(i);
                   return;
                 }
+                if (res.kind === "promote") {
+                  // Transient (timeout / 5xx / auth): retry this wallet until the deadline.
+                  // It is not a verdict — marking it failed here killed a 1-wallet FCFS job
+                  // after two timeouts even though the build budget was still open.
+                  queue.push(i);
+                  return;
+                }
                 if (res.kind === "closed") {
                   notActiveCalls++;
                   if (mode === "first" && i === probe && !opened) {
@@ -422,6 +437,20 @@ export async function probeAndRelease<T>(opts: {
           }
         } finally {
           pumping = false;
+        }
+        if (queue.length && inFlight === 0 && now() >= opts.deadline) {
+          // Build deadline hit with wallets still queued (repeated transient timeouts):
+          // fail them so the pool terminates instead of hanging the job.
+          const rest = queue.splice(0);
+          void (async () => {
+            for (const i of rest) {
+              const err = new Error("build deadline");
+              results[i] = { state: "error", error: err };
+              await settle(i, { kind: "fail", error: err }, true);
+            }
+            resolve();
+          })().catch(reject);
+          return;
         }
         if (queue.length && inFlight === 0 && now() < pauseUntil && now() < opts.deadline) {
           void sleep(Math.min(pauseUntil - now(), Math.max(0, opts.deadline - now())))

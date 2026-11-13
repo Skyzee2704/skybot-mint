@@ -62,8 +62,9 @@ export function gasFromHint(hint: bigint): bigint {
   return (hint * 130n) / 100n;
 }
 
-/** After T0 the OpenSea mint call must not sit on a 10s timeout. */
-export const MINT_API_TIMEOUT_MS = 1_500;
+/** After T0 the OpenSea mint call gets 5 s: at a busy FCFS start OpenSea routinely answers slower than 1.5 s,
+ * and a slow-but-working answer beats a timeout that the probe then has to retry. Retries still stop at the build deadline. */
+export const MINT_API_TIMEOUT_MS = 5_000;
 /** How long a fresh fee read may delay a signature. The T-60s quote is used if this expires. */
 const FEE_REFRESH_BUDGET_MS = 150;
 const NONCE_REFRESH_LEAD_MS = 1_200;

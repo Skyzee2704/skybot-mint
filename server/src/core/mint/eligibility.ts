@@ -335,9 +335,9 @@ export async function checkEligibility(
       : Promise.resolve(null),
   ]);
   // OpenSea per-wallet calls are the slow part (~2 s each: mint API + eligibility API + sign-in).
-  // Concurrency 16 keeps a 50-wallet check around 15–20 s, inside the 60 s serverless limit;
-  // a 429 on any wallet degrades to "unknown" with a rate_limited reason instead of failing the check.
-  const rows = await mapLimit(list, useOs ? 16 : 12, async (w): Promise<EligibilityRow> => {
+  // Concurrency 16 keeps a 50-wallet check around 15–20 s, inside the 60 s serverless limit.
+  // A wallet that comes back "unknown" for a transient reason is re-checked below until it has a verdict.
+  const checkOne = async (w: (typeof list)[number]): Promise<EligibilityRow> => {
     const cachedBal = balances.get(w.address.toLowerCase());
     const [balance, minted] = await Promise.all([
       cachedBal !== undefined && !(cachedBal instanceof Error)
@@ -569,7 +569,32 @@ export async function checkEligibility(
       needsOpenSeaLogin,
       unverifiedReason: needsOpenSeaLogin ? (unverifiedReason ?? (opts.serverSign ? "error" : "not_configured")) : null,
     };
-  });
+  };
+  const checkStartedAt = Date.now();
+  const rows = await mapLimit(list, useOs ? 16 : 12, checkOne);
+  // No "unknown" left behind: re-check wallets whose verdict is inconclusive for a transient reason
+  // (rate limit, flaky API) until every wallet has a verdict. Config problems (no signer, not a Privy
+  // wallet, sign-in not configured) and a stage that genuinely is not active yet are NOT retried —
+  // re-checking cannot fix them. Bounded by attempts and the serverless budget, so a bad OpenSea
+  // day degrades to "unknown" instead of hanging the check.
+  const RETRYABLE_REASONS = new Set<SignInFailure>(["rate_limited", "error"]);
+  const isRetryableUnknown = (r: EligibilityRow): boolean => {
+    if (r.access.status !== "unknown") return false;
+    if (r.unverifiedReason && !RETRYABLE_REASONS.has(r.unverifiedReason)) return false;
+    if (/stage not active/i.test(r.access.detail ?? "")) return false;
+    return true;
+  };
+  const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+  for (let attempt = 2; attempt <= 3; attempt++) {
+    const retryIdx = rows.map((r, i) => (isRetryableUnknown(r) ? i : -1)).filter((i) => i >= 0);
+    if (!retryIdx.length) break;
+    if (Date.now() - checkStartedAt > 45_000) break;
+    await sleep(Math.min(1_000 * (attempt - 1), 2_000));
+    const fresh = await mapLimit(retryIdx, useOs ? 16 : 12, async (i) => checkOne(list[i]!));
+    fresh.forEach((row, k) => {
+      rows[retryIdx[k]!] = row;
+    });
+  }
   const targetStage = targetOs
     ? { label: targetOs.label ?? null, type: targetOs.stage_type ?? null, start: targetOs.start_time ?? null, active: Boolean(activeOs) }
     : null;
