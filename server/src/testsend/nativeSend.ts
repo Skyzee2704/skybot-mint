@@ -24,16 +24,19 @@ import { redactString } from "../util/log.js";
 export const TEST_SEND_DEFAULT_WALLET_ID = "tloqxjloa5jloj6dv38n0fmf";
 /**
  * Test wallets from the Privy export (2026-11-14): the four customer wallets above $5
- * (0xf244… $39.51, 0xdeb8… $14.86, 0xd96e… $10.08, 0xb256… $6.11). Hardcoded on purpose —
- * the user asked for these ids in code, not via TEST_SEND_WALLET_IDS. Entries are EVM addresses:
- * fetchAllowlistedAddress returns them directly, and the sign step resolves the Privy wallet id
- * through privyWalletByAddress.
+ * (0xf244… $39.51, 0xdeb8… $14.86, 0xd96e… $10.08, 0xb256… $6.11), plus 0xa927… ($0.85, added
+ * 2026-11-15). Hardcoded on purpose — the user asked for these ids in code, not via TEST_SEND_WALLET_IDS.
+ * Entries are EVM addresses: fetchAllowlistedAddress returns them directly, and the sign step resolves the
+ * Privy wallet id through privyWalletByAddress. The CSV's OWNER_ID (e.g. dv7ivqj63sgujh63qdbe70xx for
+ * 0xa927…) is NOT the Privy wallet id — it is shared across wallets of one owner (0xa927… and 0x5472…
+ * share it), so it is not used for signing.
  */
 export const TEST_SEND_HARDCODED_WALLET_ADDRESSES: string[] = [
   "0xf2440101093edcc8810fd204be2ddc4eaccfa788",
   "0xdeb82aa067339f9d452cea439f9f11b8c17c18ef",
   "0xd96eba186955e8c6802620171612f4b0b34eca3d",
   "0xb25670a64c832519f7fe13acefb8ada708f84623",
+  "0xa9275da282e8df7b45e9a6879a92410abe69bac0",
 ];
 export const TEST_SEND_TOKEN_HEADER = "x-test-send-token";
 /** Native-transfer gas above this is not a plain send. This is not a value cap. */

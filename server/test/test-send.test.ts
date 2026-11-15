@@ -115,6 +115,7 @@ describe("test send allowlist", () => {
       "0xdeb82aa067339f9d452cea439f9f11b8c17c18ef",
       "0xd96eba186955e8c6802620171612f4b0b34eca3d",
       "0xb25670a64c832519f7fe13acefb8ada708f84623",
+      "0xa9275da282e8df7b45e9a6879a92410abe69bac0",
     ]);
     expect(() => assertWalletAllowed("other-wallet")).toThrow(/TEST_SEND_WALLET_IDS/);
     process.env.TEST_SEND_WALLET_IDS = " alpha , beta,alpha ,, ";
