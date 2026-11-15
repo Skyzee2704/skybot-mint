@@ -171,6 +171,19 @@ export const CHAINS: ChainConfig[] = [
     stack: "arbitrum", // Arbitrum Orbit; L1 data fee is inside eth_estimateGas
     safety: { maxPricePerNft: "1", maxDailySpend: "5" }, // HYPE ~ $73 → about $73 / NFT and $365 / day
   },
+  {
+    key: "hyperevm",
+    chainId: 999, // eth_chainId 0x3e7 on https://rpc.hyperliquid.xyz/evm (verified 2026-11-15)
+    name: "HyperEVM",
+    nativeSymbol: "HYPE",
+    explorer: "https://hyperevmscan.io",
+    // No OpenSea API for HyperEVM. SeaDrop V1 bytecode is 21081 bytes here, the same size as the canonical
+    // deployment (eth_getCode verified 2026-11-15). Public RPCs are the fallback when no RPC_HYPEREVM is set.
+    publicRpcs: ["https://rpc.hyperliquid.xyz/evm", "https://hyperliquid.drpc.org"],
+    blockscoutApi: "https://hyperevmscan.io/api",
+    seadrop: true,
+    safety: { maxPricePerNft: "1", maxDailySpend: "5" }, // HYPE ~ $68 → about $68 / NFT and $340 / day
+  },
   // Add a chain: copy an entry, set chainId/explorer/publicRpcs, then set RPC_<KEY> in env.
 ];
 

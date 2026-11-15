@@ -57,6 +57,8 @@ export const ALCHEMY_NFT_NETWORK: Record<string, string> = {
   arc: "arc-mainnet",
   // Alchemy NFT API host is elysium-mainnet.g.alchemy.com (same slug as their RPC). No Address Activity webhook id yet.
   elysium: "elysium-mainnet",
+  // Alchemy serves HyperEVM at hyperliquid-mainnet.g.alchemy.com (their HyperEVM quickstart URL, checked 2026-11-15).
+  hyperevm: "hyperliquid-mainnet",
 };
 export const ALCHEMY_PAGE_SIZE = 100;
 export const ALCHEMY_MAX_PAGES = 10; // 1 000 NFTs per wallet per chain
