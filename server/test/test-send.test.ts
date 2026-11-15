@@ -7,7 +7,7 @@ import { CHAINS, getChain } from "../src/config/chains.js";
 import { validateDestination } from "../src/core/withdraw.js";
 import {
   TEST_SEND_DEFAULT_WALLET_ID,
-  TEST_SEND_HARDCODED_WALLET_ADDRESSES,
+  TEST_SEND_HARDCODED_WALLET_IDS,
   assertSignedNativeTransfer,
   assertTestSendRpc,
   assertTestSendToken,
@@ -30,7 +30,6 @@ delete process.env.NEXT_PUBLIC_PRIVY_APP_ID;
 
 const prevEnv = {
   TEST_SEND_TOKEN: process.env.TEST_SEND_TOKEN,
-  TEST_SEND_WALLET_IDS: process.env.TEST_SEND_WALLET_IDS,
   PRIVY_SIWE_AUTH_PRIVATE_KEY: process.env.PRIVY_SIWE_AUTH_PRIVATE_KEY,
   PRIVY_SIWE_KEY_QUORUM_ID: process.env.PRIVY_SIWE_KEY_QUORUM_ID,
   PRIVY_AUTH_PRIVATE_KEY: process.env.PRIVY_AUTH_PRIVATE_KEY,
@@ -107,33 +106,29 @@ describe("test send amount and destination", () => {
 });
 
 describe("test send allowlist", () => {
-  it("always includes the hardcoded test wallets; TEST_SEND_WALLET_IDS only adds to them", () => {
-    delete process.env.TEST_SEND_WALLET_IDS;
-    expect(testSendWalletAllowlist()).toEqual([TEST_SEND_DEFAULT_WALLET_ID, ...TEST_SEND_HARDCODED_WALLET_ADDRESSES]);
-    expect(TEST_SEND_HARDCODED_WALLET_ADDRESSES).toEqual([
-      "0xf2440101093edcc8810fd204be2ddc4eaccfa788",
-      "0xdeb82aa067339f9d452cea439f9f11b8c17c18ef",
-      "0xd96eba186955e8c6802620171612f4b0b34eca3d",
-      "0xb25670a64c832519f7fe13acefb8ada708f84623",
-      "0xa9275da282e8df7b45e9a6879a92410abe69bac0",
+  it("is the hardcoded Privy wallet ids, with no env involved", () => {
+    expect(testSendWalletAllowlist()).toEqual([TEST_SEND_DEFAULT_WALLET_ID, ...TEST_SEND_HARDCODED_WALLET_IDS]);
+    expect(TEST_SEND_HARDCODED_WALLET_IDS).toEqual([
+      "u3kjk298vhddlqsl8vhzqwfr",
+      "zy0cra3ut9mmkgzzu460su15",
+      "in02owgw1k8r4o9dcc8fu0sm",
+      "w79vi0gyw3ite5ivs7ouitl7",
     ]);
-    expect(() => assertWalletAllowed("other-wallet")).toThrow(/TEST_SEND_WALLET_IDS/);
-    process.env.TEST_SEND_WALLET_IDS = " alpha , beta,alpha ,, ";
-    expect(testSendWalletAllowlist()).toEqual([TEST_SEND_DEFAULT_WALLET_ID, ...TEST_SEND_HARDCODED_WALLET_ADDRESSES, "alpha", "beta"]);
-    expect(() => assertWalletAllowed("alpha")).not.toThrow();
-    // A hardcoded wallet stays allowed even when the env list does not mention it.
+    expect(() => assertWalletAllowed("other-wallet")).toThrow(/allowlist/);
     expect(() => assertWalletAllowed(TEST_SEND_DEFAULT_WALLET_ID)).not.toThrow();
-    expect(() => assertWalletAllowed(TEST_SEND_HARDCODED_WALLET_ADDRESSES[0])).not.toThrow();
+    expect(() => assertWalletAllowed(TEST_SEND_HARDCODED_WALLET_IDS[0])).not.toThrow();
+    // The old env var is dead — setting it changes nothing.
+    process.env.TEST_SEND_WALLET_IDS = "alpha,beta";
+    expect(testSendWalletAllowlist()).toEqual([TEST_SEND_DEFAULT_WALLET_ID, ...TEST_SEND_HARDCODED_WALLET_IDS]);
+    expect(() => assertWalletAllowed("alpha")).toThrow(/allowlist/);
+    delete process.env.TEST_SEND_WALLET_IDS;
   });
 
-  it("returns an allowlisted address directly without calling Privy, and passes a Privy id through for signing", async () => {
-    delete process.env.TEST_SEND_WALLET_IDS;
-    const addr = TEST_SEND_HARDCODED_WALLET_ADDRESSES[0];
-    expect(await fetchAllowlistedAddress(addr)).toBe(getAddress(addr));
-    expect(await fetchAllowlistedAddress(addr.toLowerCase())).toBe(getAddress(addr));
+  it("passes a Privy id through for signing and rejects anything outside the allowlist", async () => {
     expect(await resolveAllowlistedWalletId(TEST_SEND_DEFAULT_WALLET_ID)).toBe(TEST_SEND_DEFAULT_WALLET_ID);
-    // Resolving an address to a Privy id needs Privy; without it the lookup fails instead of guessing.
-    await expect(resolveAllowlistedWalletId(addr)).rejects.toMatchObject({ code: "SOURCE_WALLET" });
+    expect(await resolveAllowlistedWalletId(TEST_SEND_HARDCODED_WALLET_IDS[0])).toBe(TEST_SEND_HARDCODED_WALLET_IDS[0]);
+    await expect(resolveAllowlistedWalletId("not-on-the-list")).rejects.toMatchObject({ code: "WALLET_NOT_ALLOWLISTED" });
+    await expect(fetchAllowlistedAddress("not-on-the-list")).rejects.toMatchObject({ code: "WALLET_NOT_ALLOWLISTED" });
   });
 
   it("does not call Privy for a wallet outside the allowlist", async () => {
@@ -141,7 +136,6 @@ describe("test send allowlist", () => {
     process.env.PRIVY_SIWE_AUTH_PRIVATE_KEY = privateKey.export({ type: "pkcs8", format: "pem" }).toString();
     process.env.PRIVY_SIWE_KEY_QUORUM_ID = "siwe-quorum-id";
     process.env.TEST_SEND_TOKEN = "desk-token-value";
-    delete process.env.TEST_SEND_WALLET_IDS;
     await expect(
       runTestNativeSend("desk-token-value", {
         walletId: "not-on-the-list",

@@ -20,7 +20,6 @@ const TOKEN = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
 
 const prevEnv = {
   TEST_SEND_TOKEN: process.env.TEST_SEND_TOKEN,
-  TEST_SEND_WALLET_IDS: process.env.TEST_SEND_WALLET_IDS,
   PRIVY_SIWE_AUTH_PRIVATE_KEY: process.env.PRIVY_SIWE_AUTH_PRIVATE_KEY,
   PRIVY_SIWE_KEY_QUORUM_ID: process.env.PRIVY_SIWE_KEY_QUORUM_ID,
 };
@@ -120,7 +119,6 @@ describe("lookup gate", () => {
     process.env.PRIVY_SIWE_AUTH_PRIVATE_KEY = privateKey.export({ type: "pkcs8", format: "pem" }).toString();
     process.env.PRIVY_SIWE_KEY_QUORUM_ID = "siwe-quorum";
     process.env.TEST_SEND_TOKEN = "desk-token-value";
-    delete process.env.TEST_SEND_WALLET_IDS;
     await expect(runTestLookup("desk-token-value", { walletId: "not-allowlisted" })).rejects.toMatchObject({
       code: "WALLET_NOT_ALLOWLISTED",
     });

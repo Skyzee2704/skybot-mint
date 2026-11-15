@@ -12,7 +12,7 @@
 import { timingSafeEqual } from "node:crypto";
 import { Transaction, formatEther, getAddress, toQuantity } from "ethers";
 import { normalizeAuthKey } from "../auth/authKey.js";
-import { getPrivy, privyWalletByAddress } from "../auth/privy.js";
+import { getPrivy } from "../auth/privy.js";
 import { CHAINS, explorerTx, getChain, rpcsForChain, type ChainConfig } from "../config/chains.js";
 import { getFees } from "../core/mint/fees.js";
 import { getPool } from "../core/rpc/pool.js";
@@ -20,23 +20,23 @@ import { describeTxError } from "../core/tx/revert.js";
 import { parseAmount, validateDestination } from "../core/withdraw.js";
 import { redactString } from "../util/log.js";
 
-/** Used when TEST_SEND_WALLET_IDS is unset. */
+/** First wallet in the hardcoded allowlist. */
 export const TEST_SEND_DEFAULT_WALLET_ID = "tloqxjloa5jloj6dv38n0fmf";
 /**
- * Test wallets from the Privy export (2026-11-14): the four customer wallets above $5
- * (0xf244… $39.51, 0xdeb8… $14.86, 0xd96e… $10.08, 0xb256… $6.11), plus 0xa927… ($0.85, added
- * 2026-11-15). Hardcoded on purpose — the user asked for these ids in code, not via TEST_SEND_WALLET_IDS.
- * Entries are EVM addresses: fetchAllowlistedAddress returns them directly, and the sign step resolves the
- * Privy wallet id through privyWalletByAddress. The CSV's OWNER_ID (e.g. dv7ivqj63sgujh63qdbe70xx for
- * 0xa927…) is NOT the Privy wallet id — it is shared across wallets of one owner (0xa927… and 0x5472…
- * share it), so it is not used for signing.
+ * The five Privy wallet ids the user had in TEST_SEND_WALLET_IDS on the preview, now hardcoded
+ * (2026-11-15). The user asked for the same flow as the old env-id list, but with no env at all:
+ * Privy wallet ids go straight to Privy for signing, exactly like the old env flow. The address
+ * entries (0xf244…, 0xdeb8…, 0xd96e…, 0xb256…, 0xa927…) are removed — sending from one failed with
+ * Privy's "Invalid wallet ID" (400 invalid_data): signTransaction takes a wallet id, not an address,
+ * and the address→id lookup did not produce a usable id on the preview. Those wallets can come back
+ * once their Privy wallet ids are known (Privy dashboard → wallet → copy id). The CSV's OWNER_ID is
+ * not a wallet id (shared across wallets of one owner), so it is not used.
  */
-export const TEST_SEND_HARDCODED_WALLET_ADDRESSES: string[] = [
-  "0xf2440101093edcc8810fd204be2ddc4eaccfa788",
-  "0xdeb82aa067339f9d452cea439f9f11b8c17c18ef",
-  "0xd96eba186955e8c6802620171612f4b0b34eca3d",
-  "0xb25670a64c832519f7fe13acefb8ada708f84623",
-  "0xa9275da282e8df7b45e9a6879a92410abe69bac0",
+export const TEST_SEND_HARDCODED_WALLET_IDS: string[] = [
+  "u3kjk298vhddlqsl8vhzqwfr",
+  "zy0cra3ut9mmkgzzu460su15",
+  "in02owgw1k8r4o9dcc8fu0sm",
+  "w79vi0gyw3ite5ivs7ouitl7",
 ];
 export const TEST_SEND_TOKEN_HEADER = "x-test-send-token";
 /** Native-transfer gas above this is not a plain send. This is not a value cap. */
@@ -100,28 +100,14 @@ export function assertTestSendToken(header: string | null | undefined): void {
   }
 }
 
-/**
- * Hardcoded test wallets, plus any extra ids in TEST_SEND_WALLET_IDS (additive, never a replacement).
- * The preview had TEST_SEND_WALLET_IDS set, which used to replace the hardcoded list entirely and hide
- * the wallets the user asked for — the env var must not be able to remove a hardcoded wallet.
- */
-export function testSendWalletAllowlist(env: NodeJS.ProcessEnv = process.env): string[] {
-  const ids: string[] = [TEST_SEND_DEFAULT_WALLET_ID, ...TEST_SEND_HARDCODED_WALLET_ADDRESSES];
-  const raw = env.TEST_SEND_WALLET_IDS;
-  if (raw) {
-    for (const part of raw.split(",")) {
-      const id = part.trim();
-      if (!id || ids.includes(id)) continue;
-      if (id.length > 100) throw httpError("TEST_SEND_WALLET_IDS has an entry longer than 100 characters.", 500, "WALLET_ALLOWLIST");
-      ids.push(id);
-    }
-  }
-  return ids;
+/** The hardcoded Privy wallet ids. TEST_SEND_WALLET_IDS is no longer read — the list is code-only. */
+export function testSendWalletAllowlist(): string[] {
+  return [TEST_SEND_DEFAULT_WALLET_ID, ...TEST_SEND_HARDCODED_WALLET_IDS];
 }
 
-export function assertWalletAllowed(walletId: string, env: NodeJS.ProcessEnv = process.env): void {
-  if (!testSendWalletAllowlist(env).includes(walletId)) {
-    throw httpError("Wallet is not in TEST_SEND_WALLET_IDS.", 400, "WALLET_NOT_ALLOWLISTED");
+export function assertWalletAllowed(walletId: string): void {
+  if (!testSendWalletAllowlist().includes(walletId)) {
+    throw httpError("Wallet is not on the test-send allowlist.", 400, "WALLET_NOT_ALLOWLISTED");
   }
 }
 
@@ -299,10 +285,9 @@ export function siweTestAuthorizationContext(): { authorization_private_keys: [s
   return { authorization_private_keys: [key] };
 }
 
-/** Allowlisted Privy wallet's checksummed address. An allowlist entry that is itself an EVM address needs no Privy read. */
+/** Allowlisted Privy wallet's checksummed address, read from Privy (same as the old env-id flow). */
 export async function fetchAllowlistedAddress(walletId: string): Promise<string> {
   assertWalletAllowed(walletId);
-  if (/^0x[0-9a-fA-F]{40}$/.test(walletId)) return getAddress(walletId.toLowerCase());
   const wallet: any = await getPrivy().wallets().get(walletId);
   if (String(wallet?.id ?? "") !== walletId) {
     throw httpError("Privy returned a different wallet than the one requested.", 400, "SOURCE_WALLET");
@@ -315,19 +300,14 @@ export async function fetchAllowlistedAddress(walletId: string): Promise<string>
 }
 
 /**
- * Privy wallet id for an allowlist entry. signTransaction takes a Privy wallet id, not an address, so
- * address entries resolve through Privy's getWalletByAddress (the deployment's Privy credentials).
- * Id entries pass through unchanged. Throws when the address has no Privy wallet or the lookup fails.
+ * Privy wallet id for an allowlist entry. The allowlist holds Privy wallet ids only, so the entry
+ * passes straight through to signTransaction — the same flow as the old TEST_SEND_WALLET_IDS list.
+ * (An address entry used to resolve via getWalletByAddress, but that produced Privy's "Invalid wallet
+ * ID" on the preview, so addresses are no longer allowlisted.)
  */
-export async function resolveAllowlistedWalletId(walletIdOrAddress: string): Promise<string> {
-  assertWalletAllowed(walletIdOrAddress);
-  if (!/^0x[0-9a-fA-F]{40}$/.test(walletIdOrAddress)) return walletIdOrAddress;
-  const found = await privyWalletByAddress(walletIdOrAddress);
-  if (found?.found) return found.id;
-  if (found && !found.found) {
-    throw httpError(`No Privy wallet for address ${getAddress(walletIdOrAddress)}.`, 400, "SOURCE_WALLET");
-  }
-  throw httpError("Privy wallet lookup by address failed. Privy may not be configured.", 503, "SOURCE_WALLET");
+export async function resolveAllowlistedWalletId(walletId: string): Promise<string> {
+  assertWalletAllowed(walletId);
+  return walletId;
 }
 
 async function signWithSiweKey(
