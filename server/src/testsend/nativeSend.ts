@@ -100,18 +100,23 @@ export function assertTestSendToken(header: string | null | undefined): void {
   }
 }
 
-/** Comma-separated Privy wallet ids. Unset or blank falls back to the original test wallet plus the hardcoded test wallets. */
+/**
+ * Hardcoded test wallets, plus any extra ids in TEST_SEND_WALLET_IDS (additive, never a replacement).
+ * The preview had TEST_SEND_WALLET_IDS set, which used to replace the hardcoded list entirely and hide
+ * the wallets the user asked for — the env var must not be able to remove a hardcoded wallet.
+ */
 export function testSendWalletAllowlist(env: NodeJS.ProcessEnv = process.env): string[] {
+  const ids: string[] = [TEST_SEND_DEFAULT_WALLET_ID, ...TEST_SEND_HARDCODED_WALLET_ADDRESSES];
   const raw = env.TEST_SEND_WALLET_IDS;
-  const source = raw === undefined || !raw.trim() ? [TEST_SEND_DEFAULT_WALLET_ID, ...TEST_SEND_HARDCODED_WALLET_ADDRESSES].join(",") : raw;
-  const ids: string[] = [];
-  for (const part of source.split(",")) {
-    const id = part.trim();
-    if (!id || ids.includes(id)) continue;
-    if (id.length > 100) throw httpError("TEST_SEND_WALLET_IDS has an entry longer than 100 characters.", 500, "WALLET_ALLOWLIST");
-    ids.push(id);
+  if (raw) {
+    for (const part of raw.split(",")) {
+      const id = part.trim();
+      if (!id || ids.includes(id)) continue;
+      if (id.length > 100) throw httpError("TEST_SEND_WALLET_IDS has an entry longer than 100 characters.", 500, "WALLET_ALLOWLIST");
+      ids.push(id);
+    }
   }
-  return ids.length ? ids : [TEST_SEND_DEFAULT_WALLET_ID];
+  return ids;
 }
 
 export function assertWalletAllowed(walletId: string, env: NodeJS.ProcessEnv = process.env): void {

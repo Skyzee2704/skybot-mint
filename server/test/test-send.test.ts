@@ -107,7 +107,7 @@ describe("test send amount and destination", () => {
 });
 
 describe("test send allowlist", () => {
-  it("defaults to the original wallet plus the hardcoded test wallets and rejects anything else", () => {
+  it("always includes the hardcoded test wallets; TEST_SEND_WALLET_IDS only adds to them", () => {
     delete process.env.TEST_SEND_WALLET_IDS;
     expect(testSendWalletAllowlist()).toEqual([TEST_SEND_DEFAULT_WALLET_ID, ...TEST_SEND_HARDCODED_WALLET_ADDRESSES]);
     expect(TEST_SEND_HARDCODED_WALLET_ADDRESSES).toEqual([
@@ -119,9 +119,11 @@ describe("test send allowlist", () => {
     ]);
     expect(() => assertWalletAllowed("other-wallet")).toThrow(/TEST_SEND_WALLET_IDS/);
     process.env.TEST_SEND_WALLET_IDS = " alpha , beta,alpha ,, ";
-    expect(testSendWalletAllowlist()).toEqual(["alpha", "beta"]);
+    expect(testSendWalletAllowlist()).toEqual([TEST_SEND_DEFAULT_WALLET_ID, ...TEST_SEND_HARDCODED_WALLET_ADDRESSES, "alpha", "beta"]);
     expect(() => assertWalletAllowed("alpha")).not.toThrow();
-    expect(() => assertWalletAllowed(TEST_SEND_DEFAULT_WALLET_ID)).toThrow(/TEST_SEND_WALLET_IDS/);
+    // A hardcoded wallet stays allowed even when the env list does not mention it.
+    expect(() => assertWalletAllowed(TEST_SEND_DEFAULT_WALLET_ID)).not.toThrow();
+    expect(() => assertWalletAllowed(TEST_SEND_HARDCODED_WALLET_ADDRESSES[0])).not.toThrow();
   });
 
   it("returns an allowlisted address directly without calling Privy, and passes a Privy id through for signing", async () => {
