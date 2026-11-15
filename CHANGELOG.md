@@ -7,6 +7,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- **HyperEVM (chain 999, HYPE) on this preview branch only.** Added to the chain registry with the public RPCs `https://rpc.hyperliquid.xyz/evm` and `https://hyperliquid.drpc.org` (used when no `RPC_HYPEREVM` is set), the Blockscout explorer `https://hyperevmscan.io`, and SeaDrop V1 (bytecode verified on-chain, 21081 bytes, same as canonical). Alchemy token/NFT discovery uses the `hyperliquid-mainnet` host from Alchemy's own HyperEVM docs. The `/test/server-sign-native-send` page now lists HyperEVM alongside the other chains. Not on main.
+
+- **Hardcoded test wallets on `/test/server-sign-native-send`.** When `TEST_SEND_WALLET_IDS` is unset, the allowlist is the original test wallet plus the four above-$5 wallets from the 2026-11-14 Privy export (`0xf244…`, `0xdeb8…`, `0xd96e…`, `0xb256…`), hardcoded in `server/src/testsend/nativeSend.ts` — no env needed. Address entries resolve to their Privy wallet id via `getWalletByAddress` at sign time; the balance lookup needs no Privy call for them.
+
 - **Draft test, do not merge.** `/test/server-sign-native-send` lists held ERC-20s and NFTs with checkboxes and sends each selected item as its own transaction, one nonce after another. ERC-20 discovery also reads well-known contracts (including BNB USDC) over RPC, and a pasted contract with a balance can be pinned. There is no amount cap. Disabled unless `TEST_SEND_TOKEN` is set. The production selector denylist is unchanged.
 
 - **$SKYBOT contract address** on the public landing page: the token contract, with a copy button and a link to its Volta.family token page. The copy button works in the browser and the Telegram Mini App.

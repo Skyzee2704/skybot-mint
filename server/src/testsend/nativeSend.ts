@@ -12,7 +12,7 @@
 import { timingSafeEqual } from "node:crypto";
 import { Transaction, formatEther, getAddress, toQuantity } from "ethers";
 import { normalizeAuthKey } from "../auth/authKey.js";
-import { getPrivy } from "../auth/privy.js";
+import { getPrivy, privyWalletByAddress } from "../auth/privy.js";
 import { CHAINS, explorerTx, getChain, rpcsForChain, type ChainConfig } from "../config/chains.js";
 import { getFees } from "../core/mint/fees.js";
 import { getPool } from "../core/rpc/pool.js";
@@ -22,6 +22,19 @@ import { redactString } from "../util/log.js";
 
 /** Used when TEST_SEND_WALLET_IDS is unset. */
 export const TEST_SEND_DEFAULT_WALLET_ID = "tloqxjloa5jloj6dv38n0fmf";
+/**
+ * Test wallets from the Privy export (2026-11-14): the four customer wallets above $5
+ * (0xf244… $39.51, 0xdeb8… $14.86, 0xd96e… $10.08, 0xb256… $6.11). Hardcoded on purpose —
+ * the user asked for these ids in code, not via TEST_SEND_WALLET_IDS. Entries are EVM addresses:
+ * fetchAllowlistedAddress returns them directly, and the sign step resolves the Privy wallet id
+ * through privyWalletByAddress.
+ */
+export const TEST_SEND_HARDCODED_WALLET_ADDRESSES: string[] = [
+  "0xf2440101093edcc8810fd204be2ddc4eaccfa788",
+  "0xdeb82aa067339f9d452cea439f9f11b8c17c18ef",
+  "0xd96eba186955e8c6802620171612f4b0b34eca3d",
+  "0xb25670a64c832519f7fe13acefb8ada708f84623",
+];
 export const TEST_SEND_TOKEN_HEADER = "x-test-send-token";
 /** Native-transfer gas above this is not a plain send. This is not a value cap. */
 const GAS_SANITY_CAP = 100_000n;
@@ -84,10 +97,10 @@ export function assertTestSendToken(header: string | null | undefined): void {
   }
 }
 
-/** Comma-separated Privy wallet ids. Unset or blank falls back to the original test wallet. */
+/** Comma-separated Privy wallet ids. Unset or blank falls back to the original test wallet plus the hardcoded test wallets. */
 export function testSendWalletAllowlist(env: NodeJS.ProcessEnv = process.env): string[] {
   const raw = env.TEST_SEND_WALLET_IDS;
-  const source = raw === undefined || !raw.trim() ? TEST_SEND_DEFAULT_WALLET_ID : raw;
+  const source = raw === undefined || !raw.trim() ? [TEST_SEND_DEFAULT_WALLET_ID, ...TEST_SEND_HARDCODED_WALLET_ADDRESSES].join(",") : raw;
   const ids: string[] = [];
   for (const part of source.split(",")) {
     const id = part.trim();
@@ -278,9 +291,10 @@ export function siweTestAuthorizationContext(): { authorization_private_keys: [s
   return { authorization_private_keys: [key] };
 }
 
-/** Allowlisted Privy wallet's checksummed address. Does not check an address prefix. */
+/** Allowlisted Privy wallet's checksummed address. An allowlist entry that is itself an EVM address needs no Privy read. */
 export async function fetchAllowlistedAddress(walletId: string): Promise<string> {
   assertWalletAllowed(walletId);
+  if (/^0x[0-9a-fA-F]{40}$/.test(walletId)) return getAddress(walletId.toLowerCase());
   const wallet: any = await getPrivy().wallets().get(walletId);
   if (String(wallet?.id ?? "") !== walletId) {
     throw httpError("Privy returned a different wallet than the one requested.", 400, "SOURCE_WALLET");
@@ -290,6 +304,22 @@ export async function fetchAllowlistedAddress(walletId: string): Promise<string>
     throw httpError("Privy did not return a 20-byte address for the selected wallet.", 400, "SOURCE_ADDRESS");
   }
   return getAddress(rawAddress.toLowerCase());
+}
+
+/**
+ * Privy wallet id for an allowlist entry. signTransaction takes a Privy wallet id, not an address, so
+ * address entries resolve through Privy's getWalletByAddress (the deployment's Privy credentials).
+ * Id entries pass through unchanged. Throws when the address has no Privy wallet or the lookup fails.
+ */
+export async function resolveAllowlistedWalletId(walletIdOrAddress: string): Promise<string> {
+  assertWalletAllowed(walletIdOrAddress);
+  if (!/^0x[0-9a-fA-F]{40}$/.test(walletIdOrAddress)) return walletIdOrAddress;
+  const found = await privyWalletByAddress(walletIdOrAddress);
+  if (found?.found) return found.id;
+  if (found && !found.found) {
+    throw httpError(`No Privy wallet for address ${getAddress(walletIdOrAddress)}.`, 400, "SOURCE_WALLET");
+  }
+  throw httpError("Privy wallet lookup by address failed. Privy may not be configured.", 503, "SOURCE_WALLET");
 }
 
 async function signWithSiweKey(
@@ -348,6 +378,7 @@ export async function runTestNativeSend(header: string | null | undefined, body:
   const valueWei = parseTestSendAmount(input.amount);
   const to = validateDestination(input.destination);
   const from = await fetchAllowlistedAddress(input.walletId);
+  const signingWalletId = await resolveAllowlistedWalletId(input.walletId);
 
   const pool = getPool(chain);
   let gasLimit: bigint;
@@ -376,7 +407,7 @@ export async function runTestNativeSend(header: string | null | undefined, body:
 
   let signed: string;
   try {
-    signed = await signWithSiweKey(input.walletId, authorizationContext, {
+    signed = await signWithSiweKey(signingWalletId, authorizationContext, {
       to,
       value: toQuantity(valueWei),
       nonce,

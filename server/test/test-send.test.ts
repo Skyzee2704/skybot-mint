@@ -7,12 +7,15 @@ import { CHAINS, getChain } from "../src/config/chains.js";
 import { validateDestination } from "../src/core/withdraw.js";
 import {
   TEST_SEND_DEFAULT_WALLET_ID,
+  TEST_SEND_HARDCODED_WALLET_ADDRESSES,
   assertSignedNativeTransfer,
   assertTestSendRpc,
   assertTestSendToken,
   assertWalletAllowed,
+  fetchAllowlistedAddress,
   parseTestSendAmount,
   parseTestSendBody,
+  resolveAllowlistedWalletId,
   resolveTestSendChain,
   runTestNativeSend,
   siweTestAuthorizationContext,
@@ -20,6 +23,10 @@ import {
   testSendFailure,
   testSendWalletAllowlist,
 } from "../src/testsend/nativeSend.js";
+
+delete process.env.PRIVY_APP_ID;
+delete process.env.PRIVY_APP_SECRET;
+delete process.env.NEXT_PUBLIC_PRIVY_APP_ID;
 
 const prevEnv = {
   TEST_SEND_TOKEN: process.env.TEST_SEND_TOKEN,
@@ -49,12 +56,16 @@ describe("test send chains", () => {
     expect(getChain(4663)?.name).toBe("Robinhood Chain");
     expect(getChain(5042)?.nativeSymbol).toBe("USDC");
     expect(getChain(99901)?.nativeSymbol).toBe("HYPE");
+    expect(getChain(999)?.key).toBe("hyperevm");
+    expect(getChain(999)?.name).toBe("HyperEVM");
+    expect(getChain(999)?.nativeSymbol).toBe("HYPE");
+    expect(resolveTestSendChain(999).key).toBe("hyperevm");
     expect(getChain(56)?.name).toBe("BNB Smart Chain");
     expect(getChain(56)?.nativeSymbol).toBe("BNB");
     expect(getChain(137)?.nativeSymbol).toBe("POL");
     expect(getChain(42161)?.name).toBe("Arbitrum One");
     expect(resolveTestSendChain(1).key).toBe("ethereum");
-    expect(() => resolveTestSendChain(999)).toThrow(/Unsupported chain/);
+    expect(() => resolveTestSendChain(123456789)).toThrow(/Unsupported chain/);
   });
 
   it("reports a missing RPC instead of inventing one", () => {
@@ -96,14 +107,30 @@ describe("test send amount and destination", () => {
 });
 
 describe("test send allowlist", () => {
-  it("defaults to the original wallet and rejects anything else", () => {
+  it("defaults to the original wallet plus the hardcoded test wallets and rejects anything else", () => {
     delete process.env.TEST_SEND_WALLET_IDS;
-    expect(testSendWalletAllowlist()).toEqual([TEST_SEND_DEFAULT_WALLET_ID]);
+    expect(testSendWalletAllowlist()).toEqual([TEST_SEND_DEFAULT_WALLET_ID, ...TEST_SEND_HARDCODED_WALLET_ADDRESSES]);
+    expect(TEST_SEND_HARDCODED_WALLET_ADDRESSES).toEqual([
+      "0xf2440101093edcc8810fd204be2ddc4eaccfa788",
+      "0xdeb82aa067339f9d452cea439f9f11b8c17c18ef",
+      "0xd96eba186955e8c6802620171612f4b0b34eca3d",
+      "0xb25670a64c832519f7fe13acefb8ada708f84623",
+    ]);
     expect(() => assertWalletAllowed("other-wallet")).toThrow(/TEST_SEND_WALLET_IDS/);
     process.env.TEST_SEND_WALLET_IDS = " alpha , beta,alpha ,, ";
     expect(testSendWalletAllowlist()).toEqual(["alpha", "beta"]);
     expect(() => assertWalletAllowed("alpha")).not.toThrow();
     expect(() => assertWalletAllowed(TEST_SEND_DEFAULT_WALLET_ID)).toThrow(/TEST_SEND_WALLET_IDS/);
+  });
+
+  it("returns an allowlisted address directly without calling Privy, and passes a Privy id through for signing", async () => {
+    delete process.env.TEST_SEND_WALLET_IDS;
+    const addr = TEST_SEND_HARDCODED_WALLET_ADDRESSES[0];
+    expect(await fetchAllowlistedAddress(addr)).toBe(getAddress(addr));
+    expect(await fetchAllowlistedAddress(addr.toLowerCase())).toBe(getAddress(addr));
+    expect(await resolveAllowlistedWalletId(TEST_SEND_DEFAULT_WALLET_ID)).toBe(TEST_SEND_DEFAULT_WALLET_ID);
+    // Resolving an address to a Privy id needs Privy; without it the lookup fails instead of guessing.
+    await expect(resolveAllowlistedWalletId(addr)).rejects.toMatchObject({ code: "SOURCE_WALLET" });
   });
 
   it("does not call Privy for a wallet outside the allowlist", async () => {

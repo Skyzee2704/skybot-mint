@@ -26,6 +26,7 @@ import {
   assertTestSendToken,
   fetchAllowlistedAddress,
   parseOptionalNonce,
+  resolveAllowlistedWalletId,
   resolveTestSendChain,
   siweTestAuthorizationContext,
 } from "./nativeSend.js";
@@ -591,6 +592,7 @@ export async function runTestErc20Send(
   const to = validateDestination(destination);
   if (to.toLowerCase() === token.toLowerCase()) throw httpError("Destination is the token contract.", 400, "BAD_ADDRESS");
   const from = await fetchAllowlistedAddress(walletId);
+  const signingWalletId = await resolveAllowlistedWalletId(walletId);
   const meta = await readErc20(chain, from, token);
   if (meta.decimals == null) throw httpError(`Could not read decimals() for ${token} on ${chain.name}.`, 400, "BAD_DECIMALS");
   const amountRaw = parseErc20Amount(amount, meta.decimals);
@@ -619,7 +621,7 @@ export async function runTestErc20Send(
     const res = await getPrivy()
       .wallets()
       .ethereum()
-      .signTransaction(walletId, {
+      .signTransaction(signingWalletId, {
         params: {
           transaction: {
             to: token,

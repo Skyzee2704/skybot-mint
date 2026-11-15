@@ -20,6 +20,7 @@ import {
   assertTestSendToken,
   fetchAllowlistedAddress,
   parseOptionalNonce,
+  resolveAllowlistedWalletId,
   resolveTestSendChain,
   siweTestAuthorizationContext,
 } from "./nativeSend.js";
@@ -256,6 +257,7 @@ async function runTestNftBatch(header: string | null | undefined, body: unknown)
   const contract = validateDestination(contractRaw);
   const to = validateDestination(destination);
   const from = await fetchAllowlistedAddress(walletId);
+  const signingWalletId = await resolveAllowlistedWalletId(walletId);
   const pool = getPool(chain);
   for (let i = 0; i < ids.length; i++) {
     let bal: bigint;
@@ -292,7 +294,7 @@ async function runTestNftBatch(header: string | null | undefined, body: unknown)
   const res = await getPrivy()
     .wallets()
     .ethereum()
-    .signTransaction(walletId, {
+    .signTransaction(signingWalletId, {
       params: {
         transaction: {
           to: contract,
@@ -369,6 +371,7 @@ export async function runTestNftSend(header: string | null | undefined, body: un
   const to = validateDestination(destination);
   const tokenId = parseUint(tokenIdRaw, "Token id");
   const from = await fetchAllowlistedAddress(walletId);
+  const signingWalletId = await resolveAllowlistedWalletId(walletId);
 
   let standard: NftStandard;
   if (standardRaw === "auto") {
@@ -439,7 +442,7 @@ export async function runTestNftSend(header: string | null | undefined, body: un
     const res = await getPrivy()
       .wallets()
       .ethereum()
-      .signTransaction(walletId, {
+      .signTransaction(signingWalletId, {
         params: {
           transaction: {
             to: contract,

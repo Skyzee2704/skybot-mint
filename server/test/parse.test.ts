@@ -34,6 +34,7 @@ describe("chains", () => {
       "bnb",
       "elysium",
       "ethereum",
+      "hyperevm",
       "ink",
       "polygon",
       "robinhood",
