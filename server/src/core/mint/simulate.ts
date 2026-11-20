@@ -132,7 +132,10 @@ export async function simulateMint(t: ResolvedTarget, reqIn: MintRequest, userId
       const base = { walletId: w.id, label: w.label, address: w.address, quantity: wq.quantity, balanceWei: balance.toString() };
       let tx;
       try {
-        tx = await buildMintTx(t, req, w.address, wq.quantity, undefined, userId);
+        // F-N1: pass fireAt (T0) so buildMintTx judges an unverifiable 200 the same way
+        // the live executor does — without it, simulate trusted a 200 OpenSea never
+        // named a stage for, while the executor would throw WRONG_STAGE before T0.
+        tx = await buildMintTx(t, req, w.address, wq.quantity, undefined, userId, { fireAt: runAtMs });
       } catch (e: any) {
         // Before the start OpenSea's mint API can answer 422 for a wallet that IS on the chosen stage's list
         // (the stage isn't live yet). Wallets reaching here already passed the saved per-stage eligibility check.
@@ -144,7 +147,15 @@ export async function simulateMint(t: ResolvedTarget, reqIn: MintRequest, userId
           e.code === "WRONG_STAGE" ||
           (e.code === "NOT_ELIGIBLE" &&
             choice !== null &&
-            classifyNotEligible({ message: e.message, fireAt: runAtMs, chosenStage: req.stage, now: Date.now() }) === "closed");
+            classifyNotEligible({
+              message: e.message,
+              fireAt: runAtMs,
+              chosenStage: req.stage,
+              now: Date.now(),
+              // N1: the same 30 s build budget the executor retries inside, so an
+              // unnamed-stage 422 is "closed" in simulate exactly as long as in live.
+              buildDeadline: runAtMs + 30_000,
+            }) === "closed");
         const unfundedOnly = e.code === "INSUFFICIENT_FUNDS"; // OpenSea checked the allowlist first and only balance failed
         const gl = BigInt(req.gasLimit ?? fallbackGas(req.strategy, wq.quantity));
         const expected = notActive && beforeStart;

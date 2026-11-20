@@ -360,7 +360,11 @@ export function pickTimingOption<S extends StageLike>(
   wanted: string | null,
 ): { option: TimingOption<S> | null; fellBack: boolean } {
   if (!wanted) return { option: opts[0] ?? null, fellBack: false }; // default: Now while live, else the soonest stage
-  const hit = opts.find((o) => o.key === wanted);
+  // F-N3: stage names compare case-insensitively (A2) — "gtd round" must find "GTD Round"
+  // instead of silently falling back to Public / the first option and scheduling the
+  // wrong stage without telling the member.
+  const want = wanted.trim().toLowerCase();
+  const hit = opts.find((o) => o.key.trim().toLowerCase() === want);
   if (hit) return { option: hit, fellBack: false };
   const pub = opts.find((o) => o.kind === "stage" && o.stage && isPublicStage(o.stage));
   const option = pub ?? opts[0] ?? null;

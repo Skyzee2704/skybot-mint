@@ -17,6 +17,24 @@ export function sameStageName(a: string | null | undefined, b: string | null | u
 }
 
 /**
+ * Canonical stage id (N3): OpenSea spells the same stage two ways — the drops API returns
+ * bare hex ("f7768398416f49de…") while the eligibility/mint APIs return dashed UUIDs
+ * ("f7768398-416f-49de-…"). Strip everything that is not a hex digit and lowercase, so
+ * both spellings compare equal. This is the one canonical form; eligibility.ts reuses it.
+ */
+export function stageKey(uuid: string | null | undefined): string | null {
+  if (!uuid) return null;
+  const k = uuid.toLowerCase().replace(/[^0-9a-z]/g, "");
+  return k || null;
+}
+
+/** Same stage by id, in canonical form (dashed vs bare-hex spellings match). */
+export function sameStageId(a: string | null | undefined, b: string | null | undefined): boolean {
+  const x = stageKey(a);
+  return x !== null && x === stageKey(b);
+}
+
+/**
  * Stage name OpenSea names in a 422 "not eligible for the active drop stage" message,
  * e.g. 'Team Round' in "Wallet is not eligible for the active drop stage, 'Team Round'
  * (signed_presale)". Undefined when the message names no stage.
@@ -29,7 +47,10 @@ export function sameStageName(a: string | null | undefined, b: string | null | u
 export function parseOpenSeaActiveStage(message: string): string | undefined {
   const withType = /active drop stage,?\s*['"](.+?)['"]\s*\(/i.exec(message);
   if (withType?.[1]) return withType[1];
-  const bare = /active drop stage,?\s*['"]([^'"]+)['"]/i.exec(message);
+  // N7: no " (type)" suffix after the name. The closing quote must be followed by a
+  // comma, a period or the end of the message — otherwise an apostrophe INSIDE the
+  // name ("Collector's Round") would end the match early and return "Collector".
+  const bare = /active drop stage,?\s*['"](.+?)['"]\s*(?:,|\.|$)/i.exec(message);
   return bare?.[1];
 }
 
@@ -87,13 +108,34 @@ export function mintStageOf(r: { stage_uuid?: string; stage_type?: string; stage
 /**
  * Is the stage the mint API built for the chosen stage? true = same, false = a different
  * stage, undefined = the data cannot tell (no uuid on either side and no comparable start
- * time). A uuid match wins; otherwise the stage start instants are compared.
+ * time). A uuid match wins (N3: compared in canonical form, so dashed and bare-hex
+ * spellings of the same id match); otherwise the stage start instants are compared.
  */
 export function matchesChosenStage(chosen: { uuid?: string; start: string | null }, got: MintStageId): boolean | undefined {
-  if (got.uuid !== undefined && chosen.uuid !== undefined) return got.uuid.toLowerCase() === chosen.uuid.toLowerCase();
+  if (got.uuid !== undefined && chosen.uuid !== undefined) return sameStageId(got.uuid, chosen.uuid);
   if (got.startTime !== undefined && chosen.start !== null) {
     const a = Date.parse(got.startTime);
     const b = Date.parse(chosen.start);
+    if (Number.isFinite(a) && Number.isFinite(b)) return a === b;
+  }
+  return undefined;
+}
+
+/**
+ * Did the mint API build for the resolved OpenSea stage `os` (drops API shape)? true =
+ * same stage, false = a different stage, undefined = the 200 names nothing comparable
+ * (no uuid/start on either side). Used by the eligibility checker (F-N8): a 200 for a
+ * stage other than the resolved active stage must not be recorded as "eligible" for it.
+ */
+export function mintStageMatchesOsStage(
+  got: MintStageId | undefined,
+  os: { uuid?: string; start_time?: string | null },
+): boolean | undefined {
+  if (got === undefined) return undefined;
+  if (got.uuid !== undefined && os.uuid !== undefined) return sameStageId(got.uuid, os.uuid);
+  if (got.startTime !== undefined && os.start_time) {
+    const a = Date.parse(got.startTime);
+    const b = Date.parse(os.start_time);
     if (Number.isFinite(a) && Number.isFinite(b)) return a === b;
   }
   return undefined;

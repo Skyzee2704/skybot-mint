@@ -14,6 +14,14 @@ import { cachedBalances } from "../../util/balanceCache.js";
 import { aggregate, nativeBalancesBatch } from "../rpc/multicall.js";
 import { walletMaxQty } from "./qty.js";
 import { MintBuildError, buildMintTx } from "./build.js";
+import {
+  parseOpenSeaActiveStage,
+  sameStageId,
+  sameStageName,
+  stageKey,
+  mintStageMatchesOsStage,
+  type MintStageId,
+} from "./stageVerdict.js";
 import { MintRequest, Strategy } from "./types.js";
 import { cachedJwt, eligibilityWithJwt, jwtFromSignature, validateSiweFields } from "../resolver/openseaAuth.js";
 import type { OsStage } from "../resolver/opensea.js";
@@ -175,13 +183,11 @@ async function saveVerdicts(userId: string, walletId: string, slug: string, stag
 /**
  * OpenSea stage ids come in two spellings: the drops API returns bare hex ("f7768398416f49de…") while the
  * eligibility API returns dashed UUIDs ("f7768398-416f-49de-…"). Compare them in one canonical form.
+ * The canonical form lives in stageVerdict.ts (the one stage-matching module); re-exported here
+ * so existing importers keep working.
  */
-export const stageKey = (uuid: string | null | undefined): string | null =>
-  uuid ? uuid.toLowerCase().replace(/[^0-9a-z]/g, "") || null : null;
-export const sameStage = (a: string | null | undefined, b: string | null | undefined): boolean => {
-  const x = stageKey(a);
-  return x !== null && x === stageKey(b);
-};
+export { stageKey };
+export const sameStage = (a: string | null | undefined, b: string | null | undefined): boolean => sameStageId(a, b);
 
 const stageEndMs = (s: OsStage) => (s.end_time ? Date.parse(s.end_time) : NaN);
 const stageStartMs = (s: OsStage) => (s.start_time ? Date.parse(s.start_time) : NaN);
@@ -378,6 +384,7 @@ export async function checkEligibility(
     if (strategy === "opensea_api") {
       // Active stage: the official mint API answers directly (allowlist is checked before balance).
       if (useOs && activeOs && d.suggestedQty > 0) {
+        let builtStage: MintStageId | undefined;
         try {
           const tx = await buildMintTx(
             t,
@@ -386,14 +393,27 @@ export async function checkEligibility(
             qty,
             os,
             userId,
+            { onMintStage: (s) => (builtStage = s) },
           );
-          access = {
-            status: activeIsPublic ? "public" : "yes",
-            source: "OpenSea mint API",
-            detail: activeIsPublic ? "public stage" : `allowed in "${activeOs?.label ?? "active stage"}"`,
-          };
-          legacy = "eligible";
-          simulation = await simulateIgnoringBalance(pool, { from: w.address, to: tx.to, data: tx.data, value: tx.value });
+          // F-N8: the mint API builds for the stage whose window contains now, which at a
+          // stage boundary (or with stale drop data) may not be the resolved active stage.
+          // A 200 for another stage proves nothing about the active stage — do not record
+          // it (and never save it, see the reconcile below) as "eligible" for the active one.
+          if (mintStageMatchesOsStage(builtStage, activeOs) === false) {
+            access = {
+              status: "unknown",
+              source: "OpenSea mint API",
+              detail: `mint API built for a different stage than the resolved active stage '${activeOs?.label ?? "active stage"}' — no verdict for this stage yet`,
+            };
+          } else {
+            access = {
+              status: activeIsPublic ? "public" : "yes",
+              source: "OpenSea mint API",
+              detail: activeIsPublic ? "public stage" : `allowed in "${activeOs?.label ?? "active stage"}"`,
+            };
+            legacy = "eligible";
+            simulation = await simulateIgnoringBalance(pool, { from: w.address, to: tx.to, data: tx.data, value: tx.value });
+          }
         } catch (e: any) {
           if (e instanceof MintBuildError && e.code === "INSUFFICIENT_FUNDS") {
             // Verified: OpenSea checks the stage allowlist BEFORE balance — non-listed wallets get "not on allowlist".
@@ -406,8 +426,21 @@ export async function checkEligibility(
                 };
             legacy = activeIsPublic ? "unknown" : "eligible";
           } else if (e instanceof MintBuildError && e.code === "NOT_ELIGIBLE") {
-            access = { status: "no", source: "OpenSea mint API", detail: e.message.replace(/^OpenSea: /, "") };
-            legacy = "not_eligible";
+            // F-N8: the 422 is about the stage OpenSea names, which at a boundary may not
+            // be the resolved active stage. A "no" for the wrong stage must not be recorded
+            // — or saved — as a verdict for the active one.
+            const named = parseOpenSeaActiveStage(e.message);
+            const activeName = activeOs?.label ?? activeOs?.stage_type ?? null;
+            if (named !== undefined && activeName !== null && !sameStageName(named, activeName)) {
+              access = {
+                status: "unknown",
+                source: "OpenSea mint API",
+                detail: `OpenSea answered for '${named}', not the resolved active stage '${activeName}' — no verdict for this stage yet`,
+              };
+            } else {
+              access = { status: "no", source: "OpenSea mint API", detail: e.message.replace(/^OpenSea: /, "") };
+              legacy = "not_eligible";
+            }
           } else if (e instanceof MintBuildError && e.code === "NOT_ACTIVE") {
             access = { status: "unknown", source: "OpenSea mint API", detail: "stage not active (409)" };
             legacy = "not_active";

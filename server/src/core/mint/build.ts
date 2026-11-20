@@ -14,7 +14,7 @@ import { readableAllowListTx } from "./access.js";
 import { isDangerousFunctionName, assertSafeMintTx } from "../safety/safety.js";
 import { osStage } from "./stage.js";
 import { stageEndedAt } from "./stageEligibility.js";
-import { matchesChosenStage, mintStageOf, sameStageName } from "./stageVerdict.js";
+import { matchesChosenStage, mintStageOf, sameStageName, type MintStageId } from "./stageVerdict.js";
 import { BuiltTx, MintRequest } from "./types.js";
 
 /** Map official mint-API errors. 422 is also returned for an unfunded minter, which says nothing about allowlist status. */
@@ -23,6 +23,16 @@ export function osErrorCode(status: number, message = ""): string {
   if (status === 429) return "RATE_LIMIT";
   if (status === 422) return /insufficient (balance|funds)/i.test(message) ? "INSUFFICIENT_FUNDS" : "NOT_ELIGIBLE";
   return `HTTP_${status}`;
+}
+
+/**
+ * F-N7: transport-level failures from fetch (undici): socket reset, DNS failure,
+ * connection refused/reset, TLS failure. Deliberately narrow — a SafetyError, a
+ * malformed response or a bad address must NOT match, so those still fail fast.
+ */
+export function isTransientTransportError(e: unknown): boolean {
+  const m = `${(e as any)?.name ?? ""} ${(e as any)?.code ?? ""} ${(e as any)?.message ?? e}`;
+  return /fetch failed|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|EPIPE|socket hang up|network (error|request failed)/i.test(m);
 }
 export class MintBuildError extends Error {
   statusCode = 422;
@@ -83,10 +93,21 @@ export async function buildMintTx(
     /** T0 for the chosen stage; lets the mint-API stage check judge an unverifiable 200. */
     fireAt?: number;
     onMintSample?: (sample: OpenSeaMintSample) => void;
+    /**
+     * F-N8: the stage the mint API says the 200 was built for (undefined when the
+     * response names no stage). Lets the eligibility checker verify the 200 really
+     * belongs to the resolved active stage instead of assuming it.
+     */
+    onMintStage?: (stage: MintStageId | undefined) => void;
   } = {},
 ): Promise<BuiltTx> {
   const chain = requireChain(t.chain.key);
   const chosen = req.stage ? (t.stages.find((s) => sameStageName(s.name, req.stage)) ?? null) : null;
+  // N4: a chosen stage the fresh resolve does not know is not "no stage to check" — it
+  // means the plan is stale (renamed stage, re-resolved drop). Fail fast instead of
+  // silently skipping the F1b guard AND falling back to the active stage's price.
+  if (req.stage && !chosen && req.strategy === "opensea_api")
+    throw new MintBuildError(`Chosen stage '${req.stage}' is not part of this drop anymore — resolve the collection again`, "STAGE");
   if (chosen && stageEndedAt(chosen, Date.now())) throw new MintBuildError(`The ${chosen.name} stage has ended`, "STAGE_ENDED");
   let tx: BuiltTx;
   let builtLocal = false;
@@ -126,6 +147,7 @@ export async function buildMintTx(
           onSample: call.onMintSample,
         });
         const value = BigInt(r.value || "0x0");
+        call.onMintStage?.(mintStageOf(r));
         verifyMintStage(r, chosen, req, call.fireAt);
         tx = { to: getAddress(r.to), data: r.data, value };
         if (r.chain && r.chain !== chain.openseaChain && r.chain !== chain.key && chain.openseaChain)
@@ -140,6 +162,12 @@ export async function buildMintTx(
         }
         if (call.mintTimeoutMs && /abort|timeout/i.test(`${e?.name ?? ""} ${e?.message ?? e}`))
           throw new MintBuildError("OpenSea mint timed out", "RETRY");
+        // F-N7: a transport failure (socket reset, DNS, connection refused) is transient,
+        // not a verdict — the executor retries it ("promote") instead of failing the
+        // wallet at once. Anything else (safety blocks, malformed responses) keeps
+        // failing fast with its reason: a safety refusal must never be retried blind.
+        if (isTransientTransportError(e))
+          throw new MintBuildError(`OpenSea request failed: ${String(e?.message ?? e).slice(0, 160)}`, "RETRY");
         throw e;
       }
       break;

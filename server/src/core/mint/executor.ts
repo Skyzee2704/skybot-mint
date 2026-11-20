@@ -219,14 +219,15 @@ export async function prepareAll(
     firstAttemptAt: -1,
     path: "post" as "post" | "presigned" | "resigned",
   }));
-  const sameTx = (a: BuiltTx, b: BuiltTx) =>
-    a.to.toLowerCase() === b.to.toLowerCase() && a.data.toLowerCase() === b.data.toLowerCase() && a.value === b.value;
 
   const buildOnce = async (i: number): Promise<BuiltTx> => {
     timing[i].attempts++;
     if (timing[i].firstAttemptAt < 0) timing[i].firstAttemptAt = Date.now();
+    // N2: forward fireAt — any stage check buildMintTx gains for local builds must
+    // judge against T0, not against "no fire time" (which trusts unverifiable builds).
     return buildMintTx(t, req, results[i].address, req.wallets[i].quantity, undefined, job.userId, {
       mintTimeoutMs: MINT_API_TIMEOUT_MS,
+      fireAt,
     });
   };
 
@@ -283,7 +284,6 @@ export async function prepareAll(
   };
 
   // OpenSea is not fanned out before the stage opens. One probe polls; the rest wait for it.
-  const pre: ({ tx: BuiltTx; gas: bigint; nonce: number; raw: string } | null)[] = req.wallets.map(() => null);
 
   // Worst-case budget up front when the price is known, so wallets can be signed and sent one by one (no barrier).
   const priceWei = stagePriceWei(t, req.strategy);
@@ -386,13 +386,7 @@ export async function prepareAll(
       if (await cancelled()) throw new JobCancelledError();
       const nonce = await freshNonces[i];
       let usedNonce = nonce;
-      const pr = pre[i];
-      if (pr && sameTx(pr.tx, tx) && pr.nonce === nonce) {
-        gasLimits[i] = pr.gas;
-        raws[i] = pr.raw;
-        timing[i].path = "presigned";
-      } else {
-        if (pr) timing[i].path = "resigned";
+      {
         let s = Date.now();
         gasLimits[i] = await gasFor(tx, i);
         timing[i].gas = Date.now() - s;

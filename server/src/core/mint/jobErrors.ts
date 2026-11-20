@@ -27,6 +27,11 @@ export function withChosenStageContext(message: string, chosenStage?: string | n
 /** Couldn't build the mint call (stage closed, not eligible, contract rejected the read, …). */
 export async function buildFailureMessage(e: any, c: Ctx, opts?: { chosenStage?: string | null }): Promise<string> {
   if (e instanceof MintBuildError) return withChosenStageContext(redactString(String(e.message)).slice(0, 300), opts?.chosenStage);
+  // F-N5: a "build deadline" failure already carries the last OpenSea answer
+  // ("build deadline reached — last OpenSea answer: ..."). describeTxError would cut
+  // it to 160 chars and hide the 422 again, so keep the full text (300 cap).
+  if (/^build deadline/i.test(String(e?.message ?? "")))
+    return withChosenStageContext(redactString(String(e.message)).slice(0, 300), opts?.chosenStage);
   return `Couldn't prepare the mint: ${(await describeTxError(e, rc(c))).message}`;
 }
 

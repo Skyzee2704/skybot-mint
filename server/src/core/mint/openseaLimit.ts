@@ -282,17 +282,29 @@ export async function probeAndRelease<T>(opts: {
   let strikes = 0;
   let postWindow = 0;
 
+  // F-N5: the last answer each wallet got, so a terminal "build deadline" failure can
+  // still say WHAT OpenSea answered (e.g. the 422 naming the team stage) instead of
+  // failing the wallet with a bare "build deadline" and no reason.
+  const lastError: unknown[] = Array.from({ length: opts.count }, () => undefined);
+  const deadlineError = (i: number) => {
+    const last = lastError[i];
+    const detail = last ? String((last as any)?.message ?? last).slice(0, 200) : "";
+    return new Error(detail ? `build deadline reached — last OpenSea answer: ${detail}` : "build deadline");
+  };
+
   const waveAt = opts.fireAt === undefined ? now() : opts.fireAt + (opts.waveOffsetMs ?? FIRST_WAVE_OFFSET_MS);
 
   async function issue(i: number): Promise<ProbeCall<T>> {
     await waitPause();
-    if (now() >= opts.deadline) return { kind: "fail", error: new Error("build deadline") };
+    if (now() >= opts.deadline) return { kind: "fail", error: deadlineError(i) };
     inFlight++;
     maxInFlight = Math.max(maxInFlight, inFlight);
     httpCalls++;
     if (i === probe) probeAttempts++;
     try {
-      return await opts.call(i);
+      const res = await opts.call(i);
+      if (res.error !== undefined) lastError[i] = res.error;
+      return res;
     } finally {
       inFlight--;
     }
@@ -307,8 +319,14 @@ export async function probeAndRelease<T>(opts: {
     } else if (res.kind === "live" || res.kind === "fail" || res.kind === "promote") {
       results[i] = { state: "error", error: res.error ?? new Error(res.kind) };
       if (res.kind === "live") {
-        opened = true;
-        releaseAt ??= now();
+        // F-N6: a "live" verdict only opens the gate at/after the wave. Before T0 it
+        // proves nothing about the chosen stage — e.g. INSUFFICIENT_FUNDS for a probe
+        // wallet that IS on the previous (team) stage's list, but unfunded. Letting
+        // that release the wave early fired every wallet into the previous stage.
+        if (now() >= waveAt) {
+          opened = true;
+          releaseAt ??= now();
+        }
       }
     }
     conc.capToRemaining(res.remaining, parked.size + results.filter((r) => r.state === "pending").length);
@@ -395,9 +413,9 @@ export async function probeAndRelease<T>(opts: {
             void (async () => {
               try {
                 await waitPause();
-                const res: ProbeCall<T> =
-                  now() >= opts.deadline ? { kind: "fail", error: new Error("build deadline") } : await opts.call(i);
+                const res: ProbeCall<T> = now() >= opts.deadline ? { kind: "fail", error: deadlineError(i) } : await opts.call(i);
                 noteSample(res);
+                if (res.error !== undefined) lastError[i] = res.error;
                 if (res.kind === "rate") {
                   if (!opts.isolateRateLimits) applyRate(res);
                   queue.push(i);
@@ -420,12 +438,18 @@ export async function probeAndRelease<T>(opts: {
                     parked.add(i);
                     return;
                   }
-                  // F1a: follow-mode "closed" is terminal — this wallet will not be retried — so
-                  // onFail MUST run here. settle() deliberately skips onFail for "closed" (a
-                  // first-mode wallet is parked, not failed), so call it directly: otherwise the
-                  // executor's WalletResult stays "pending" forever with no error while the job
-                  // is marked "done".
-                  const closedErr = res.error ?? new Error("not active");
+                  // F-N2 (round 3, supersedes the round-2 F1a immediate fail): a
+                  // follow-mode "closed" is NOT terminal while the build budget is open —
+                  // the chosen stage may still be propagating to OpenSea after the probe
+                  // opened the gate. Retry with a shared pause until the deadline; only
+                  // then fail, with the last OpenSea answer preserved (F-N5), so the
+                  // wallet still ends failed WITH a reason instead of stuck "pending".
+                  if (now() < opts.deadline) {
+                    pauseUntil = Math.max(pauseUntil, now() + probeRetryDelay(now(), opts.fireAt, PROBE_BACKOFF_MS.length));
+                    queue.push(i);
+                    return;
+                  }
+                  const closedErr = deadlineError(i);
                   results[i] = { state: "error", error: closedErr };
                   if (opts.onFail) await opts.onFail(i, closedErr);
                   return;
@@ -446,11 +470,12 @@ export async function probeAndRelease<T>(opts: {
         }
         if (queue.length && inFlight === 0 && now() >= opts.deadline) {
           // Build deadline hit with wallets still queued (repeated transient timeouts):
-          // fail them so the pool terminates instead of hanging the job.
+          // fail them so the pool terminates instead of hanging the job. F-N5: keep
+          // each wallet's last OpenSea answer in the error, not a bare "build deadline".
           const rest = queue.splice(0);
           void (async () => {
             for (const i of rest) {
-              const err = new Error("build deadline");
+              const err = deadlineError(i);
               results[i] = { state: "error", error: err };
               await settle(i, { kind: "fail", error: err }, true);
             }
@@ -488,6 +513,15 @@ export async function probeAndRelease<T>(opts: {
         if (step === "stop" || step === "open") break;
         if (step === "closed") await sleepProbe();
       }
+    }
+    // F-N5b: the probe only ever saw "closed" and the budget ran out. It is not parked,
+    // so nothing else fails it — do it here, with its last answer, or the wallet stays
+    // "pending" with no error while the job is marked failed (the F1a symptom, for the
+    // probe wallet, when the stage never opens inside the budget).
+    if (!opened && results[probe]?.state === "pending" && now() >= opts.deadline) {
+      const err = deadlineError(probe);
+      results[probe] = { state: "error", error: err };
+      await settle(probe, { kind: "fail", error: err }, true);
     }
     if (parked.size) {
       const again = [...parked];

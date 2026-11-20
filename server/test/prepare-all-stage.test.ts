@@ -171,7 +171,16 @@ const err422 = (stageName: string) => ({
   outcome: "422-" + stageName,
 });
 
-async function runPrepare(opts: { wallets?: number; stage: string; fireAt: number; buildNotBefore?: number }) {
+async function runPrepare(opts: {
+  wallets?: number;
+  stage: string;
+  fireAt?: number;
+  buildNotBefore?: number;
+  /** Build budget override (default fireAt + 30 s). Short deadlines keep retry-until-deadline tests fast. */
+  buildDeadlineMs?: number;
+  /** Pass no fireAt at all: the fireAt=undefined path (immediate-final 422). */
+  noFireAt?: boolean;
+}) {
   const { prepareAll } = await import("../src/core/mint/executor.js");
   const req: any = {
     chain: "sim",
@@ -181,8 +190,9 @@ async function runPrepare(opts: { wallets?: number; stage: string; fireAt: numbe
     wallets: Array.from({ length: opts.wallets ?? 3 }, (_, i) => ({ walletId: `w${i}`, quantity: 1 })),
   };
   const startedAt = Date.now();
-  const out = await prepareAll({ id: "job-sim", userId: "u" } as any, req, {}, opts.fireAt + 30_000, {
-    fireAt: opts.fireAt,
+  const fireAt = opts.fireAt ?? startedAt;
+  const out = await prepareAll({ id: "job-sim", userId: "u" } as any, req, {}, opts.buildDeadlineMs ?? fireAt + 30_000, {
+    ...(opts.noFireAt ? {} : { fireAt }),
     ...(opts.buildNotBefore !== undefined ? { buildNotBefore: opts.buildNotBefore } : {}),
     onSigned: async () => {},
   });
@@ -253,7 +263,9 @@ describe("prepareAll stage wiring (mocked OpenSea, real build + classify)", () =
   });
 
   it("F1: probe wallet on the team list gets a pre-T0 200 for the TEAM stage — the wave must NOT mint into it", async () => {
-    const fireAt = Date.now() + 1500;
+    // 3000ms lead (not 1500): under parallel load the first probe call can otherwise
+    // land after T0 and the pre-T0 200 never happens — a test-timing flake, not a code bug.
+    const fireAt = Date.now() + 3000;
     const chosenStart = new Date(fireAt).toISOString();
     const prevStart = new Date(fireAt - 3600_000).toISOString();
     sim.fireAt = fireAt;
@@ -283,7 +295,7 @@ describe("prepareAll stage wiring (mocked OpenSea, real build + classify)", () =
     expect(out.prepared.some((p) => p.raw.includes(TEAM_DATA))).toBe(false);
   });
 
-  it("F1a + Opsi 3: a follow-mode 'closed' is failed (not pending) and names both stages", async () => {
+  it("F1a + Opsi 3 (round 3: F-N2 + F-N5): a follow-mode 'closed' RETRIES until the deadline, then fails naming both stages", async () => {
     const fireAt = Date.now() + 1500;
     const chosenStart = new Date(fireAt).toISOString();
     const prevStart = new Date(fireAt - 3600_000).toISOString();
@@ -302,14 +314,20 @@ describe("prepareAll stage wiring (mocked OpenSea, real build + classify)", () =
       if (minter === addr(0)) return { outcome: "200-gtd", data: CHOSEN_DATA, stageUuid: "uuid-gtd", stageStart: chosenStart };
       return err422("Team Round");
     };
-    const { out } = await runPrepare({ stage: "GTD Round", fireAt, buildNotBefore: fireAt - 150 });
+    // Short budget: the retry-until-deadline behavior is proven without waiting 30 s.
+    const { out } = await runPrepare({ stage: "GTD Round", fireAt, buildNotBefore: fireAt - 150, buildDeadlineMs: fireAt + 2500 });
     expect(out.results[0]?.status).toBe("signed");
     for (const r of out.results.slice(1)) {
       expect(r.status).toBe("failed");
+      // F-N5: the terminal error keeps the last 422 (both stages named, Opsi 3).
       expect(r.error).toContain("Team Round");
       expect(r.error).toContain("GTD Round");
+      expect(r.error).toContain("build deadline");
     }
     expect(out.results.some((r) => r.status === "pending")).toBe(false);
+    // F-N2: the follow wallets retried instead of failing at once — several 422s each.
+    const followCalls = sim.calls.filter((c) => c.outcome === "422-Team Round");
+    expect(followCalls.length).toBeGreaterThan(3);
   });
 
   it("A1 (wiring): a pre-T0 422 naming an apostrophe stage retries past T0 and mints", async () => {
@@ -374,6 +392,150 @@ describe("prepareAll stage wiring (mocked OpenSea, real build + classify)", () =
     expect(out.prepared).toHaveLength(0);
     expect(out.results[0]?.status).toBe("failed");
     expect(out.results[0]?.error).toContain("Allowlist Round");
+    expect(sim.calls).toHaveLength(1);
+    expect(elapsedMs).toBeLessThan(2000);
+  });
+
+  it("F-N6 (wiring): a pre-T0 'live' verdict (unfunded probe wallet on the team list) must NOT release the wave early", async () => {
+    const fireAt = Date.now() + 1500;
+    const chosenStart = new Date(fireAt).toISOString();
+    const prevStart = new Date(fireAt - 3600_000).toISOString();
+    sim.fireAt = fireAt;
+    sim.target = makeTarget({
+      chosenName: "GTD Round",
+      chosenUuid: "uuid-gtd",
+      chosenStart,
+      prevName: "Team Round",
+      prevUuid: "uuid-team",
+      prevStart,
+    });
+    sim.handler = (minter: string) => {
+      if (Date.now() < fireAt) {
+        // Wallet 0 IS on the team list but unfunded: 422 insufficient funds is "live"
+        // yet proves nothing about the GTD stage.
+        if (minter === addr(0))
+          return {
+            error: { status: 422, message: "Wallet has insufficient funds for this mint" },
+            outcome: "422-insufficient",
+          };
+        return err422("Team Round");
+      }
+      if (minter === addr(0))
+        return {
+          error: { status: 422, message: "Wallet has insufficient funds for this mint" },
+          outcome: "422-insufficient",
+        };
+      return { outcome: "200-gtd", data: CHOSEN_DATA, stageUuid: "uuid-gtd", stageStart: chosenStart };
+    };
+    const { out } = await runPrepare({ stage: "GTD Round", fireAt, buildNotBefore: fireAt - 150 });
+    // No wallet other than the probe ever called before T0: the wave was not released early.
+    expect(sim.calls.filter((c) => c.at < fireAt).every((c) => c.minter === addr(0))).toBe(true);
+    expect(out.results[0]?.status).toBe("failed");
+    expect(out.results.slice(1).every((r) => r.status === "signed")).toBe(true);
+    expect(out.prepared).toHaveLength(2);
+    expect(out.prepared.every((p) => p.raw.includes(CHOSEN_DATA))).toBe(true);
+  });
+
+  it("N5 (A6): prepareAll fails fast when buildNotBefore is passed without fireAt", async () => {
+    const { prepareAll } = await import("../src/core/mint/executor.js");
+    const fireAt = Date.now() + 60_000;
+    sim.target = makeTarget({
+      chosenName: "GTD Round",
+      chosenUuid: "uuid-gtd",
+      chosenStart: new Date(fireAt).toISOString(),
+      prevName: "Team Round",
+      prevUuid: "uuid-team",
+      prevStart: new Date(fireAt - 3600_000).toISOString(),
+    });
+    const req: any = {
+      chain: "sim",
+      contract: "0x" + "c".repeat(40),
+      strategy: "opensea_api",
+      stage: "GTD Round",
+      wallets: [{ walletId: "w0", quantity: 1 }],
+    };
+    await expect(
+      prepareAll({ id: "job-sim", userId: "u" } as any, req, {}, fireAt + 30_000, { buildNotBefore: fireAt - 150 }),
+    ).rejects.toThrow("buildNotBefore without fireAt");
+    expect(sim.calls).toHaveLength(0);
+  });
+
+  it("Mint Now decision (a) RETRY, current behavior: 422 naming another stage retries, stage flips at +2s, mints", async () => {
+    const fireAt = Date.now() - 1000; // Mint Now: runJob passes startedAt
+    const flipAt = Date.now() + 2000;
+    const chosenStart = new Date(fireAt).toISOString();
+    const prevStart = new Date(fireAt - 3600_000).toISOString();
+    sim.fireAt = fireAt;
+    sim.target = makeTarget({
+      chosenName: "GTD Round",
+      chosenUuid: "uuid-gtd",
+      chosenStart,
+      prevName: "Team Round",
+      prevUuid: "uuid-team",
+      prevStart,
+    });
+    sim.handler = () =>
+      Date.now() < flipAt
+        ? err422("Team Round")
+        : { outcome: "200-gtd", data: CHOSEN_DATA, stageUuid: "uuid-gtd", stageStart: chosenStart };
+    const { out, elapsedMs } = await runPrepare({ wallets: 1, stage: "GTD Round", fireAt, buildNotBefore: fireAt - 150 });
+    expect(out.prepared).toHaveLength(1);
+    expect(out.results[0]?.status).toBe("signed");
+    // Data for the coordinator's decision: ~2 s to success, a handful of calls.
+    expect(elapsedMs).toBeGreaterThanOrEqual(1500);
+    expect(elapsedMs).toBeLessThan(8000);
+    expect(sim.calls.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("Mint Now decision (b) RETRY, stage never flips: fails at the deadline WITH the 422 text (call-rate sample)", async () => {
+    const fireAt = Date.now() - 1000;
+    const chosenStart = new Date(fireAt).toISOString();
+    const prevStart = new Date(fireAt - 3600_000).toISOString();
+    sim.fireAt = fireAt;
+    sim.target = makeTarget({
+      chosenName: "GTD Round",
+      chosenUuid: "uuid-gtd",
+      chosenStart,
+      prevName: "Team Round",
+      prevUuid: "uuid-team",
+      prevStart,
+    });
+    sim.handler = () => err422("Team Round");
+    const { out, elapsedMs } = await runPrepare({
+      wallets: 1,
+      stage: "GTD Round",
+      fireAt,
+      buildNotBefore: fireAt - 150,
+      buildDeadlineMs: fireAt + 6000,
+    });
+    expect(out.prepared).toHaveLength(0);
+    expect(out.results[0]?.status).toBe("failed");
+    expect(out.results[0]?.error).toContain("Team Round");
+    expect(out.results[0]?.error).toContain("build deadline");
+    // ~5 s of budget spent, calls counted here for the 30 s extrapolation in the report.
+    expect(elapsedMs).toBeGreaterThanOrEqual(4000);
+    expect(elapsedMs).toBeLessThan(9000);
+    expect(sim.calls.length).toBeGreaterThan(2);
+  });
+
+  it("Mint Now decision (c) IMMEDIATE-FINAL, the alternative: no fireAt means one call, instant fail", async () => {
+    const fireAt = Date.now() - 1000;
+    const chosenStart = new Date(fireAt).toISOString();
+    const prevStart = new Date(fireAt - 3600_000).toISOString();
+    sim.fireAt = fireAt;
+    sim.target = makeTarget({
+      chosenName: "GTD Round",
+      chosenUuid: "uuid-gtd",
+      chosenStart,
+      prevName: "Team Round",
+      prevUuid: "uuid-team",
+      prevStart,
+    });
+    sim.handler = () => err422("Team Round");
+    const { out, elapsedMs } = await runPrepare({ wallets: 1, stage: "GTD Round", noFireAt: true });
+    expect(out.prepared).toHaveLength(0);
+    expect(out.results[0]?.status).toBe("failed");
+    expect(out.results[0]?.error).toContain("Team Round");
     expect(sim.calls).toHaveLength(1);
     expect(elapsedMs).toBeLessThan(2000);
   });
@@ -458,6 +620,63 @@ describe("buildMintTx stage verification (F1b, real build, fake OpenSea client)"
       }),
     };
     const tx2 = await buildMintTx(noUuidTarget as any, req, addr(1), 1, startOs, "u", { fireAt });
+    expect(tx2.data).toBe(CHOSEN_DATA);
+  });
+
+  it("N3 (wiring): a 200 whose stage_uuid is the dashed spelling of the resolved bare-hex uuid is accepted", async () => {
+    const { buildMintTx } = await import("../src/core/mint/build.js");
+    const fireAt = Date.now() - 1000;
+    const chosenStart = new Date(fireAt).toISOString();
+    const prevStart = new Date(fireAt - 3600_000).toISOString();
+    const bare = "f7768398416f49dead4798ad09c31bc9";
+    const dashed = "f7768398-416f-49de-ad47-98ad09c31bc9";
+    const t = makeTarget({
+      chosenName: "GTD Round",
+      chosenUuid: bare,
+      chosenStart,
+      prevName: "Team Round",
+      prevUuid: "uuid-team",
+      prevStart,
+    });
+    const req: any = { chain: "sim", contract: t.contract, strategy: "opensea_api", stage: "GTD Round", wallets: [] };
+    const dashedOs: any = {
+      available: true,
+      buildMint: async () => ({
+        to: "0x" + "a".repeat(40),
+        data: CHOSEN_DATA,
+        value: "0x0",
+        chain: "sim",
+        stage_uuid: dashed,
+        stage_type: "signed_presale",
+        stage_start_time: chosenStart,
+        stage_end_time: null,
+      }),
+    };
+    const tx = await buildMintTx(t as any, req, addr(1), 1, dashedOs, "u", { fireAt });
+    expect(tx.data).toBe(CHOSEN_DATA);
+    // Reverse spelling: resolved dashed, 200 bare hex.
+    const t2 = makeTarget({
+      chosenName: "GTD Round",
+      chosenUuid: dashed,
+      chosenStart,
+      prevName: "Team Round",
+      prevUuid: "uuid-team",
+      prevStart,
+    });
+    const bareOs: any = {
+      available: true,
+      buildMint: async () => ({
+        to: "0x" + "a".repeat(40),
+        data: CHOSEN_DATA,
+        value: "0x0",
+        chain: "sim",
+        stage_uuid: bare,
+        stage_type: "signed_presale",
+        stage_start_time: chosenStart,
+        stage_end_time: null,
+      }),
+    };
+    const tx2 = await buildMintTx(t2 as any, req, addr(1), 1, bareOs, "u", { fireAt });
     expect(tx2.data).toBe(CHOSEN_DATA);
   });
 

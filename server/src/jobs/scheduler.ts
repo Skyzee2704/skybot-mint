@@ -94,6 +94,9 @@ export async function ensureHousekeepingSchedule() {
 }
 
 export async function enqueueMint(userId: string, req: MintRequest, gasHints: Record<string, string>): Promise<JobRecord> {
+  // F-N4: a job with no wallets can never mint — refuse it here instead of letting it
+  // wait until fireAt, claim a broadcast slot, and end "done" for 0 of 0 wallets.
+  if (!req.wallets?.length) throw Object.assign(new Error("Cannot schedule a mint with no wallets"), { statusCode: 400 });
   const job = await insertJob(userId, req, gasHints);
   if (qstashEnabled()) {
     try {
@@ -171,6 +174,23 @@ function noWalletMinted(results: Array<{ status: string }>): boolean {
 }
 
 /**
+ * N6 (round 3): the job-level reason when nothing minted. The mixed case matters most —
+ * some wallets failed, others still "pending" with no verdict at all — which round 2 left
+ * as "failed" with no reason text. Returns null when at least one wallet minted (or is
+ * still in flight; the caller decides that separately).
+ */
+export function noMintReason(results: Array<{ status: string; error?: string }>): string | null {
+  if (!results.length) return "No wallet minted: the job had no wallets";
+  if (results.some((r) => r.status === "confirmed" || r.status === "broadcast")) return null;
+  const failed = results.filter((r) => r.status === "failed" || r.status === "reverted" || r.status === "timeout").length;
+  const pending = results.filter((r) => r.status === "pending" || r.status === "signed").length;
+  const first = results.find((r) => r.error)?.error;
+  const tail = first ? ` — first reason: ${String(first).slice(0, 160)}` : "";
+  if (pending > 0) return `No wallet minted: ${failed} failed, ${pending} never reached a verdict (still pending/signed)${tail}`;
+  return `No wallet minted: ${failed} failed${tail}`;
+}
+
+/**
  * Execute a job. `budgetMs` = time left in this invocation (serverless max duration).
  */
 export async function runJob(id: string, budgetMs = env.jobMaxDurationSec * 1000): Promise<RunOutcome> {
@@ -189,6 +209,13 @@ export async function runJob(id: string, budgetMs = env.jobMaxDurationSec * 1000
 
   const job = await claimJob(id);
   if (!job) return { status: "skipped", reason: "already claimed" };
+  // F-N4 (defense in depth for jobs created before the enqueue guard): fail fast with a
+  // reason instead of waiting for fireAt and reporting "done" for nothing.
+  if (!(job.request as MintRequest)?.wallets?.length) {
+    await patchRunningJob(id, { status: "failed", error: "No wallet minted: the job had no wallets" });
+    await notifyJobDone(id);
+    return { status: "failed", reason: "no wallets" };
+  }
   installKeepAlive();
   const req = job.request as MintRequest & { gasHints: Record<string, string> };
   const chainForRank = getChain(req.chain);
@@ -217,6 +244,14 @@ export async function runJob(id: string, budgetMs = env.jobMaxDurationSec * 1000
       }
     }
     const buildDeadline = Math.min(Math.max(fireAt + 30_000, Date.now() + 30_000), deadline - 5_000);
+    // The build budget must reach past the start: with an invocation budget too short to
+    // cover it, every wallet would fail at once with a bare "build deadline" and no cause.
+    if (buildDeadline <= fireAt) {
+      const error = `Invocation budget too short: the build deadline (${new Date(buildDeadline).toISOString()}) is at or before the stage start (${new Date(fireAt).toISOString()})`;
+      await patchRunningJob(id, { status: "failed", error });
+      await notifyJobDone(id);
+      return { status: "failed", reason: "budget too short" };
+    }
     // Resolve the drop and fees as soon as this function is awake (~T−60s). Nonces, signing, and the OpenSea
     // build stay in the last few seconds: a signed stage cannot be built until it opens, and a nonce read too
     // early goes stale. The OpenSea mint API is held until fireAt (see prepareAll).
@@ -310,14 +345,12 @@ export async function runJob(id: string, budgetMs = env.jobMaxDurationSec * 1000
     await tracked;
     const pending = results.some((r) => r.status === "broadcast");
     const failed = !pending && noWalletMinted(results);
-    const allPending = results.length > 0 && results.every((r) => r.status === "pending");
     await patchJob(id, {
       status: pending ? "running" : failed ? "failed" : "done",
       results,
-      // F1c: every wallet still "pending" is not a success — say so, with a reason, instead of "done".
-      ...(failed && allPending
-        ? { error: "No wallet minted: every wallet is still pending after prepare (no wallet was signed or failed with a reason)" }
-        : {}),
+      // F1c + N6: nothing minted is a failure WITH a reason — including the mixed case
+      // (some failed, some still pending with no verdict).
+      ...(failed ? { error: noMintReason(results) ?? "No wallet minted" } : {}),
     });
     if (!pending) await notifyJobDone(id);
     return { status: failed ? "failed" : "done" };
@@ -360,13 +393,11 @@ export async function housekeeping() {
       const still = j.results.some((r: any) => r.status === "broadcast");
       if (!still) {
         const failed = noWalletMinted(j.results);
-        const allPending = j.results.length > 0 && j.results.every((r: any) => r.status === "pending");
         await patchJob(j.id, {
           status: failed ? "failed" : "done",
           results: j.results,
-          ...(failed && allPending
-            ? { error: "No wallet minted: every wallet is still pending after prepare (no wallet was signed or failed with a reason)" }
-            : {}),
+          // F1c + N6: same reason as runJob — nothing minted fails WITH a reason.
+          ...(failed ? { error: noMintReason(j.results) ?? "No wallet minted" } : {}),
         });
         await notifyJobDone(j.id);
         out.finished++;
