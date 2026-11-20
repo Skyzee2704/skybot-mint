@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
 import { OpenSeaClient } from "../src/core/resolver/opensea.js";
+import { classifyNotEligible } from "../src/core/mint/executor.js";
 import {
   BUILD_CONCURRENCY,
   FIRST_WAVE_OFFSET_MS,
@@ -58,6 +59,62 @@ describe("OpenSea probe and release", () => {
     expect(calls[0]).toEqual([fireAt - 150, fireAt - 75, fireAt]);
     for (let i = 1; i < 100; i++) expect(calls[i]).toEqual([fireAt]);
     expect(report.maxInFlight).toBe(100);
+  });
+
+  it("a pre-T0 422 naming the previous stage retries across T0 and mints (regression: stage bug 2026-11-21)", async () => {
+    // The scheduled job's first probe fires at T0−150ms, while OpenSea still has the
+    // previous (team) stage active. The 422 it answers must be retried like a 409 —
+    // the old classify() treated it as final ("live") and killed the whole job
+    // before the chosen stage opened.
+    const fireAt = 10_000;
+    const chosen = "Allowlist Round";
+    const c = clock(fireAt - OPENSEA_LEAD_MS);
+    const calls: number[] = [];
+    const report = await probeAndRelease<number>({
+      count: 1,
+      fireAt,
+      deadline: fireAt + 30_000,
+      now: c.now,
+      sleep: c.sleep,
+      call: async (i) => {
+        calls.push(c.now());
+        if (c.now() < fireAt) {
+          const msg = "OpenSea: Wallet is not eligible for the active drop stage, 'Team Round' (signed_presale)";
+          const kind = classifyNotEligible({ message: msg, fireAt, chosenStage: chosen, now: c.now() });
+          return { kind, error: new Error(msg) };
+        }
+        return { kind: "ok", value: i };
+      },
+    });
+    expect(report.results[0]?.state).toBe("ok");
+    expect(calls).toEqual([fireAt - 150, fireAt - 75, fireAt]);
+    expect(report.probeAttempts).toBe(3);
+    expect(report.releaseAt).toBeGreaterThanOrEqual(fireAt);
+  });
+
+  it("a post-T0 422 against the chosen stage itself fails the wallet (live)", async () => {
+    const fireAt = 10_000;
+    const chosen = "Allowlist Round";
+    const c = clock(fireAt);
+    const msg = "OpenSea: Wallet is not eligible for the active drop stage, 'Allowlist Round' (signed_presale)";
+    let failed: unknown;
+    const report = await probeAndRelease<number>({
+      count: 1,
+      fireAt,
+      deadline: fireAt + 30_000,
+      now: c.now,
+      sleep: c.sleep,
+      call: async () => {
+        const kind = classifyNotEligible({ message: msg, fireAt, chosenStage: chosen, now: c.now() });
+        return { kind, error: new Error(msg) };
+      },
+      onFail: async (_i, error) => {
+        failed = error;
+      },
+    });
+    expect(report.results[0]?.state).toBe("error");
+    expect(report.probeAttempts).toBe(1);
+    expect(failed).toBeInstanceOf(Error);
   });
 
   it("opening at T0+400ms is two wallet passes plus the probe polls, not a 409 storm", async () => {

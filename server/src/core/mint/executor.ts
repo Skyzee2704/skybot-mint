@@ -124,6 +124,42 @@ export async function warmMint(req: MintRequest): Promise<void> {
 }
 
 /**
+ * Stage name OpenSea names in a 422 "not eligible for the active drop stage" message,
+ * e.g. 'Team Round' in "Wallet is not eligible for the active drop stage, 'Team Round'
+ * (signed_presale)". Undefined when the message names no stage.
+ */
+export function parseOpenSeaActiveStage(message: string): string | undefined {
+  const m = /active drop stage,\s*['"]([^'"]+)['"]/i.exec(message);
+  return m?.[1];
+}
+
+/**
+ * Verdict for an OpenSea 422 NOT_ELIGIBLE from the mint API.
+ *
+ * The probe's first call lands at T0−150ms, while the previous stage is still active, so a
+ * 422 there says nothing about the chosen stage: the wallet may be perfectly eligible for
+ * the stage that opens at T0. Such a 422 is "closed" (retried like a 409 past T0) unless it
+ * arrives after the chosen stage's start AND names the chosen stage itself — only then is
+ * it a final "live" verdict. When the message names no stage there is nothing to compare,
+ * so before T0 it is retried and after T0 it is final. Mirrors simulate.ts, which already
+ * treats a pre-start 422 as "not active".
+ */
+export function classifyNotEligible(opts: {
+  message: string;
+  /** Start of the chosen stage (T0). Undefined for a mint-now job: the stage is already live. */
+  fireAt?: number;
+  chosenStage?: string | null;
+  now?: number;
+}): "closed" | "live" {
+  const now = opts.now ?? Date.now();
+  if (opts.fireAt === undefined) return "live";
+  if (now < opts.fireAt) return "closed";
+  const active = parseOpenSeaActiveStage(opts.message);
+  if (active !== undefined && opts.chosenStage != null && active !== opts.chosenStage) return "closed";
+  return "live";
+}
+
+/**
  * Prepare (build + nonce + fees + sign via Privy) all wallet txs.
  * Signing uses Privy's wallet API with the app authorization key — we never hold private keys.
  *
@@ -350,7 +386,12 @@ export async function prepareAll(
       };
       if (e.code === "NOT_ACTIVE") return { kind: "closed", ...base };
       if (e.code === "RATE_LIMIT") return { kind: "rate", ...base };
-      if (e.code === "NOT_ELIGIBLE" || e.code === "INSUFFICIENT_FUNDS") return { kind: "live", ...base };
+      if (e.code === "NOT_ELIGIBLE")
+        return {
+          kind: classifyNotEligible({ message: e.message, fireAt, chosenStage: req.stage }),
+          ...base,
+        };
+      if (e.code === "INSUFFICIENT_FUNDS") return { kind: "live", ...base };
       if (e.code === "RETRY" || e.code === "HTTP_401" || e.code === "HTTP_403" || /^HTTP_5/.test(e.code))
         return { kind: "promote", ...base };
       return { kind: "fail", ...base };
