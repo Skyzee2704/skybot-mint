@@ -186,6 +186,38 @@ describe("OpenSea probe and release", () => {
     expect(err?.retryAfterMs).toBe(12_000);
   });
 
+  it("F1a: a follow-mode 'closed' still calls onFail — the wallet is failed, not left pending", async () => {
+    // Regression: in follow mode a "closed" (422 being retried / 409 after the gate opened) used
+    // to set the probe report to "error" but never called onFail, so the executor's WalletResult
+    // stayed "pending" with no error and the job was marked "done".
+    const fireAt = 10_000;
+    const c = clock(fireAt);
+    const failed: Array<{ i: number; error: unknown }> = [];
+    const report = await probeAndRelease<number>({
+      count: 3,
+      fireAt,
+      deadline: fireAt + 30_000,
+      now: c.now,
+      sleep: c.sleep,
+      call: async (i) => {
+        if (i === 0) return { kind: "ok", value: i };
+        // The gate is open (wallet 0 built fine) but these wallets still see the stage closed.
+        return {
+          kind: "closed",
+          error: new Error("OpenSea: Wallet is not eligible for the active drop stage, 'Team Round' (signed_presale)"),
+        };
+      },
+      onFail: async (i, error) => {
+        failed.push({ i, error });
+      },
+    });
+    expect(report.results[0]?.state).toBe("ok");
+    expect(report.results[1]?.state).toBe("error");
+    expect(report.results[2]?.state).toBe("error");
+    expect(failed.map((f) => f.i).sort()).toEqual([1, 2]);
+    expect(failed.every((f) => f.error instanceof Error)).toBe(true);
+  });
+
   it("a transient timeout on the only wallet retries until it succeeds instead of failing the job", async () => {
     // Regression: a 1-wallet FCFS job used to fail with "OpenSea mint timed out" after two
     // timeouts (~3 s) even though the build budget was still open — the probe gave up and the

@@ -16,6 +16,8 @@ import type { KalosDrop } from "../kalos/types.js";
 export interface Stage {
   name: string;
   type: "public" | "allowlist" | "signed" | "token_gated" | "unknown";
+  /** OpenSea stage uuid when the stage came from the drop API — the key the mint API's 200 names. */
+  uuid?: string;
   priceWei: string | null;
   /** Set when the stage is paid in an ERC-20. Absent means the chain's native coin. */
   paymentSymbol?: string | null;
@@ -288,6 +290,7 @@ export async function resolveTarget(opts: ResolveOptions): Promise<ResolvedTarge
     stages.push({
       name: s.label || s.stage_type || "stage",
       type,
+      uuid: s.uuid ?? undefined,
       priceWei: s.price ?? null,
       paymentSymbol: paymentSymbolOf(s),
       start: iso(toSec(s.start_time)),

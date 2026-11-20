@@ -162,6 +162,15 @@ export async function claimJob(id: string): Promise<JobRecord | null> {
 export type RunOutcome = { status: "skipped" | "requeued" | "done" | "failed"; reason?: string };
 
 /**
+ * F1c: no wallet minted and none still in flight. A job in this state failed — even if some
+ * wallets never got a verdict ("pending"). Marking it "done" hid failed wallets behind a
+ * "Mint finished" Telegram message.
+ */
+function noWalletMinted(results: Array<{ status: string }>): boolean {
+  return results.length > 0 && !results.some((r) => r.status === "confirmed" || r.status === "broadcast");
+}
+
+/**
  * Execute a job. `budgetMs` = time left in this invocation (serverless max duration).
  */
 export async function runJob(id: string, budgetMs = env.jobMaxDurationSec * 1000): Promise<RunOutcome> {
@@ -300,8 +309,16 @@ export async function runJob(id: string, budgetMs = env.jobMaxDurationSec * 1000
     ).catch(() => {});
     await tracked;
     const pending = results.some((r) => r.status === "broadcast");
-    const failed = !pending && results.every((r) => ["failed", "reverted", "timeout"].includes(r.status));
-    await patchJob(id, { status: pending ? "running" : failed ? "failed" : "done", results });
+    const failed = !pending && noWalletMinted(results);
+    const allPending = results.length > 0 && results.every((r) => r.status === "pending");
+    await patchJob(id, {
+      status: pending ? "running" : failed ? "failed" : "done",
+      results,
+      // F1c: every wallet still "pending" is not a success — say so, with a reason, instead of "done".
+      ...(failed && allPending
+        ? { error: "No wallet minted: every wallet is still pending after prepare (no wallet was signed or failed with a reason)" }
+        : {}),
+    });
     if (!pending) await notifyJobDone(id);
     return { status: failed ? "failed" : "done" };
   } catch (e: any) {
@@ -342,8 +359,15 @@ export async function housekeeping() {
       await trackReceipts(j, req, j.results, 3_000, final);
       const still = j.results.some((r: any) => r.status === "broadcast");
       if (!still) {
-        const failed = j.results.every((r: any) => ["failed", "reverted", "timeout"].includes(r.status));
-        await patchJob(j.id, { status: failed ? "failed" : "done", results: j.results });
+        const failed = noWalletMinted(j.results);
+        const allPending = j.results.length > 0 && j.results.every((r: any) => r.status === "pending");
+        await patchJob(j.id, {
+          status: failed ? "failed" : "done",
+          results: j.results,
+          ...(failed && allPending
+            ? { error: "No wallet minted: every wallet is still pending after prepare (no wallet was signed or failed with a reason)" }
+            : {}),
+        });
         await notifyJobDone(j.id);
         out.finished++;
       } else await patchJob(j.id, { results: j.results });

@@ -25,6 +25,22 @@ describe("parseOpenSeaActiveStage", () => {
     expect(parseOpenSeaActiveStage("OpenSea: Wallet is not eligible")).toBeUndefined();
     expect(parseOpenSeaActiveStage("")).toBeUndefined();
   });
+
+  it("A1: a stage name with an apostrophe parses whole, not cut at the apostrophe", () => {
+    expect(
+      parseOpenSeaActiveStage(
+        "OpenSea: Wallet is not eligible for the active drop stage, 'Collector's Round' (signed_presale): the wallet is not on this stage's allowlist",
+      ),
+    ).toBe("Collector's Round");
+    expect(parseOpenSeaActiveStage('Wallet is not eligible for the active drop stage, "Collector\'s Round" (signed_presale)')).toBe(
+      "Collector's Round",
+    );
+  });
+
+  it("A3: the comma after 'stage' is optional", () => {
+    expect(parseOpenSeaActiveStage("Wallet is not eligible for the active drop stage 'Team Round' (signed_presale)")).toBe("Team Round");
+    expect(parseOpenSeaActiveStage("Wallet is not eligible for the active drop stage 'Team Round'")).toBe("Team Round");
+  });
 });
 
 describe("classifyNotEligible", () => {
@@ -56,7 +72,27 @@ describe("classifyNotEligible", () => {
     expect(classifyNotEligible({ message: chosenStageMsg, fireAt, chosenStage: chosen, now: fireAt + 5_000 })).toBe("live");
   });
 
-  it("422 at/after T0 with no stage name is final — the active stage is the chosen one by then", () => {
+  it("A2: the stage-name compare is case-insensitive", () => {
+    expect(classifyNotEligible({ message: chosenStageMsg, fireAt, chosenStage: "allowlist round", now: fireAt })).toBe("live");
+    expect(classifyNotEligible({ message: otherStage, fireAt, chosenStage: "TEAM ROUND", now: fireAt })).toBe("live");
+    expect(classifyNotEligible({ message: otherStage, fireAt, chosenStage: "Allowlist Round", now: fireAt })).toBe("closed");
+  });
+
+  it("A4: 422 at/after T0 with no stage name retries while the build budget is open, then is final", () => {
+    // "Unknown stage": the message proves nothing about the chosen stage, so a delayed
+    // opening must not kill the job — retry until the deadline, then fail final.
+    expect(
+      classifyNotEligible({ message: noNameMsg, fireAt, chosenStage: chosen, now: fireAt + 5_000, buildDeadline: fireAt + 30_000 }),
+    ).toBe("closed");
+    expect(
+      classifyNotEligible({ message: noNameMsg, fireAt, chosenStage: chosen, now: fireAt + 30_000, buildDeadline: fireAt + 30_000 }),
+    ).toBe("live");
+    expect(
+      classifyNotEligible({ message: noNameMsg, fireAt, chosenStage: chosen, now: fireAt + 60_000, buildDeadline: fireAt + 30_000 }),
+    ).toBe("live");
+  });
+
+  it("422 at/after T0 with no stage name and no build deadline keeps the round-1 behavior: final", () => {
     expect(classifyNotEligible({ message: noNameMsg, fireAt, chosenStage: chosen, now: fireAt + 5_000 })).toBe("live");
   });
 

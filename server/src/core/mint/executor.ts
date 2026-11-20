@@ -22,6 +22,10 @@ import { MintRequest } from "./types.js";
 import { signRawTransaction } from "../../auth/privy.js";
 import { log } from "../../util/log.js";
 import { BUILD_CONCURRENCY, MintRateLog, OPENSEA_LEAD_MS, probeAndRelease, type ProbeCall } from "./openseaLimit.js";
+import { classifyNotEligible } from "./stageVerdict.js";
+
+/** Shared stage verdicts (parse + classify + stage match) live in stageVerdict.ts so the live mint and simulate.ts use one decision. */
+export { classifyNotEligible, parseOpenSeaActiveStage, sameStageName } from "./stageVerdict.js";
 
 export { BUILD_CONCURRENCY, NOT_ACTIVE_RETRY_MS, OPENSEA_LEAD_MS, RATE_LIMIT_RETRY_MS, nextRetryDelay } from "./openseaLimit.js";
 
@@ -124,42 +128,6 @@ export async function warmMint(req: MintRequest): Promise<void> {
 }
 
 /**
- * Stage name OpenSea names in a 422 "not eligible for the active drop stage" message,
- * e.g. 'Team Round' in "Wallet is not eligible for the active drop stage, 'Team Round'
- * (signed_presale)". Undefined when the message names no stage.
- */
-export function parseOpenSeaActiveStage(message: string): string | undefined {
-  const m = /active drop stage,\s*['"]([^'"]+)['"]/i.exec(message);
-  return m?.[1];
-}
-
-/**
- * Verdict for an OpenSea 422 NOT_ELIGIBLE from the mint API.
- *
- * The probe's first call lands at T0−150ms, while the previous stage is still active, so a
- * 422 there says nothing about the chosen stage: the wallet may be perfectly eligible for
- * the stage that opens at T0. Such a 422 is "closed" (retried like a 409 past T0) unless it
- * arrives after the chosen stage's start AND names the chosen stage itself — only then is
- * it a final "live" verdict. When the message names no stage there is nothing to compare,
- * so before T0 it is retried and after T0 it is final. Mirrors simulate.ts, which already
- * treats a pre-start 422 as "not active".
- */
-export function classifyNotEligible(opts: {
-  message: string;
-  /** Start of the chosen stage (T0). Undefined for a mint-now job: the stage is already live. */
-  fireAt?: number;
-  chosenStage?: string | null;
-  now?: number;
-}): "closed" | "live" {
-  const now = opts.now ?? Date.now();
-  if (opts.fireAt === undefined) return "live";
-  if (now < opts.fireAt) return "closed";
-  const active = parseOpenSeaActiveStage(opts.message);
-  if (active !== undefined && opts.chosenStage != null && active !== opts.chosenStage) return "closed";
-  return "live";
-}
-
-/**
  * Prepare (build + nonce + fees + sign via Privy) all wallet txs.
  * Signing uses Privy's wallet API with the app authorization key — we never hold private keys.
  *
@@ -222,6 +190,14 @@ export async function prepareAll(
     return lastCheckP;
   };
 
+  // FOOTGUN (A6): fireAt is T0, buildNotBefore is the probe start (T0−150ms). They are NOT
+  // interchangeable: classifyNotEligible() judges a 422 against fireAt, so if a caller passed
+  // only buildNotBefore, fireAt would silently become T0−150ms and a 422 in the last 150ms
+  // before T0 would be misjudged as post-T0 (final instead of retried). runJob always passes
+  // fireAt; fail fast if a future caller passes a probe start without a fire time.
+  if (opts.buildNotBefore !== undefined && opts.fireAt === undefined) {
+    throw new Error("prepareAll: buildNotBefore without fireAt — the probe start is not T0");
+  }
   const fireAt = opts.fireAt ?? opts.buildNotBefore;
   const hotAt = fireAt !== undefined ? fireAt - OPENSEA_LEAD_MS : undefined;
   const deferredLogs: string[] = [];
@@ -385,10 +361,14 @@ export async function prepareAll(
         remaining: e.rateLimit?.remaining,
       };
       if (e.code === "NOT_ACTIVE") return { kind: "closed", ...base };
+      // F1b: the mint API built a tx for a different stage than the chosen one (or the
+      // stage could not be verified before T0) — the chosen stage is not open yet, so
+      // retry like a 409 instead of signing a tx for the wrong stage.
+      if (e.code === "WRONG_STAGE") return { kind: "closed", ...base };
       if (e.code === "RATE_LIMIT") return { kind: "rate", ...base };
       if (e.code === "NOT_ELIGIBLE")
         return {
-          kind: classifyNotEligible({ message: e.message, fireAt, chosenStage: req.stage }),
+          kind: classifyNotEligible({ message: e.message, fireAt, chosenStage: req.stage, buildDeadline }),
           ...base,
         };
       if (e.code === "INSUFFICIENT_FUNDS") return { kind: "live", ...base };
@@ -486,6 +466,9 @@ export async function prepareAll(
             mintTimeoutMs: MINT_API_TIMEOUT_MS,
             mintJobId: job.id,
             walletIndex: i,
+            // F1b: buildMintTx verifies the stage the 200 was built for against the chosen
+            // stage; it needs T0 (not the probe start) to judge an unverifiable response.
+            fireAt,
             onMintSample: (sample) => rateLog.note(sample),
           });
           timing[i].build = Date.now() - s;
@@ -498,7 +481,8 @@ export async function prepareAll(
       onFail: async (i, error) => {
         if (results[i].status === "failed") return;
         results[i].status = "failed";
-        results[i].error = await buildFailureMessage(error, { chain, contract: req.contract });
+        // Opsi 3: a final 422 names both stages (the one OpenSea is on + the chosen one).
+        results[i].error = await buildFailureMessage(error, { chain, contract: req.contract }, { chosenStage: req.stage });
       },
     });
     probeAttempts = report.probeAttempts;

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { Contract, Interface, getAddress } from "ethers";
 import { requireChain } from "../../config/chains.js";
-import { OpenSeaClient, OpenSeaHttpError } from "../resolver/opensea.js";
+import { OpenSeaClient, OpenSeaHttpError, type OsMintTx } from "../resolver/opensea.js";
 import type { OpenSeaMintSample } from "./openseaLimit.js";
-import { ResolvedTarget } from "../resolver/resolver.js";
+import { ResolvedTarget, Stage } from "../resolver/resolver.js";
 import { SEADROP_ADDRESS, encodeMintPublic } from "../resolver/seadrop.js";
 import { encodeKalosMintPublic, encodeMintAllowList } from "../kalos/calldata.js";
 import { fetchKalosEligibility } from "../kalos/client.js";
@@ -14,6 +14,7 @@ import { readableAllowListTx } from "./access.js";
 import { isDangerousFunctionName, assertSafeMintTx } from "../safety/safety.js";
 import { osStage } from "./stage.js";
 import { stageEndedAt } from "./stageEligibility.js";
+import { matchesChosenStage, mintStageOf, sameStageName } from "./stageVerdict.js";
 import { BuiltTx, MintRequest } from "./types.js";
 
 /** Map official mint-API errors. 422 is also returned for an unfunded minter, which says nothing about allowlist status. */
@@ -42,6 +43,29 @@ export function allowedTargets(t: ResolvedTarget, req: MintRequest): string[] {
 }
 
 /**
+ * F1b guard: the mint API builds for the stage whose window contains *now*, which before
+ * T0 is still the previous stage. A 200 for the wrong stage must never be signed or
+ * broadcast — it would mint into that stage. A mismatch (or an unverifiable response
+ * before T0) throws WRONG_STAGE, which the executor retries like NOT_ACTIVE; simulate.ts
+ * treats it the same way before the start.
+ */
+function verifyMintStage(r: OsMintTx, chosen: Stage | null, req: MintRequest, fireAt?: number): void {
+  if (!req.stage || !chosen) return;
+  const got = mintStageOf(r);
+  const match = got === undefined ? undefined : matchesChosenStage(chosen, got);
+  if (match === false)
+    throw new MintBuildError(
+      `OpenSea built this mint for a different stage than your chosen stage '${req.stage}' — wait for '${req.stage}' to open`,
+      "WRONG_STAGE",
+    );
+  if (match === undefined && fireAt !== undefined && Date.now() < fireAt)
+    throw new MintBuildError(
+      `OpenSea did not name the stage for this mint, so it cannot be verified against your chosen stage '${req.stage}' before it opens`,
+      "WRONG_STAGE",
+    );
+}
+
+/**
  * Build the mint tx for one wallet. Prices/ABI come from the server-side resolved target,
  * never from the client (except generic price override, which is capped by safety).
  */
@@ -52,10 +76,17 @@ export async function buildMintTx(
   quantity: number,
   os = new OpenSeaClient(),
   userId = "system",
-  call: { mintTimeoutMs?: number; mintJobId?: string; walletIndex?: number; onMintSample?: (sample: OpenSeaMintSample) => void } = {},
+  call: {
+    mintTimeoutMs?: number;
+    mintJobId?: string;
+    walletIndex?: number;
+    /** T0 for the chosen stage; lets the mint-API stage check judge an unverifiable 200. */
+    fireAt?: number;
+    onMintSample?: (sample: OpenSeaMintSample) => void;
+  } = {},
 ): Promise<BuiltTx> {
   const chain = requireChain(t.chain.key);
-  const chosen = req.stage ? (t.stages.find((s) => s.name === req.stage) ?? null) : null;
+  const chosen = req.stage ? (t.stages.find((s) => sameStageName(s.name, req.stage)) ?? null) : null;
   if (chosen && stageEndedAt(chosen, Date.now())) throw new MintBuildError(`The ${chosen.name} stage has ended`, "STAGE_ENDED");
   let tx: BuiltTx;
   let builtLocal = false;
@@ -95,6 +126,7 @@ export async function buildMintTx(
           onSample: call.onMintSample,
         });
         const value = BigInt(r.value || "0x0");
+        verifyMintStage(r, chosen, req, call.fireAt);
         tx = { to: getAddress(r.to), data: r.data, value };
         if (r.chain && r.chain !== chain.openseaChain && r.chain !== chain.key && chain.openseaChain)
           throw new MintBuildError(`OpenSea returned chain "${r.chain}" but target is ${chain.key}`);

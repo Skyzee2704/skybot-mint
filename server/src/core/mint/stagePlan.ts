@@ -6,6 +6,7 @@
 import type { Stage } from "../resolver/resolver.js";
 import { MintBuildError } from "./build.js";
 import { isPublicStage, timingOptions, type RowLike, type TimingOption, type WalletStageVerdict } from "./stageEligibility.js";
+import { sameStageName } from "./stageVerdict.js";
 import type { MintRequest } from "./types.js";
 
 export interface StageSkip {
@@ -30,9 +31,9 @@ const skipReason = (stage: string, v: WalletStageVerdict) =>
 export function applyStageChoice(stages: readonly Stage[], rows: readonly RowLike[], req: MintRequest, now = Date.now()): StageChoice {
   const name = req.stage!;
   const ids = req.wallets.map((w) => w.walletId);
-  const option = timingOptions(stages, rows, ids, null, now).find((o) => o.kind === "stage" && o.key === name);
+  const option = timingOptions(stages, rows, ids, null, now).find((o) => o.kind === "stage" && sameStageName(o.key, name));
   if (!option?.stage) {
-    const s = stages.find((x) => x.name === name);
+    const s = stages.find((x) => sameStageName(x.name, name));
     throw new MintBuildError(
       !s
         ? `Stage "${name}" is not part of this drop. Resolve the collection again.`

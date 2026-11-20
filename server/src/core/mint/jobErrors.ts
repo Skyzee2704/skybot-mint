@@ -8,13 +8,25 @@ import { redactString } from "../../util/log.js";
 import { describeTxError, isInsufficientFunds } from "../tx/revert.js";
 import { privySigningRefusal } from "../../users/mintSigner.js";
 import { MintBuildError } from "./build.js";
+import { parseOpenSeaActiveStage, sameStageName } from "./stageVerdict.js";
 
 type Ctx = { chain: ChainConfig; contract: string };
 const rc = (c: Ctx) => ({ chain: c.chain, contracts: [c.contract] });
 
+/**
+ * Opsi 3: a final 422 names the stage OpenSea is on; when the job picked another stage,
+ * the message must name BOTH, so the owner sees it was the wrong stage, not their wallet.
+ * The context goes FIRST: Telegram slices per-wallet errors to 120 chars, so a suffix would be cut off.
+ */
+export function withChosenStageContext(message: string, chosenStage?: string | null): string {
+  const active = parseOpenSeaActiveStage(message);
+  if (!active || !chosenStage || sameStageName(active, chosenStage)) return message;
+  return `Chosen stage '${chosenStage}' is not the active stage — OpenSea is still on '${active}'. ${message}`;
+}
+
 /** Couldn't build the mint call (stage closed, not eligible, contract rejected the read, …). */
-export async function buildFailureMessage(e: any, c: Ctx): Promise<string> {
-  if (e instanceof MintBuildError) return redactString(String(e.message)).slice(0, 300);
+export async function buildFailureMessage(e: any, c: Ctx, opts?: { chosenStage?: string | null }): Promise<string> {
+  if (e instanceof MintBuildError) return withChosenStageContext(redactString(String(e.message)).slice(0, 300), opts?.chosenStage);
   return `Couldn't prepare the mint: ${(await describeTxError(e, rc(c))).message}`;
 }
 

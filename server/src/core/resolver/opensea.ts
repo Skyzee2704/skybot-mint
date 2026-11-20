@@ -70,6 +70,11 @@ export interface OsMintTx {
   data: string;
   value: string;
   chain: string;
+  /** Stage the mint was built for (official docs): the stage whose window contains the call time. */
+  stage_uuid?: string;
+  stage_type?: string;
+  stage_start_time?: string;
+  stage_end_time?: string;
 }
 
 type FetchFn = typeof fetch;

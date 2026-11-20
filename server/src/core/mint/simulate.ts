@@ -15,6 +15,7 @@ import { getAddress, toQuantity } from "ethers";
 import { decodeRevertData, revertDataOf } from "../tx/revert.js";
 import { applyStageChoice, type StageChoice } from "./stagePlan.js";
 import { isPublicStage } from "./stageEligibility.js";
+import { classifyNotEligible } from "./stageVerdict.js";
 import { savedStageRows } from "./eligibility.js";
 
 export interface SimRow {
@@ -51,6 +52,8 @@ export interface SimRow {
 export function explainMintError(raw: string | null | undefined): string | null {
   if (!raw) return null;
   const m = String(raw);
+  if (/different stage than your chosen stage/i.test(m)) return "OpenSea is still on a different stage than the one you picked.";
+  if (/did not name the stage/i.test(m)) return "OpenSea did not say which stage this mint is for — it cannot be checked yet.";
   if (/not eligible|not on (the )?allow ?list|NOT_ELIGIBLE|allowlist/i.test(m)) return "Not on the allowlist for this stage.";
   if (/InvalidProof|InvalidSignature|PayerNotAllowed|TokenGatedNotTokenOwner/.test(m))
     return "Not on the allowlist (proof or signature rejected).";
@@ -133,7 +136,15 @@ export async function simulateMint(t: ResolvedTarget, reqIn: MintRequest, userId
       } catch (e: any) {
         // Before the start OpenSea's mint API can answer 422 for a wallet that IS on the chosen stage's list
         // (the stage isn't live yet). Wallets reaching here already passed the saved per-stage eligibility check.
-        const notActive = e.code === "NOT_ACTIVE" || (e.code === "NOT_ELIGIBLE" && beforeStart && choice !== null);
+        // The 422 verdict uses the SAME helper as the live executor (stageVerdict.classifyNotEligible), so the
+        // simulation and the mint cannot disagree about what a 422 means; WRONG_STAGE is the 200-side twin —
+        // the API built for a different stage than the chosen one.
+        const notActive =
+          e.code === "NOT_ACTIVE" ||
+          e.code === "WRONG_STAGE" ||
+          (e.code === "NOT_ELIGIBLE" &&
+            choice !== null &&
+            classifyNotEligible({ message: e.message, fireAt: runAtMs, chosenStage: req.stage, now: Date.now() }) === "closed");
         const unfundedOnly = e.code === "INSUFFICIENT_FUNDS"; // OpenSea checked the allowlist first and only balance failed
         const gl = BigInt(req.gasLimit ?? fallbackGas(req.strategy, wq.quantity));
         const expected = notActive && beforeStart;

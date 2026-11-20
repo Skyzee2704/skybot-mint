@@ -420,8 +420,14 @@ export async function probeAndRelease<T>(opts: {
                     parked.add(i);
                     return;
                   }
-                  results[i] = { state: "error", error: res.error ?? new Error("not active") };
-                  await settle(i, res, true);
+                  // F1a: follow-mode "closed" is terminal — this wallet will not be retried — so
+                  // onFail MUST run here. settle() deliberately skips onFail for "closed" (a
+                  // first-mode wallet is parked, not failed), so call it directly: otherwise the
+                  // executor's WalletResult stays "pending" forever with no error while the job
+                  // is marked "done".
+                  const closedErr = res.error ?? new Error("not active");
+                  results[i] = { state: "error", error: closedErr };
+                  if (opts.onFail) await opts.onFail(i, closedErr);
                   return;
                 }
                 remember(i, res);
